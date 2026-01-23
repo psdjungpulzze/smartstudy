@@ -120,7 +120,13 @@ COMPONENT=${1:-"interactive"}
 
 # Fetch latest from template
 print_info "Fetching latest template updates..."
-git fetch template
+# Prevent hanging on credential prompts; fail fast with timeout
+if ! GIT_TERMINAL_PROMPT=0 timeout 30 git fetch template 2>&1; then
+    print_error "Failed to fetch from template remote."
+    print_info "This may be due to network issues or missing credentials."
+    print_info "Try: git fetch template --verbose"
+    exit 1
+fi
 print_success "Fetched template updates"
 echo ""
 
@@ -161,15 +167,16 @@ sync_component() {
     fi
 
     # Determine files to delete (local files not in template)
+    # Use comm for efficient set difference (O(n) instead of O(n²))
     echo ""
     echo "Files to delete (not in template):"
     local deleted=""
-    if [[ -n "$local_files" ]]; then
-        while IFS= read -r local_file; do
-            if [[ -n "$local_file" ]] && ! echo "$template_files" | grep -qxF "$local_file"; then
-                deleted="${deleted}${local_file}"$'\n'
-            fi
-        done <<< "$local_files"
+    if [[ -n "$local_files" && -n "$template_files" ]]; then
+        # comm -23: lines only in file1 (local) not in file2 (template)
+        deleted=$(comm -23 <(echo "$local_files") <(echo "$template_files"))
+    elif [[ -n "$local_files" ]]; then
+        # No template files, all local files would be deleted
+        deleted="$local_files"
     fi
 
     if [[ -n "$deleted" ]]; then
@@ -238,10 +245,22 @@ sync_all_paths() {
             local local_files
             local_files=$(find "$path" -type f 2>/dev/null | sort)
 
-            # Delete files not in template
-            if [[ -n "$local_files" ]]; then
+            # Delete files not in template (use comm for efficiency)
+            if [[ -n "$local_files" && -n "$template_files" ]]; then
+                local to_delete
+                to_delete=$(comm -23 <(echo "$local_files") <(echo "$template_files"))
+                if [[ -n "$to_delete" ]]; then
+                    while IFS= read -r local_file; do
+                        if [[ -n "$local_file" && -f "$local_file" ]]; then
+                            rm -f "$local_file"
+                            print_info "Deleted: $local_file"
+                        fi
+                    done <<< "$to_delete"
+                fi
+            elif [[ -n "$local_files" && -z "$template_files" ]]; then
+                # No template files for this path, delete all local
                 while IFS= read -r local_file; do
-                    if [[ -n "$local_file" ]] && ! echo "$template_files" | grep -qxF "$local_file"; then
+                    if [[ -n "$local_file" && -f "$local_file" ]]; then
                         rm -f "$local_file"
                         print_info "Deleted: $local_file"
                     fi
@@ -271,12 +290,14 @@ case $COMPONENT in
             if [[ -d "$sync_path" ]]; then
                 template_files=$(git ls-tree -r --name-only template/main -- "$sync_path" 2>/dev/null | sort)
                 local_files=$(find "$sync_path" -type f 2>/dev/null | sort)
-                if [[ -n "$local_files" ]]; then
-                    while IFS= read -r local_file; do
-                        if [[ -n "$local_file" ]] && ! echo "$template_files" | grep -qxF "$local_file"; then
-                            all_deleted="${all_deleted}${local_file}"$'\n'
-                        fi
-                    done <<< "$local_files"
+                if [[ -n "$local_files" && -n "$template_files" ]]; then
+                    # Use comm for efficient set difference
+                    path_deleted=$(comm -23 <(echo "$local_files") <(echo "$template_files"))
+                    if [[ -n "$path_deleted" ]]; then
+                        all_deleted="${all_deleted}${path_deleted}"$'\n'
+                    fi
+                elif [[ -n "$local_files" ]]; then
+                    all_deleted="${all_deleted}${local_files}"$'\n'
                 fi
             fi
         done
@@ -363,12 +384,14 @@ case $COMPONENT in
                     if [[ -d "$sync_path" ]]; then
                         template_files=$(git ls-tree -r --name-only template/main -- "$sync_path" 2>/dev/null | sort)
                         local_files=$(find "$sync_path" -type f 2>/dev/null | sort)
-                        if [[ -n "$local_files" ]]; then
-                            while IFS= read -r local_file; do
-                                if [[ -n "$local_file" ]] && ! echo "$template_files" | grep -qxF "$local_file"; then
-                                    all_deleted="${all_deleted}${local_file}"$'\n'
-                                fi
-                            done <<< "$local_files"
+                        if [[ -n "$local_files" && -n "$template_files" ]]; then
+                            # Use comm for efficient set difference
+                            path_deleted=$(comm -23 <(echo "$local_files") <(echo "$template_files"))
+                            if [[ -n "$path_deleted" ]]; then
+                                all_deleted="${all_deleted}${path_deleted}"$'\n'
+                            fi
+                        elif [[ -n "$local_files" ]]; then
+                            all_deleted="${all_deleted}${local_files}"$'\n'
                         fi
                     fi
                 done
