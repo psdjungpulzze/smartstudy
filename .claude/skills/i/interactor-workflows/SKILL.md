@@ -2,7 +2,12 @@
 name: interactor-workflows
 description: Build state-machine based automation with human-in-the-loop support through Interactor. Use when implementing approval flows, multi-step processes, automated pipelines, or any workflow requiring user input at specific stages.
 author: Interactor Integration Guide
+source_docs:
+  - docs/i/interactor-docs/integration-guide/05-workflows.md
 ---
+
+> **Source Documentation:** `docs/i/interactor-docs/integration-guide/05-workflows.md`
+> For the latest API details, read the source documentation in the submodule.
 
 # Interactor Workflows Skill
 

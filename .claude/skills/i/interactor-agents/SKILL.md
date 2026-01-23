@@ -2,7 +2,12 @@
 name: interactor-agents
 description: Create LLM-powered AI assistants with tools and data sources through Interactor. Use when building conversational AI, chatbots, tool-calling assistants, or agents that need to query databases and external APIs.
 author: Interactor Integration Guide
+source_docs:
+  - docs/i/interactor-docs/integration-guide/04-ai-agents.md
 ---
+
+> **Source Documentation:** `docs/i/interactor-docs/integration-guide/04-ai-agents.md`
+> For the latest API details, read the source documentation in the submodule.
 
 # Interactor AI Agents Skill
 

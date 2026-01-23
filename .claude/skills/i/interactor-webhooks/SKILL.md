@@ -2,7 +2,12 @@
 name: interactor-webhooks
 description: Receive real-time updates from Interactor via webhooks (push) or Server-Sent Events (pull). Use when building real-time UIs, monitoring credential changes, tracking workflow progress, or streaming AI chat responses.
 author: Interactor Integration Guide
+source_docs:
+  - docs/i/interactor-docs/integration-guide/06-webhooks-and-streaming.md
 ---
+
+> **Source Documentation:** `docs/i/interactor-docs/integration-guide/06-webhooks-and-streaming.md`
+> For the latest API details, read the source documentation in the submodule.
 
 # Interactor Webhooks and Streaming Skill
 

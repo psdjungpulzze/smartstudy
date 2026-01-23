@@ -7,7 +7,12 @@ requires:
   - Bash (for curl commands and verification scripts)
   - Write (for environment file creation)
   - Read (for verifying configuration)
+source_docs:
+  - docs/i/account-server-docs/integration-guide.md
 ---
+
+> **Source Documentation:** `docs/i/account-server-docs/integration-guide.md`
+> For the latest API details, read the source documentation in the submodule.
 
 ## Changelog
 

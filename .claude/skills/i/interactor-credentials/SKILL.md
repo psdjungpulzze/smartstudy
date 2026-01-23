@@ -2,7 +2,12 @@
 name: interactor-credentials
 description: Implement OAuth flows and manage credentials for external services (Google, Slack, Salesforce, etc.) through Interactor. Use when connecting users to third-party services, handling OAuth authorization, retrieving access tokens, or monitoring credential status.
 author: Interactor Integration Guide
+source_docs:
+  - docs/i/interactor-docs/integration-guide/03-credential-management.md
 ---
+
+> **Source Documentation:** `docs/i/interactor-docs/integration-guide/03-credential-management.md`
+> For the latest API details, read the source documentation in the submodule.
 
 # Interactor Credential Management Skill
 

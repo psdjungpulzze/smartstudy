@@ -2,7 +2,12 @@
 name: interactor-sdk
 description: Complete SDK implementations for Interactor platform integration. Use when building TypeScript/Node.js or Python applications that need full Interactor client libraries. Includes complete client classes, webhook handlers, SSE streaming, and production-ready patterns.
 author: Interactor Integration Guide
+source_docs:
+  - docs/i/interactor-docs/integration-guide/07-sdk-examples.md
 ---
+
+> **Source Documentation:** `docs/i/interactor-docs/integration-guide/07-sdk-examples.md`
+> For the latest API details, read the source documentation in the submodule.
 
 # Interactor SDK Examples Skill
 

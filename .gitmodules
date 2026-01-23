@@ -1,0 +1,6 @@
+[submodule "docs/i/account-server-docs"]
+	path = docs/i/account-server-docs
+	url = https://github.com/pulzze/account-server-docs.git
+[submodule "docs/i/interactor-docs"]
+	path = docs/i/interactor-docs
+	url = https://github.com/pulzze/interactor-docs.git
