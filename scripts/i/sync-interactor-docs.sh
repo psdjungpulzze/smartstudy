@@ -10,6 +10,7 @@
 #   interactor   - Sync interactor-docs only
 #
 # Options:
+#   --setup      - Set up submodules from scratch (adds them to .gitmodules)
 #   --init       - Initialize submodules if not already done
 #   --status     - Show submodule status without syncing
 #   --help       - Show this help message
@@ -58,15 +59,17 @@ show_help() {
     echo "  interactor   Sync interactor-docs only"
     echo ""
     echo "Options:"
+    echo "  --setup      Set up submodules from scratch (adds them to .gitmodules)"
     echo "  --init       Initialize submodules if not already done"
     echo "  --status     Show submodule status without syncing"
     echo "  --help       Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                    # Sync all submodules"
-    echo "  $0 account            # Sync only account-server-docs"
-    echo "  $0 --init             # Initialize and sync all"
-    echo "  $0 --status           # Show current status"
+    echo "  $0 --setup             # Set up submodules for the first time"
+    echo "  $0                     # Sync all submodules"
+    echo "  $0 account             # Sync only account-server-docs"
+    echo "  $0 --init              # Initialize and sync all"
+    echo "  $0 --status            # Show current status"
 }
 
 # Find project root (directory containing .git)
@@ -86,13 +89,24 @@ find_project_root() {
 ACCOUNT_DOCS="docs/i/account-server-docs"
 INTERACTOR_DOCS="docs/i/interactor-docs"
 
+# Submodule repository URLs (GitHub)
+ACCOUNT_DOCS_REPO="https://github.com/pulzze/account-server-docs.git"
+INTERACTOR_DOCS_REPO="https://github.com/pulzze/interactor-docs.git"
+
+# Default branch to track
+DEFAULT_BRANCH="main"
+
 # Parse arguments
 SUBMODULE="all"
 INIT_MODE=false
 STATUS_MODE=false
+SETUP_MODE=false
 
 for arg in "$@"; do
     case $arg in
+        --setup)
+            SETUP_MODE=true
+            ;;
         --init)
             INIT_MODE=true
             ;;
@@ -123,11 +137,113 @@ cd "$PROJECT_ROOT"
 
 print_header
 
-# Check if submodules exist in .gitmodules
-if [[ ! -f ".gitmodules" ]]; then
-    print_error "No .gitmodules file found. Submodules may not be configured."
-    print_info "Run this from a project that has Interactor doc submodules set up."
-    exit 1
+# Setup mode - configure submodules from scratch
+setup_submodules() {
+    print_info "Setting up Interactor documentation submodules..."
+    echo ""
+
+    # Create docs/i directory if it doesn't exist
+    mkdir -p "docs/i"
+
+    # Function to add a single submodule
+    add_submodule() {
+        local path="$1"
+        local url="$2"
+        local name="$3"
+
+        if [[ -d "$path" ]] && [[ -f "$path/.git" || -d "$path/.git" ]]; then
+            print_warning "$name already exists and is initialized. Skipping."
+            return 0
+        fi
+
+        # Check if submodule is already in .gitmodules
+        if [[ -f ".gitmodules" ]] && grep -q "\[submodule \"$path\"\]" ".gitmodules"; then
+            print_warning "$name is already configured in .gitmodules"
+            print_info "Run with --init to initialize it"
+            return 0
+        fi
+
+        # Remove existing directory if it exists but isn't a submodule
+        if [[ -d "$path" ]]; then
+            print_warning "$path exists but is not a submodule. Removing..."
+            rm -rf "$path"
+        fi
+
+        print_info "Adding submodule: $name"
+        print_info "  URL: $url"
+        print_info "  Path: $path"
+
+        if git submodule add -b "$DEFAULT_BRANCH" "$url" "$path"; then
+            print_success "$name submodule added successfully"
+        else
+            print_error "Failed to add $name submodule"
+            print_info "Check that you have access to: $url"
+            return 1
+        fi
+    }
+
+    case $SUBMODULE in
+        all)
+            add_submodule "$ACCOUNT_DOCS" "$ACCOUNT_DOCS_REPO" "account-server-docs"
+            echo ""
+            add_submodule "$INTERACTOR_DOCS" "$INTERACTOR_DOCS_REPO" "interactor-docs"
+            ;;
+        account)
+            add_submodule "$ACCOUNT_DOCS" "$ACCOUNT_DOCS_REPO" "account-server-docs"
+            ;;
+        interactor)
+            add_submodule "$INTERACTOR_DOCS" "$INTERACTOR_DOCS_REPO" "interactor-docs"
+            ;;
+    esac
+
+    echo ""
+    print_success "Submodule setup complete!"
+    echo ""
+    print_info "Next steps:"
+    echo "  1. Review changes: git status"
+    echo "  2. Commit: git add -A && git commit -m 'Add Interactor docs submodules'"
+    echo "  3. Push: git push"
+    echo ""
+    exit 0
+}
+
+# Check if submodules need to be set up
+needs_setup() {
+    # No .gitmodules file at all
+    if [[ ! -f ".gitmodules" ]]; then
+        return 0
+    fi
+
+    # Check if specific submodules are configured based on selection
+    case $SUBMODULE in
+        all)
+            if ! grep -q "\[submodule \"$ACCOUNT_DOCS\"\]" ".gitmodules" || \
+               ! grep -q "\[submodule \"$INTERACTOR_DOCS\"\]" ".gitmodules"; then
+                return 0
+            fi
+            ;;
+        account)
+            if ! grep -q "\[submodule \"$ACCOUNT_DOCS\"\]" ".gitmodules"; then
+                return 0
+            fi
+            ;;
+        interactor)
+            if ! grep -q "\[submodule \"$INTERACTOR_DOCS\"\]" ".gitmodules"; then
+                return 0
+            fi
+            ;;
+    esac
+
+    return 1
+}
+
+# Handle setup mode (explicit or auto-detected)
+if [[ "$SETUP_MODE" == true ]]; then
+    setup_submodules
+elif needs_setup; then
+    print_info "Submodules not configured. Setting up automatically..."
+    echo ""
+    setup_submodules
 fi
 
 # Status mode - just show status and exit
