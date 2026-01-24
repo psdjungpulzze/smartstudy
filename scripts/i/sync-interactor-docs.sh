@@ -163,6 +163,12 @@ setup_submodules() {
             return 0
         fi
 
+        # Check if path exists in git index (not as submodule)
+        if git ls-files --stage "$path" | grep -q .; then
+            print_warning "$path exists in git index. Removing from index..."
+            git rm -rf --cached "$path" 2>/dev/null || true
+        fi
+
         # Remove existing directory if it exists but isn't a submodule
         if [[ -d "$path" ]]; then
             print_warning "$path exists but is not a submodule. Removing..."
