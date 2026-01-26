@@ -430,6 +430,14 @@ If `docs/planning/tasks.md` exists, show:
 - `code-review` - Review code for quality and security
 - `test-generator` - Generate test scaffolds
 - `doc-generator` - Update documentation
+
+### Development Practices Skills (from interactor-workspace)
+- `dev-logging` - File-based logging for AI debugging
+- `service-launcher` - Multi-service launcher script
+- `hot-reload` - Hot code reloading API
+- `ci-setup` - GitHub Actions CI pipeline
+- `code-quality` - Code quality enforcement
+- `deployment-infra` - Deployment infrastructure setup
 ```
 
 ### 12. Create Development Start Script
@@ -546,6 +554,14 @@ echo "Starting Phoenix on port $PORT..."
 - `code-review` - Code quality analysis
 - `test-generator` - Create test scaffolds
 - `doc-generator` - Update documentation
+
+### Development Practices (interactor-workspace)
+- `dev-logging` - File-based logging for AI debugging
+- `service-launcher` - Multi-service launcher script
+- `hot-reload` - Hot code reloading API
+- `ci-setup` - GitHub Actions CI pipeline
+- `code-quality` - Code quality enforcement
+- `deployment-infra` - Deployment infrastructure
 
 ### Quick Commands
 ```bash
