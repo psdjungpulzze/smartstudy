@@ -3,12 +3,12 @@ name: hot-reload
 description: Setup hot code reloading API for updating running Elixir code without restarts. Enables rapid iteration and production debugging.
 author: Interactor Workspace Practices
 source_docs:
-  - docs/setup/interactor-workspace-docs/docs/development-practices.md#hot-code-reloading-api
+  - docs/i-i/interactor-workspace-docs/docs/development-practices.md#hot-code-reloading-api
 ---
 
 # Hot Code Reloading API
 
-**Documentation:** `docs/setup/interactor-workspace-docs/docs/development-practices.md`
+**Documentation:** `docs/i-i/interactor-workspace-docs/docs/development-practices.md`
 
 ## When to Use
 

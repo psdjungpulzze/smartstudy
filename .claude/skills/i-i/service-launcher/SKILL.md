@@ -3,12 +3,12 @@ name: service-launcher
 description: Create a development services launcher script for consistent startup, logging, and process management across multiple services.
 author: Interactor Workspace Practices
 source_docs:
-  - docs/setup/interactor-workspace-docs/docs/development-practices.md#service-launcher-script
+  - docs/i-i/interactor-workspace-docs/docs/development-practices.md#service-launcher-script
 ---
 
 # Service Launcher Script
 
-**Documentation:** `docs/setup/interactor-workspace-docs/docs/development-practices.md`
+**Documentation:** `docs/i-i/interactor-workspace-docs/docs/development-practices.md`
 
 ## When to Use
 

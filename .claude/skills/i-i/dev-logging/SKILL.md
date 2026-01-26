@@ -3,12 +3,12 @@ name: dev-logging
 description: Setup file-based logging for AI-assisted debugging. Enables AI tools to read logs directly instead of requiring copy-paste from terminals.
 author: Interactor Workspace Practices
 source_docs:
-  - docs/setup/interactor-workspace-docs/docs/development-practices.md#file-based-logging-for-ai-debugging
+  - docs/i-i/interactor-workspace-docs/docs/development-practices.md#file-based-logging-for-ai-debugging
 ---
 
 # File-Based Logging for AI Debugging
 
-**Documentation:** `docs/setup/interactor-workspace-docs/docs/development-practices.md`
+**Documentation:** `docs/i-i/interactor-workspace-docs/docs/development-practices.md`
 
 ## When to Use
 

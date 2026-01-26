@@ -3,12 +3,12 @@ name: code-quality
 description: Setup code quality enforcement for Elixir/Phoenix projects including formatter configuration, mix aliases, pre-commit workflow, and Dialyzer.
 author: Interactor Workspace Practices
 source_docs:
-  - docs/setup/interactor-workspace-docs/docs/development-practices.md#code-quality-enforcement
+  - docs/i-i/interactor-workspace-docs/docs/development-practices.md#code-quality-enforcement
 ---
 
 # Code Quality Enforcement
 
-**Documentation:** `docs/setup/interactor-workspace-docs/docs/development-practices.md`
+**Documentation:** `docs/i-i/interactor-workspace-docs/docs/development-practices.md`
 
 ## When to Use
 

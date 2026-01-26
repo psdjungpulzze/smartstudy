@@ -3,12 +3,12 @@ name: deployment-infra
 description: Setup deployment infrastructure with Docker, Caddy reverse proxy, deployment/rollback scripts, and GitHub Actions for building images.
 author: Interactor Workspace Practices
 source_docs:
-  - docs/setup/interactor-workspace-docs/docs/development-practices.md#deployment-infrastructure
+  - docs/i-i/interactor-workspace-docs/docs/development-practices.md#deployment-infrastructure
 ---
 
 # Deployment Infrastructure
 
-**Documentation:** `docs/setup/interactor-workspace-docs/docs/development-practices.md`
+**Documentation:** `docs/i-i/interactor-workspace-docs/docs/development-practices.md`
 
 ## When to Use
 

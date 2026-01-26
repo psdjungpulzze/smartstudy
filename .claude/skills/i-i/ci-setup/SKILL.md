@@ -3,12 +3,12 @@ name: ci-setup
 description: Setup continuous integration with GitHub Actions for Elixir/Phoenix projects. Includes testing, formatting checks, compilation warnings, and Dialyzer.
 author: Interactor Workspace Practices
 source_docs:
-  - docs/setup/interactor-workspace-docs/docs/development-practices.md#continuous-integration-setup
+  - docs/i-i/interactor-workspace-docs/docs/development-practices.md#continuous-integration-setup
 ---
 
 # Continuous Integration Setup
 
-**Documentation:** `docs/setup/interactor-workspace-docs/docs/development-practices.md`
+**Documentation:** `docs/i-i/interactor-workspace-docs/docs/development-practices.md`
 
 ## When to Use
 
