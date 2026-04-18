@@ -1,150 +1,111 @@
-<%!-- AppBar (Global Navigation Bar) --%>
-<header class="bg-white shadow-sm h-16 fixed top-0 left-0 right-0 z-50 flex items-center px-4">
-  <%!-- Logo --%>
-  <a href="/dashboard" class="flex items-center gap-2 mr-6">
-    <div class="w-8 h-8 bg-[#4CD964] rounded-lg flex items-center justify-center">
-      <svg
-        class="w-5 h-5 text-white"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke-width="1.5"
-        stroke="currentColor"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342"
-        />
-      </svg>
-    </div>
-    <span class="font-semibold text-[#1C1C1E] text-lg">StudySmart</span>
-  </a>
+<%!-- Top Navigation Bar - Duolingo-style --%>
+<header class="bg-white border-b border-gray-100 h-16 fixed top-0 left-0 right-0 z-50">
+  <div class="max-w-5xl mx-auto h-full flex items-center justify-between px-4">
+    <%!-- Left: Logo --%>
+    <a href="/dashboard" class="flex items-center gap-2 shrink-0">
+      <span class="text-2xl">🐑</span>
+      <span class="font-extrabold text-gray-900 text-lg tracking-tight hidden sm:inline">Fun Sheep</span>
+    </a>
 
-  <%!-- Search Bar (center) --%>
-  <div class="flex-1 max-w-xl mx-auto">
-    <div class="relative">
-      <.icon
-        name="hero-magnifying-glass"
-        class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8E8E93]"
-      />
-      <input
-        type="text"
-        placeholder="Search courses, assessments..."
-        class="w-full pl-10 pr-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full text-sm outline-none transition-colors"
-      />
-    </div>
-  </div>
+    <%!-- Center: Nav Tabs (desktop only) --%>
+    <nav class="hidden md:flex items-center gap-1">
+      <%= for item <- StudySmartWeb.Layouts.nav_items_for_role(@current_role) do %>
+        <.link
+          navigate={item.path}
+          class={[
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all",
+            if(item.path == (@current_path || ""),
+              do: "bg-purple-100 text-purple-700",
+              else: "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+            )
+          ]}
+        >
+          <span class="text-base">{nav_emoji(item.icon)}</span>
+          <span>{item.label}</span>
+        </.link>
+      <% end %>
+    </nav>
 
-  <%!-- Right Actions --%>
-  <div class="flex items-center gap-3 ml-6">
-    <%!-- Notifications --%>
-    <button
-      class="relative p-2 rounded-lg hover:bg-[#F5F5F7] transition-colors"
-      aria-label="Notifications"
-    >
-      <.icon name="hero-bell" class="w-5 h-5 text-[#8E8E93]" />
-    </button>
-
-    <%!-- User Menu --%>
-    <div class="flex items-center gap-2">
-      <div class="w-8 h-8 rounded-full bg-[#4CD964] flex items-center justify-center text-white text-sm font-medium">
-        {String.first(@current_user["display_name"] || "U")}
+    <%!-- Right: Streak + XP + Avatar --%>
+    <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+      <%!-- Streak --%>
+      <div class="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-orange-50 border border-orange-100">
+        <span class="text-base animate-streak">🔥</span>
+        <span class="text-sm font-extrabold text-orange-600">3</span>
       </div>
-      <div class="hidden sm:block text-sm">
-        <div class="font-medium text-[#1C1C1E]">{@current_user["display_name"]}</div>
-        <div class="text-xs text-[#8E8E93] capitalize">{@current_role}</div>
-      </div>
-    </div>
 
-    <%!-- Logout --%>
-    <form action="/dev/auth" method="post" class="inline">
-      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-      <input type="hidden" name="_method" value="delete" />
+      <%!-- XP --%>
+      <div class="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-100">
+        <span class="text-base">⚡</span>
+        <span class="text-sm font-extrabold text-amber-600">150</span>
+      </div>
+
+      <%!-- Search Button --%>
       <button
-        type="submit"
-        class="p-2 rounded-lg hover:bg-red-50 text-[#8E8E93] hover:text-[#FF3B30] transition-colors"
-        aria-label="Logout"
+        class="p-2 rounded-xl hover:bg-gray-50 text-gray-400 hover:text-gray-600 transition-colors"
+        aria-label="Search"
       >
-        <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
+        <.icon name="hero-magnifying-glass" class="w-5 h-5" />
       </button>
-    </form>
+
+      <%!-- Avatar + Dropdown --%>
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-400 to-indigo-500 flex items-center justify-center text-white text-sm font-bold ring-2 ring-purple-100">
+          {String.first(@current_user["display_name"] || "U")}
+        </div>
+      </div>
+
+      <%!-- Logout --%>
+      <form
+        action={
+          if Application.get_env(:study_smart, :dev_routes), do: "/dev/auth", else: "/auth/logout"
+        }
+        method="post"
+        class="inline"
+      >
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <input
+          type="hidden"
+          name="_method"
+          value={if Application.get_env(:study_smart, :dev_routes), do: "delete", else: "post"}
+        />
+        <button
+          type="submit"
+          class="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+          aria-label="Logout"
+        >
+          <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
+        </button>
+      </form>
+    </div>
   </div>
 </header>
 
-<%!-- Left Drawer (Sidebar) --%>
-<aside class="w-64 bg-white h-screen fixed left-0 top-16 shadow-lg flex flex-col z-40">
-  <%!-- Navigation --%>
-  <nav class="flex-1 py-4 px-3 overflow-y-auto">
-    <ul class="space-y-1">
-      <%= for item <- StudySmartWeb.Layouts.nav_items_for_role(@current_role) do %>
-        <li>
-          <.link
-            navigate={item.path}
-            class={[
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              if(item.path == (@current_path || ""),
-                do: "bg-[#E8F8EB] text-[#4CD964]",
-                else: "text-[#1C1C1E] hover:bg-[#F5F5F7]"
-              )
-            ]}
-          >
-            <.icon name={item.icon} class="w-5 h-5" />
-            <span>{item.label}</span>
-          </.link>
-        </li>
-      <% end %>
-    </ul>
-  </nav>
-
-  <%!-- Divider --%>
-  <div class="border-t border-[#E5E5EA] mx-3"></div>
-
-  <%!-- Feedback Section --%>
-  <div class="p-4">
-    <p class="text-xs text-[#8E8E93] mb-2 text-center">How are you feeling?</p>
-    <div class="flex justify-center gap-2">
-      <button
-        class="text-xl hover:scale-125 transition-transform"
-        aria-label="Very unhappy"
-        title="Very unhappy"
-      >
-        &#128577;
-      </button>
-      <button
-        class="text-xl hover:scale-125 transition-transform"
-        aria-label="Unhappy"
-        title="Unhappy"
-      >
-        &#128543;
-      </button>
-      <button
-        class="text-xl hover:scale-125 transition-transform"
-        aria-label="Neutral"
-        title="Neutral"
-      >
-        &#128528;
-      </button>
-      <button
-        class="text-xl hover:scale-125 transition-transform"
-        aria-label="Happy"
-        title="Happy"
-      >
-        &#128578;
-      </button>
-      <button
-        class="text-xl hover:scale-125 transition-transform"
-        aria-label="Very happy"
-        title="Very happy"
-      >
-        &#128522;
-      </button>
-    </div>
+<%!-- Main Content - Centered column like Duolingo --%>
+<main class="mt-16 pb-24 md:pb-8 min-h-screen bg-[#FAFAF9]">
+  <div class="max-w-3xl mx-auto px-4 py-6">
+    <.flash_group flash={@flash} />
+    {@inner_content}
   </div>
-</aside>
-
-<%!-- Main Content --%>
-<main class="ml-64 mt-16 p-6 min-h-screen bg-[#F5F5F7]">
-  <.flash_group flash={@flash} />
-  {@inner_content}
 </main>
+
+<%!-- Bottom Tab Bar (mobile only) --%>
+<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
+  <div class="flex items-center justify-around py-2 px-2">
+    <%= for item <- StudySmartWeb.Layouts.nav_items_for_role(@current_role) |> Enum.take(5) do %>
+      <.link
+        navigate={item.path}
+        class={[
+          "flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-[56px]",
+          if(item.path == (@current_path || ""),
+            do: "text-purple-600",
+            else: "text-gray-400"
+          )
+        ]}
+      >
+        <span class="text-xl">{nav_emoji(item.icon)}</span>
+        <span class="text-[10px] font-bold">{item.label}</span>
+      </.link>
+    <% end %>
+  </div>
+</nav>

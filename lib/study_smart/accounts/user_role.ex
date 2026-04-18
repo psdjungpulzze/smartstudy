@@ -18,6 +18,8 @@ defmodule StudySmart.Accounts.UserRole do
     field :email, :string
     field :display_name, :string
     field :grade, :string
+    field :gender, :string
+    field :nationality, :string
     field :metadata, :map, default: %{}
 
     belongs_to :school, StudySmart.Geo.School
@@ -43,6 +45,8 @@ defmodule StudySmart.Accounts.UserRole do
       :email,
       :display_name,
       :grade,
+      :gender,
+      :nationality,
       :metadata,
       :school_id
     ])

@@ -15,7 +15,7 @@ defmodule StudySmartWeb.DashboardLive do
 
     {:ok,
      assign(socket,
-       page_title: "Student Dashboard",
+       page_title: "Home",
        course_stats: course_stats
      )}
   end
@@ -24,121 +24,202 @@ defmodule StudySmartWeb.DashboardLive do
   def render(assigns) do
     ~H"""
     <div>
-      <h1 class="text-2xl font-bold text-[#1C1C1E]">Student Dashboard</h1>
-      <p class="text-[#8E8E93] mt-2">Welcome back, {@current_user["display_name"]}!</p>
+      <%!-- Greeting + Daily Progress --%>
+      <div class="animate-slide-up">
+        <div class="flex items-center justify-between">
+          <div>
+            <h1 class="text-2xl font-extrabold text-gray-900">
+              {greeting()}, {@current_user["display_name"]}!
+            </h1>
+            <p class="text-gray-500 font-medium text-sm mt-0.5">{motivational_message()}</p>
+          </div>
+          <div class="text-4xl animate-float">{greeting_emoji()}</div>
+        </div>
 
-      <%!-- Summary Cards --%>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-        <.dashboard_card
-          title="My Courses"
-          count={to_string(length(@course_stats))}
-          description="Enrolled courses"
-          icon="hero-book-open"
-        />
-        <.dashboard_card
-          title="Assessments"
-          count="0"
-          description="Pending assessments"
-          icon="hero-clipboard-document-check"
-        />
-        <.dashboard_card
-          title="Study Guides"
-          count="0"
-          description="Available guides"
-          icon="hero-document-text"
-        />
+        <%!-- Stats Strip --%>
+        <div class="flex items-center gap-3 mt-5 overflow-x-auto pb-1 -mx-1 px-1">
+          <.pill_stat emoji="🔥" value="3" label="streak" bg="bg-orange-50" text="text-orange-600" border="border-orange-100" />
+          <.pill_stat emoji="⚡" value="150" label="XP" bg="bg-amber-50" text="text-amber-600" border="border-amber-100" />
+          <.pill_stat emoji="📚" value={to_string(length(@course_stats))} label="courses" bg="bg-purple-50" text="text-purple-600" border="border-purple-100" />
+          <.pill_stat emoji="🏆" value="0" label="badges" bg="bg-pink-50" text="text-pink-600" border="border-pink-100" />
+        </div>
       </div>
 
-      <%!-- My Courses Section --%>
-      <div class="mt-10">
+      <%!-- Daily Challenge --%>
+      <div class="mt-6 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-5 text-white shadow-lg card-hover animate-slide-up">
+        <div class="flex items-center gap-4">
+          <div class="text-4xl animate-streak shrink-0">🎯</div>
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-bold text-purple-200 uppercase tracking-wider">Daily Challenge</p>
+            <p class="font-bold text-lg mt-0.5">Complete a Quick Test</p>
+            <p class="text-sm text-purple-200 mt-0.5">+50 XP bonus</p>
+          </div>
+          <.link
+            navigate={~p"/quick-test"}
+            class="bg-white text-purple-700 font-bold px-5 py-2.5 rounded-full shadow-md btn-bounce text-sm whitespace-nowrap shrink-0"
+          >
+            Go!
+          </.link>
+        </div>
+      </div>
+
+      <%!-- Course Section --%>
+      <div class="mt-8 animate-slide-up">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-[#1C1C1E]">My Courses</h2>
-          <div class="flex gap-3">
+          <h2 class="text-lg font-extrabold text-gray-900">My Courses</h2>
+          <div class="flex gap-2">
             <.link
               navigate={~p"/courses"}
-              class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-4 py-2 rounded-full border border-gray-200 shadow-sm transition-colors text-sm"
+              class="text-sm font-bold text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              <.icon name="hero-magnifying-glass" class="w-4 h-4 inline mr-1" /> Browse Courses
+              Browse
             </.link>
             <.link
               navigate={~p"/courses/new"}
-              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-4 py-2 rounded-full shadow-md transition-colors text-sm"
+              class="text-sm font-bold text-purple-600 hover:text-purple-700 px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 transition-colors"
             >
-              <.icon name="hero-plus" class="w-4 h-4 inline mr-1" /> Create Course
+              + Add
             </.link>
           </div>
         </div>
 
-        <div :if={@course_stats == []} class="bg-white rounded-2xl shadow-md p-8 text-center">
-          <.icon name="hero-book-open" class="w-12 h-12 text-[#8E8E93] mx-auto mb-3" />
-          <h3 class="text-lg font-semibold text-[#1C1C1E] mb-2">No courses yet</h3>
-          <p class="text-[#8E8E93] mb-4">
-            Get started by browsing existing courses or creating a new one.
-          </p>
+        <%!-- Empty State --%>
+        <div :if={@course_stats == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center card-hover">
+          <div class="animate-float text-5xl mb-4">📖</div>
+          <h3 class="font-bold text-gray-900 text-lg">No courses yet</h3>
+          <p class="text-gray-500 text-sm mt-1 mb-5">Add your first course and start earning XP</p>
           <.link
             navigate={~p"/courses"}
-            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors inline-block"
+            class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold px-6 py-2.5 rounded-full shadow-md btn-bounce text-sm"
           >
-            Browse Courses
+            Get Started
           </.link>
         </div>
 
-        <div :if={@course_stats != []} class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <%!-- Course Cards - Stacked list, not grid --%>
+        <div :if={@course_stats != []} class="space-y-3">
           <.link
-            :for={stat <- @course_stats}
+            :for={{stat, idx} <- Enum.with_index(@course_stats)}
             navigate={~p"/courses/#{stat.course.id}"}
-            class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
+            class={"bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 card-hover block animate-slide-up stagger-#{rem(idx, 6) + 1}"}
           >
-            <h3 class="font-semibold text-[#1C1C1E] mb-2">{stat.course.name}</h3>
-            <div class="flex gap-2 mb-3">
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#E8F8EB] text-[#3DBF55]">
-                {stat.course.subject}
-              </span>
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-600">
-                Grade {stat.course.grade}
-              </span>
+            <%!-- Subject Emoji --%>
+            <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center text-2xl shrink-0">
+              {subject_emoji(stat.course.subject)}
             </div>
-            <div class="flex gap-4 text-sm text-[#8E8E93]">
-              <span>
-                <.icon name="hero-book-open" class="w-4 h-4 inline mr-1" />
-                {stat.chapter_count} chapters
-              </span>
-              <span>
-                <.icon name="hero-question-mark-circle" class="w-4 h-4 inline mr-1" />
-                {stat.question_count} questions
-              </span>
+
+            <%!-- Course Info --%>
+            <div class="flex-1 min-w-0">
+              <p class="font-bold text-gray-900 text-sm truncate">{stat.course.name}</p>
+              <div class="flex items-center gap-2 mt-1">
+                <span class="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
+                  {stat.course.subject}
+                </span>
+                <span class="text-xs font-bold text-cyan-600 bg-cyan-50 px-2 py-0.5 rounded-full">
+                  Grade {stat.course.grade}
+                </span>
+              </div>
+              <%!-- Progress bar --%>
+              <div class="mt-2 flex items-center gap-2">
+                <div class="flex-1 bg-gray-100 rounded-full h-2">
+                  <div class="progress-gradient h-2 rounded-full" style="width: 0%"></div>
+                </div>
+                <span class="text-xs font-bold text-gray-400">0%</span>
+              </div>
+            </div>
+
+            <%!-- Stats --%>
+            <div class="text-right shrink-0 hidden sm:block">
+              <p class="text-xs text-gray-400">{stat.chapter_count} ch</p>
+              <p class="text-xs text-gray-400">{stat.question_count} Q</p>
             </div>
           </.link>
         </div>
       </div>
 
-      <%!-- Upcoming Tests Placeholder --%>
-      <div class="mt-10">
-        <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Upcoming Tests</h2>
-        <div class="bg-white rounded-2xl shadow-md p-8 text-center">
-          <.icon name="hero-calendar" class="w-12 h-12 text-[#8E8E93] mx-auto mb-3" />
-          <p class="text-[#8E8E93]">No upcoming tests scheduled.</p>
+      <%!-- Upcoming Tests --%>
+      <div class="mt-8 animate-slide-up">
+        <h2 class="text-lg font-extrabold text-gray-900 mb-4">Coming Up</h2>
+        <div class="bg-white rounded-2xl border border-gray-100 p-6 text-center card-hover">
+          <div class="text-4xl mb-2">😎</div>
+          <p class="text-gray-500 font-medium text-sm">No tests coming up -- you're all clear!</p>
         </div>
       </div>
     </div>
     """
   end
 
-  attr :title, :string, required: true
-  attr :count, :string, required: true
-  attr :description, :string, required: true
-  attr :icon, :string, required: true
+  # ── Stat pill component ─────────────────────────────────────────────────────
 
-  defp dashboard_card(assigns) do
+  attr :emoji, :string, required: true
+  attr :value, :string, required: true
+  attr :label, :string, required: true
+  attr :bg, :string, required: true
+  attr :text, :string, required: true
+  attr :border, :string, required: true
+
+  defp pill_stat(assigns) do
     ~H"""
-    <div class="bg-white rounded-2xl shadow-md p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="font-semibold text-[#1C1C1E]">{@title}</h3>
-        <.icon name={@icon} class="w-5 h-5 text-[#8E8E93]" />
-      </div>
-      <p class="text-3xl font-bold text-[#4CD964]">{@count}</p>
-      <p class="text-sm text-[#8E8E93] mt-1">{@description}</p>
+    <div class={"flex items-center gap-1.5 px-3 py-2 rounded-xl border shrink-0 #{@bg} #{@border}"}>
+      <span class="text-base">{@emoji}</span>
+      <span class={"text-sm font-extrabold #{@text}"}>{@value}</span>
+      <span class="text-xs text-gray-400 font-medium">{@label}</span>
     </div>
     """
   end
+
+  # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  defp greeting do
+    hour = DateTime.utc_now().hour
+
+    cond do
+      hour < 12 -> "Good morning"
+      hour < 17 -> "Hey"
+      true -> "Evening"
+    end
+  end
+
+  defp greeting_emoji do
+    hour = DateTime.utc_now().hour
+
+    cond do
+      hour < 12 -> "🌅"
+      hour < 17 -> "👋"
+      true -> "🌙"
+    end
+  end
+
+  defp motivational_message do
+    messages = [
+      "Keep the streak alive!",
+      "Ready to level up?",
+      "Small steps, big gains.",
+      "Your future self says thanks!",
+      "Every question counts."
+    ]
+
+    Enum.random(messages)
+  end
+
+  defp subject_emoji(subject) when is_binary(subject) do
+    subject_lower = String.downcase(subject)
+
+    cond do
+      String.contains?(subject_lower, "math") -> "🔢"
+      String.contains?(subject_lower, "science") -> "🔬"
+      String.contains?(subject_lower, "bio") -> "🧬"
+      String.contains?(subject_lower, "chem") -> "⚗️"
+      String.contains?(subject_lower, "phys") -> "⚛️"
+      String.contains?(subject_lower, "hist") -> "🏛️"
+      String.contains?(subject_lower, "english") -> "📝"
+      String.contains?(subject_lower, "art") -> "🎨"
+      String.contains?(subject_lower, "music") -> "🎵"
+      String.contains?(subject_lower, "geo") -> "🌍"
+      String.contains?(subject_lower, "comp") -> "💻"
+      true -> "📘"
+    end
+  end
+
+  defp subject_emoji(_), do: "📘"
 end

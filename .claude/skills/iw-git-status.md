@@ -1,0 +1,1 @@
+../../interactor-workspace/.claude/skills/git-status.md

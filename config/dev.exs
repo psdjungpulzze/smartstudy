@@ -94,13 +94,18 @@ config :swoosh, :api_client, false
 
 # Interactor configuration (mock mode for development)
 config :study_smart,
-  interactor_mock: true,
-  interactor_url: "https://auth.interactor.com",
-  interactor_core_url: "https://core.interactor.com",
+  interactor_mock: false,
+  interactor_url: System.get_env("INTERACTOR_URL", "http://localhost:4001"),
+  interactor_core_url: System.get_env("INTERACTOR_CORE_URL", "https://core.interactor.com"),
   interactor_ukb_url: "http://localhost:4005",
   interactor_udb_url: "http://localhost:4007",
-  interactor_client_id: System.get_env("INTERACTOR_CLIENT_ID", ""),
-  interactor_client_secret: System.get_env("INTERACTOR_CLIENT_SECRET", "")
+  interactor_org_name: System.get_env("INTERACTOR_ORG_NAME", "studysmart"),
+  interactor_client_id: System.get_env("INTERACTOR_CLIENT_ID", "app_Pp4JCBlFXxIoADX1kv41"),
+  interactor_client_secret:
+    System.get_env(
+      "INTERACTOR_CLIENT_SECRET",
+      "sec_Ar5o5Nca_o3lxBk0ujelnB2RGyYgE97n4-2gP72i-MC8"
+    )
 
 # Storage backend
 config :study_smart, :storage_backend, StudySmart.Storage.Local

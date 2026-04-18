@@ -1,0 +1,1 @@
+../../interactor-workspace/.claude/skills/submodule-commit.md

@@ -25,11 +25,62 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/study_smart"
 import topbar from "../vendor/topbar"
 
+// Custom hooks
+const Hooks = {
+  ...colocatedHooks,
+
+  // Captures webkitRelativePath from file inputs and sends folder metadata to LiveView.
+  // Mounted on the upload form element.
+  FolderMetadata: {
+    mounted() {
+      // Watch for file selections on any file input inside this form
+      this.el.addEventListener("input", (e) => {
+        if (e.target.type !== "file" || !e.target.files) return
+
+        const folderMap = {}
+        for (const file of e.target.files) {
+          const relPath = file.webkitRelativePath || ""
+          if (relPath) {
+            // Extract top-level folder: "Textbook/ch1/page.pdf" → "Textbook"
+            const topFolder = relPath.split("/")[0]
+            folderMap[file.name] = topFolder
+          }
+        }
+
+        if (Object.keys(folderMap).length > 0) {
+          this.pushEvent("folder_metadata", { folders: folderMap })
+        }
+      })
+    }
+  },
+
+  // Folder upload button: toggles webkitdirectory on the LiveView file input, then clicks it.
+  FolderUpload: {
+    mounted() {
+      this.el.addEventListener("click", (e) => {
+        e.preventDefault()
+        const fileInput = this.el.closest("form")?.querySelector("input[type='file']")
+          || document.querySelector("#upload-form input[type='file']")
+        if (fileInput) {
+          fileInput.setAttribute("webkitdirectory", "")
+          fileInput.setAttribute("directory", "")
+          fileInput.click()
+          // Remove after dialog opens so normal file picks still work
+          setTimeout(() => {
+            fileInput.removeAttribute("webkitdirectory")
+            fileInput.removeAttribute("directory")
+          }, 500)
+        }
+      })
+    }
+  }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: Hooks,
 })
 
 // Show progress bar on live navigation and form submits

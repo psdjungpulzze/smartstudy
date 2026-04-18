@@ -75,6 +75,11 @@ defmodule StudySmartWeb.ProfileSetupLive do
   end
 
   @impl true
+  # Fallback handler for the step1 form wrapper - individual inputs have their own phx-change
+  def handle_event("step1_change", _params, socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("select_country", %{"country_id" => country_id}, socket) do
     states =
       if country_id != "" do
@@ -351,7 +356,7 @@ defmodule StudySmartWeb.ProfileSetupLive do
 
   defp step1_demographics(assigns) do
     ~H"""
-    <div>
+    <form id="step1-form" phx-change="step1_change" phx-submit="next_step">
       <h2 class="text-xl font-semibold text-[#1C1C1E] mb-6">Demographics</h2>
 
       <div class="space-y-4">
@@ -449,9 +454,7 @@ defmodule StudySmartWeb.ProfileSetupLive do
           <input
             type="text"
             value={@subject_class}
-            phx-change="update_field"
-            phx-value-field="subject_class"
-            name="value"
+            name="subject_class"
             placeholder="e.g., AP Biology, Math 101"
             class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors"
           />
@@ -462,9 +465,7 @@ defmodule StudySmartWeb.ProfileSetupLive do
           <div>
             <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Grade Level *</label>
             <select
-              phx-change="update_field"
-              phx-value-field="selected_grade"
-              name="value"
+              name="selected_grade"
               class={"w-full px-4 py-3 bg-[#F5F5F7] border rounded-lg outline-none transition-colors appearance-none #{if @errors[:grade], do: "border-[#FF3B30]", else: "border-transparent focus:border-[#4CD964]"}"}
             >
               <option value="">Select grade</option>
@@ -479,9 +480,7 @@ defmodule StudySmartWeb.ProfileSetupLive do
           <div>
             <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Gender</label>
             <select
-              phx-change="update_field"
-              phx-value-field="selected_gender"
-              name="value"
+              name="selected_gender"
               class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none"
             >
               <option value="">Select gender</option>
@@ -502,9 +501,7 @@ defmodule StudySmartWeb.ProfileSetupLive do
           <input
             type="text"
             value={@nationality}
-            phx-change="update_field"
-            phx-value-field="nationality"
-            name="value"
+            name="nationality"
             placeholder="e.g., American, Korean"
             class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors"
           />
@@ -514,13 +511,13 @@ defmodule StudySmartWeb.ProfileSetupLive do
       <%!-- Next button --%>
       <div class="flex justify-end mt-8">
         <button
-          phx-click="next_step"
+          type="submit"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors"
         >
           Next
         </button>
       </div>
-    </div>
+    </form>
     """
   end
 

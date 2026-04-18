@@ -18,24 +18,21 @@ defmodule StudySmartWeb.DashboardLiveTest do
     })
   end
 
-  describe "student dashboard" do
-    test "renders dashboard page", %{conn: conn} do
+  describe "student home" do
+    test "renders home page", %{conn: conn} do
       conn = auth_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
-      assert html =~ "Student Dashboard"
-      assert html =~ "Welcome back, Test Student"
+      assert html =~ "Test Student"
       assert html =~ "My Courses"
-      assert html =~ "Assessments"
-      assert html =~ "Study Guides"
     end
 
     test "shows courses section with links", %{conn: conn} do
       conn = auth_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
-      assert html =~ "Browse Courses"
-      assert html =~ "Create Course"
+      assert html =~ "Browse"
+      assert html =~ "Add"
     end
 
     test "shows no courses message when empty", %{conn: conn} do
@@ -81,12 +78,12 @@ defmodule StudySmartWeb.DashboardLiveTest do
       assert html =~ "Grade 10"
     end
 
-    test "shows upcoming tests placeholder", %{conn: conn} do
+    test "shows coming up section", %{conn: conn} do
       conn = auth_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
-      assert html =~ "Upcoming Tests"
-      assert html =~ "No upcoming tests scheduled"
+      assert html =~ "Coming Up"
+      assert html =~ "all clear"
     end
   end
 end

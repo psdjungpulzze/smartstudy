@@ -196,6 +196,20 @@ defmodule StudySmart.Accounts do
     list_guardians_for_student(student_id)
   end
 
+  @doc """
+  Finds or creates a user_role by interactor_user_id, then updates profile fields.
+  Used during course creation wizard to persist demographics.
+  """
+  def upsert_user_profile(interactor_user_id, attrs) do
+    case get_user_role_by_interactor_id(interactor_user_id) do
+      nil ->
+        create_user_role(Map.put(attrs, :interactor_user_id, interactor_user_id))
+
+      existing ->
+        update_user_role(existing, attrs)
+    end
+  end
+
   ## User Role Lookups
 
   @doc """

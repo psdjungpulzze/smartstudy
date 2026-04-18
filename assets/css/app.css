@@ -103,3 +103,88 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* ── Teen-Friendly Design System ──────────────────────────────────────────── */
+
+/* Global font */
+* {
+  font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+}
+
+/* Safe area for mobile bottom tabs */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* XP / Streak animations */
+@keyframes streak-flame {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+@keyframes xp-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(245, 158, 11, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.6); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes confetti-pop {
+  0% { transform: scale(0) rotate(0deg); opacity: 0; }
+  50% { transform: scale(1.2) rotate(180deg); opacity: 1; }
+  100% { transform: scale(1) rotate(360deg); opacity: 1; }
+}
+
+.animate-streak { animation: streak-flame 1.5s ease-in-out infinite; }
+.animate-xp-glow { animation: xp-glow 2s ease-in-out infinite; }
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-slide-up { animation: slide-up 0.4s ease-out; }
+.animate-confetti { animation: confetti-pop 0.5s ease-out; }
+
+/* Fun hover effects for cards */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px -8px rgba(124, 58, 237, 0.15);
+}
+
+/* Bouncy button */
+.btn-bounce {
+  transition: transform 0.15s ease;
+}
+.btn-bounce:hover {
+  transform: scale(1.05);
+}
+.btn-bounce:active {
+  transform: scale(0.95);
+}
+
+/* Progress bar with gradient */
+.progress-gradient {
+  background: linear-gradient(90deg, #7C3AED, #EC4899, #F59E0B);
+  background-size: 200% 100%;
+  animation: gradient-shift 3s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* Stagger animation for cards */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }

@@ -23,11 +23,11 @@ defmodule StudySmartWeb.CourseSearchLiveTest do
       conn = auth_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/courses")
 
-      assert html =~ "Browse Courses"
-      assert html =~ "Subject or Name"
+      assert html =~ "My Courses"
+      assert html =~ "Subject"
       assert html =~ "Grade"
       assert html =~ "Search"
-      assert html =~ "Create New Course"
+      assert html =~ "Add New Course"
     end
 
     test "search with results", %{conn: conn} do
@@ -42,7 +42,7 @@ defmodule StudySmartWeb.CourseSearchLiveTest do
       assert html =~ "Algebra 1"
       assert html =~ "Mathematics"
       assert html =~ "Grade 9"
-      assert html =~ "Use This Course"
+      assert html =~ "Open"
     end
 
     test "empty search results", %{conn: conn} do
@@ -52,7 +52,7 @@ defmodule StudySmartWeb.CourseSearchLiveTest do
       html =
         render_submit(view, "search", %{subject: "nonexistent", grade: "", school_id: ""})
 
-      assert html =~ "No courses found"
+      assert html =~ "No matches found"
     end
 
     test "clear search resets results", %{conn: conn} do
@@ -62,7 +62,7 @@ defmodule StudySmartWeb.CourseSearchLiveTest do
       render_submit(view, "search", %{subject: "test", grade: "", school_id: ""})
       html = render_click(view, "clear_search")
 
-      refute html =~ "No courses found"
+      refute html =~ "No matches found"
       refute html =~ "Found"
     end
   end

@@ -17,7 +17,18 @@ defmodule StudySmartWeb.Router do
   scope "/", StudySmartWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", LoginLive, :index
+    live "/register", RegisterLive, :index
+  end
+
+  # OAuth callback routes (regular controller, not LiveView)
+  scope "/auth", StudySmartWeb do
+    pipe_through :browser
+
+    get "/login/redirect", AuthController, :login
+    get "/callback", AuthController, :callback
+    get "/session", AuthController, :session
+    post "/logout", AuthController, :logout
   end
 
   # Authenticated LiveView routes
@@ -35,6 +46,7 @@ defmodule StudySmartWeb.Router do
 
       live "/courses", CourseSearchLive, :index
       live "/courses/new", CourseNewLive, :new
+      live "/courses/:id/edit", CourseNewLive, :edit
       live "/courses/:id", CourseDetailLive, :show
       live "/courses/:course_id/questions", QuestionBankLive, :index
       live "/courses/:course_id/practice", PracticeLive, :index

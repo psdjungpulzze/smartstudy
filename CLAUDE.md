@@ -747,3 +747,7 @@ External engineers working on improvements should:
 4. Use `.claude/skills/i/` for specialized tasks (code-review, security-audit, etc.)
 
 The setup methodology files will not be available to external engineers.
+
+## Interactor Workspace
+
+@interactor-workspace/CONSUMER_CLAUDE.md

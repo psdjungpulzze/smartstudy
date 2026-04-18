@@ -7,16 +7,25 @@ defmodule StudySmartWeb.CourseSearchLive do
   @impl true
   def mount(_params, _session, socket) do
     schools = Geo.list_schools()
+    user_role_id = socket.assigns.current_user["id"]
+
+    my_courses =
+      case Ecto.UUID.cast(user_role_id) do
+        {:ok, _} -> Courses.list_courses_for_user(user_role_id)
+        :error -> []
+      end
 
     {:ok,
      assign(socket,
-       page_title: "Browse Courses",
+       page_title: "My Courses",
        search_subject: "",
        search_grade: "",
        search_school_id: "",
        schools: schools,
+       my_courses: my_courses,
        results: [],
-       searched: false
+       searched: false,
+       confirm_delete: nil
      )}
   end
 
@@ -52,127 +61,261 @@ defmodule StudySmartWeb.CourseSearchLive do
      )}
   end
 
+  def handle_event("confirm_delete", %{"id" => course_id}, socket) do
+    {:noreply, assign(socket, confirm_delete: course_id)}
+  end
+
+  def handle_event("cancel_delete", _params, socket) do
+    {:noreply, assign(socket, confirm_delete: nil)}
+  end
+
+  def handle_event("delete_course", %{"id" => course_id}, socket) do
+    course = Courses.get_course!(course_id)
+
+    case Courses.delete_course(course) do
+      {:ok, _} ->
+        my_courses = Enum.reject(socket.assigns.my_courses, &(&1.id == course_id))
+        results = Enum.reject(socket.assigns.results, &(&1.id == course_id))
+
+        {:noreply,
+         socket
+         |> assign(my_courses: my_courses, results: results, confirm_delete: nil)
+         |> put_flash(:info, "Course deleted.")}
+
+      {:error, _} ->
+        {:noreply,
+         socket
+         |> assign(confirm_delete: nil)
+         |> put_flash(:error, "Could not delete course.")}
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-4xl mx-auto">
+    <div class="animate-slide-up">
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-[#1C1C1E]">Browse Courses</h1>
-          <p class="text-[#8E8E93] mt-1">Search for existing courses or create a new one</p>
+          <h1 class="text-2xl font-extrabold text-gray-900">My Courses 📚</h1>
+          <p class="text-gray-500 text-sm mt-1">Your courses and search for new ones</p>
         </div>
         <.link
           navigate={~p"/courses/new"}
-          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+          class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-full shadow-md btn-bounce text-sm"
         >
-          <.icon name="hero-plus" class="w-4 h-4 inline mr-1" /> Create New Course
+          + Add New Course
         </.link>
       </div>
 
-      <%!-- Search Form --%>
-      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
-        <form phx-submit="search" class="space-y-4">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label class="label mb-1 text-sm font-medium text-[#1C1C1E]">Subject or Name</label>
-              <input
-                type="text"
-                name="subject"
-                value={@search_subject}
-                placeholder="e.g. Mathematics, Science..."
-                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label class="label mb-1 text-sm font-medium text-[#1C1C1E]">Grade</label>
-              <select
-                name="grade"
-                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
-              >
-                <option value="">All Grades</option>
-                <%= for g <- ~w(1 2 3 4 5 6 7 8 9 10 11 12) do %>
-                  <option value={g} selected={@search_grade == g}>Grade {g}</option>
-                <% end %>
-              </select>
-            </div>
-            <div>
-              <label class="label mb-1 text-sm font-medium text-[#1C1C1E]">School</label>
-              <select
-                name="school_id"
-                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
-              >
-                <option value="">All Schools</option>
-                <%= for school <- @schools do %>
-                  <option value={school.id} selected={@search_school_id == school.id}>
-                    {school.name}
-                  </option>
-                <% end %>
-              </select>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <button
-              type="submit"
-              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
-            >
-              <.icon name="hero-magnifying-glass" class="w-4 h-4 inline mr-1" /> Search
-            </button>
-            <button
-              type="button"
-              phx-click="clear_search"
-              class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-6 py-2 rounded-full border border-gray-200 shadow-sm transition-colors"
-            >
-              Clear
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <%!-- Results --%>
-      <div :if={@searched}>
-        <div :if={@results == []} class="bg-white rounded-2xl shadow-md p-8 text-center">
-          <.icon name="hero-magnifying-glass" class="w-12 h-12 text-[#8E8E93] mx-auto mb-3" />
-          <h3 class="text-lg font-semibold text-[#1C1C1E] mb-2">No courses found</h3>
-          <p class="text-[#8E8E93] mb-4">Try adjusting your search or create a new course.</p>
+      <%!-- My Courses Section --%>
+      <div class="mb-8">
+        <div :if={@my_courses == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+          <div class="text-5xl mb-3 animate-float">📖</div>
+          <h3 class="font-bold text-gray-900 text-lg">No courses yet!</h3>
+          <p class="text-gray-500 text-sm mt-1 mb-4">
+            Add your first course to start studying
+          </p>
           <.link
             navigate={~p"/courses/new"}
-            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors inline-block"
+            class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-full shadow-md btn-bounce text-sm"
           >
-            Create New Course
+            + Add New Course
           </.link>
         </div>
 
-        <div :if={@results != []} class="space-y-4">
-          <p class="text-sm text-[#8E8E93]">
-            Found {length(@results)} course(s)
-          </p>
-          <div :for={course <- @results} class="bg-white rounded-2xl shadow-md p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <h3 class="text-lg font-semibold text-[#1C1C1E]">{course.name}</h3>
-                <div class="flex gap-3 mt-2">
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#E8F8EB] text-[#3DBF55]">
+        <div :if={@my_courses != []} class="space-y-3">
+          <div
+            :for={{course, idx} <- Enum.with_index(@my_courses)}
+            class={"bg-white rounded-2xl border border-gray-100 p-4 card-hover animate-slide-up stagger-#{rem(idx, 6) + 1}"}
+          >
+            <%!-- Delete confirmation overlay --%>
+            <div
+              :if={@confirm_delete == course.id}
+              class="flex items-center justify-between gap-3 p-3 bg-red-50 rounded-xl mb-3 border border-red-100"
+            >
+              <p class="text-sm text-red-700 font-medium">
+                Delete <strong>{course.name}</strong>? This cannot be undone.
+              </p>
+              <div class="flex gap-2 shrink-0">
+                <button
+                  phx-click="delete_course"
+                  phx-value-id={course.id}
+                  class="bg-red-500 hover:bg-red-600 text-white font-bold px-4 py-1.5 rounded-full text-xs"
+                >
+                  Delete
+                </button>
+                <button
+                  phx-click="cancel_delete"
+                  class="bg-white hover:bg-gray-50 text-gray-600 font-bold px-4 py-1.5 rounded-full text-xs border border-gray-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center text-2xl shrink-0">
+                {subject_emoji(course.subject)}
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="font-bold text-gray-900 text-sm">{course.name}</h3>
+                <div class="flex flex-wrap gap-2 mt-1.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600">
                     {course.subject}
                   </span>
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-600">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-cyan-50 text-cyan-600">
                     Grade {course.grade}
                   </span>
                   <span
                     :if={course.school}
-                    class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-gray-50 text-gray-500"
                   >
-                    <.icon name="hero-building-library" class="w-3 h-3 mr-1" /> {course.school.name}
+                    🏫 {course.school.name}
                   </span>
                 </div>
-                <p :if={course.description} class="text-sm text-[#8E8E93] mt-2">
+                <p :if={course.description} class="text-xs text-gray-400 mt-1.5 line-clamp-1">
                   {course.description}
                 </p>
               </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <.link
+                  navigate={~p"/courses/#{course.id}"}
+                  class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-full shadow-md btn-bounce text-sm"
+                >
+                  Open
+                </.link>
+                <.link
+                  navigate={~p"/courses/#{course.id}/edit"}
+                  class="p-2 rounded-full hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-colors"
+                  aria-label="Edit course"
+                >
+                  <.icon name="hero-pencil-square" class="w-4 h-4" />
+                </.link>
+                <button
+                  phx-click="confirm_delete"
+                  phx-value-id={course.id}
+                  class="p-2 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                  aria-label="Delete course"
+                >
+                  <.icon name="hero-trash" class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Search Section --%>
+      <div class="border-t border-gray-100 pt-6">
+        <h2 class="text-lg font-extrabold text-gray-900 mb-4">Find More Courses 🔍</h2>
+        <div class="bg-white rounded-2xl border border-gray-100 p-5 mb-6">
+          <form phx-submit="search" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                  Subject
+                </label>
+                <input
+                  type="text"
+                  name="subject"
+                  value={@search_subject}
+                  placeholder="Math, Science..."
+                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-sm"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                  Grade
+                </label>
+                <select
+                  name="grade"
+                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-sm"
+                >
+                  <option value="">All Grades</option>
+                  <%= for g <- ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College) do %>
+                    <option value={g} selected={@search_grade == g}>{g}</option>
+                  <% end %>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                  School
+                </label>
+                <select
+                  name="school_id"
+                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-sm"
+                >
+                  <option value="">All Schools</option>
+                  <%= for school <- @schools do %>
+                    <option value={school.id} selected={@search_school_id == school.id}>
+                      {school.name}
+                    </option>
+                  <% end %>
+                </select>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button
+                type="submit"
+                class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2 rounded-full shadow-md btn-bounce text-sm"
+              >
+                Search
+              </button>
+              <button
+                type="button"
+                phx-click="clear_search"
+                class="bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold px-5 py-2 rounded-full border border-gray-200 text-sm transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <%!-- Search Results --%>
+        <div :if={@searched}>
+          <div
+            :if={@results == []}
+            class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+          >
+            <div class="text-4xl mb-3">🔍</div>
+            <h3 class="font-bold text-gray-900">No matches found</h3>
+            <p class="text-gray-500 text-sm mt-1">Try different filters</p>
+          </div>
+
+          <div :if={@results != []} class="space-y-3">
+            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              {length(@results)} course(s) found
+            </p>
+            <div
+              :for={{course, idx} <- Enum.with_index(@results)}
+              class={"bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 card-hover animate-slide-up stagger-#{rem(idx, 6) + 1}"}
+            >
+              <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center text-2xl shrink-0">
+                {subject_emoji(course.subject)}
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="font-bold text-gray-900 text-sm">{course.name}</h3>
+                <div class="flex flex-wrap gap-2 mt-1.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600">
+                    {course.subject}
+                  </span>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-cyan-50 text-cyan-600">
+                    Grade {course.grade}
+                  </span>
+                  <span
+                    :if={course.school}
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-gray-50 text-gray-500"
+                  >
+                    🏫 {course.school.name}
+                  </span>
+                </div>
+              </div>
               <.link
                 navigate={~p"/courses/#{course.id}"}
-                class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors whitespace-nowrap"
+                class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-full shadow-md btn-bounce text-sm whitespace-nowrap shrink-0"
               >
-                Use This Course
+                Open
               </.link>
             </div>
           </div>
@@ -181,4 +324,31 @@ defmodule StudySmartWeb.CourseSearchLive do
     </div>
     """
   end
+
+  defp subject_emoji(subject) when is_binary(subject) do
+    subject_lower = String.downcase(subject)
+
+    cond do
+      String.contains?(subject_lower, "math") -> "🔢"
+      String.contains?(subject_lower, "calcul") -> "🔢"
+      String.contains?(subject_lower, "algebra") -> "🔢"
+      String.contains?(subject_lower, "science") -> "🔬"
+      String.contains?(subject_lower, "bio") -> "🧬"
+      String.contains?(subject_lower, "chem") -> "⚗️"
+      String.contains?(subject_lower, "phys") -> "⚛️"
+      String.contains?(subject_lower, "hist") -> "🏛️"
+      String.contains?(subject_lower, "english") -> "📝"
+      String.contains?(subject_lower, "art") -> "🎨"
+      String.contains?(subject_lower, "music") -> "🎵"
+      String.contains?(subject_lower, "geo") -> "🌍"
+      String.contains?(subject_lower, "comp") -> "💻"
+      String.contains?(subject_lower, "econ") -> "📊"
+      String.contains?(subject_lower, "korean") -> "🇰🇷"
+      String.contains?(subject_lower, "spanish") -> "🇪🇸"
+      String.contains?(subject_lower, "french") -> "🇫🇷"
+      true -> "📘"
+    end
+  end
+
+  defp subject_emoji(_), do: "📘"
 end

@@ -1,22 +1,30 @@
 defmodule StudySmartWeb.Plugs.DevAuth do
   @moduledoc """
-  Development-only authentication bypass.
-  Allows selecting a role (student/parent/teacher/admin) without Interactor.
-  Only active when `config :study_smart, dev_routes: true`.
+  Authentication plug that checks both real Interactor auth and dev bypass.
+  Real auth (current_user in session) takes precedence over dev auth.
   """
   import Plug.Conn
 
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    if get_session(conn, :dev_user_id) do
-      user = get_session(conn, :dev_user)
+    cond do
+      # Real Interactor auth
+      user = get_session(conn, :current_user) ->
+        conn
+        |> assign(:current_user, user)
+        |> assign(:current_role, user["role"])
 
-      conn
-      |> assign(:current_user, user)
-      |> assign(:current_role, user["role"])
-    else
-      conn
+      # Dev auth bypass
+      get_session(conn, :dev_user_id) ->
+        user = get_session(conn, :dev_user)
+
+        conn
+        |> assign(:current_user, user)
+        |> assign(:current_role, user["role"])
+
+      true ->
+        conn
     end
   end
 end

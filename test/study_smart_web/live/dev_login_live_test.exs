@@ -21,7 +21,7 @@ defmodule StudySmartWeb.DevLoginLiveTest do
       assert html =~ "Parent"
       assert html =~ "Teacher"
       assert html =~ "Admin"
-      assert html =~ "Development Login"
+      assert html =~ "Fun Sheep"
     end
 
     test "each role card has a form posting to /dev/auth" do

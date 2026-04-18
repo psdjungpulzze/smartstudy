@@ -92,29 +92,46 @@ defmodule StudySmartWeb.Layouts do
   end
 
   @doc """
+  Maps hero icon names to fun emoji for the teen-friendly sidebar.
+  """
+  def nav_emoji("hero-home"), do: "🏠"
+  def nav_emoji("hero-book-open"), do: "📚"
+  def nav_emoji("hero-clipboard-document-check"), do: "📝"
+  def nav_emoji("hero-bolt"), do: "⚡"
+  def nav_emoji("hero-document-text"), do: "📖"
+  def nav_emoji("hero-users"), do: "👥"
+  def nav_emoji("hero-chart-bar"), do: "📊"
+  def nav_emoji("hero-academic-cap"), do: "🎓"
+  def nav_emoji("hero-user-group"), do: "👨‍🎓"
+  def nav_emoji("hero-building-library"), do: "🏫"
+  def nav_emoji("hero-cog-6-tooth"), do: "⚙️"
+  def nav_emoji(_), do: "✨"
+
+  @doc """
   Returns navigation items for a given role.
   """
   def nav_items_for_role(role) do
     case role do
       "student" ->
         [
-          %{label: "Dashboard", path: "/dashboard", icon: "hero-home"},
+          %{label: "Home", path: "/dashboard", icon: "hero-home"},
           %{label: "My Courses", path: "/courses", icon: "hero-book-open"},
           %{label: "Assessments", path: "/tests", icon: "hero-clipboard-document-check"},
           %{label: "Quick Test", path: "/quick-test", icon: "hero-bolt"},
-          %{label: "Study Guides", path: "/study-guides", icon: "hero-document-text"}
+          %{label: "Study Guides", path: "/study-guides", icon: "hero-document-text"},
+          %{label: "Profile", path: "/profile/setup", icon: "hero-user"}
         ]
 
       "parent" ->
         [
-          %{label: "Dashboard", path: "/parent", icon: "hero-home"},
+          %{label: "Home", path: "/parent", icon: "hero-home"},
           %{label: "Children", path: "/parent/children", icon: "hero-users"},
           %{label: "Reports", path: "/parent/reports", icon: "hero-chart-bar"}
         ]
 
       "teacher" ->
         [
-          %{label: "Dashboard", path: "/teacher", icon: "hero-home"},
+          %{label: "Home", path: "/teacher", icon: "hero-home"},
           %{label: "My Classes", path: "/teacher/classes", icon: "hero-academic-cap"},
           %{label: "Students", path: "/teacher/students", icon: "hero-user-group"},
           %{label: "Reports", path: "/teacher/reports", icon: "hero-chart-bar"}
@@ -122,7 +139,7 @@ defmodule StudySmartWeb.Layouts do
 
       "admin" ->
         [
-          %{label: "Dashboard", path: "/admin", icon: "hero-home"},
+          %{label: "Home", path: "/admin", icon: "hero-home"},
           %{label: "Users", path: "/admin/users", icon: "hero-users"},
           %{label: "Schools", path: "/admin/schools", icon: "hero-building-library"},
           %{label: "Courses", path: "/admin/courses", icon: "hero-book-open"},
@@ -131,7 +148,7 @@ defmodule StudySmartWeb.Layouts do
 
       _ ->
         [
-          %{label: "Dashboard", path: "/dashboard", icon: "hero-home"}
+          %{label: "Home", path: "/dashboard", icon: "hero-home"}
         ]
     end
   end

@@ -16,6 +16,7 @@ defmodule StudySmart.Content.UploadedMaterial do
     field :file_name, :string
     field :file_type, :string
     field :file_size, :integer
+    field :folder_name, :string
 
     field :ocr_status, Ecto.Enum,
       values: [:pending, :processing, :completed, :failed],
@@ -37,6 +38,7 @@ defmodule StudySmart.Content.UploadedMaterial do
       :file_name,
       :file_type,
       :file_size,
+      :folder_name,
       :ocr_status,
       :user_role_id,
       :course_id
