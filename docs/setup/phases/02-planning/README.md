@@ -146,6 +146,12 @@ Before moving to Implementation phase:
 4. ✅ Risks identified with mitigation plans
 5. ✅ Team capacity confirmed
 6. ✅ Development environment ready
+7. ✅ Every requirement (FR-XXX) has at least one task (T-XXX)
+8. ✅ Every user-facing requirement has a dedicated UI task
+9. ✅ No task estimated > 1 day without subtasks
+10. ✅ Requirements Coverage Matrix has Tasks and UI Tasks columns filled
+11. ✅ Coverage report shows 100% for "Must" requirements
+12. ✅ No raw requirement downgraded to "Should" or "Could"
 
 ---
 

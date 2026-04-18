@@ -272,3 +272,76 @@ Run the `validator` skill:
 ```
 "Validate the planning documents before implementation"
 ```
+
+---
+
+## MANDATORY: Requirements Coverage Validation
+
+After generating the task breakdown, run this validation:
+
+### Step 1: Build Coverage Matrix
+For each requirement in requirements.md:
+
+| FR-XXX | User Stories | Architecture Section | Tasks | UI Task? | Priority |
+|--------|-------------|---------------------|-------|----------|----------|
+
+### Step 2: Validate Coverage
+- [ ] Every "Must" requirement has at least one task
+- [ ] Every "Should" requirement has at least one task (if from raw requirements)
+- [ ] Every user-facing requirement has a UI task
+- [ ] No task is larger than 1 day without subtasks
+- [ ] Total task count is proportional to requirement count (minimum 3:1 ratio tasks:requirements)
+
+### Step 3: Validate Task Granularity
+For each task estimated as "L" (Large) or with no subtasks:
+- [ ] Can this be completed in one day?
+- [ ] If not, break it into subtasks (T-XXXa, T-XXXb, etc.)
+
+### Step 4: Validate Pipeline Features
+For any multi-step pipeline (OCR, AI generation, data import/export):
+- [ ] Each step has its own task
+- [ ] There is an orchestration task
+- [ ] There is an error handling task
+- [ ] There is a progress/status UI task
+- [ ] There is a background job configuration task
+
+### Step 5: Validate UI Coverage
+For every LiveView/page/component planned:
+- [ ] There is a dedicated task for building it
+- [ ] The task includes acceptance criteria from the user story
+- [ ] Loading, error, and empty states are specified
+
+### Step 6: Check for Orphaned Architecture
+For each section in architecture.md:
+- [ ] There is at least one task referencing this section
+- [ ] If an architecture section has no tasks, either add tasks or remove the section
+
+**If ANY requirement has zero tasks, DO NOT proceed to Implementation.**
+
+### Coverage Report Format
+Generate this report before proceeding:
+
+```
+Requirements Coverage Report
+=============================
+Total Requirements: XX
+  Must:   XX (XX with tasks, XX without)
+  Should: XX (XX with tasks, XX without)
+  Could:  XX (XX with tasks, XX without)
+
+Total User Stories: XX (XX with tasks, XX without)
+Total Tasks: XX
+  Backend: XX
+  Frontend/UI: XX
+  Integration: XX
+  Testing: XX
+
+Coverage: XX% (requirements with tasks / total requirements)
+
+GAPS (requirements without tasks):
+- FR-XXX: [Title] — MISSING TASKS
+- FR-XXX: [Title] — MISSING TASKS
+
+UI GAPS (user-facing requirements without UI tasks):
+- FR-XXX: [Title] — MISSING UI TASK
+```

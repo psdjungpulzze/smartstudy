@@ -140,6 +140,11 @@ Before moving to Planning phase:
 3. ✅ Initial scope defined
 4. ✅ Risks identified
 5. ✅ Go/no-go decision made
+6. ✅ Every requirement has a unique ID (FR-XXX) and acceptance criteria
+7. ✅ Every requirement (FR-XXX) maps to at least one user story (US-XXX)
+8. ✅ Every user story references its parent requirement(s) via FR-XXX
+9. ✅ Requirements Coverage Matrix has Req ID, Title, Priority, and User Stories columns filled
+10. ✅ No raw requirement left unaddressed or downgraded without justification
 
 ---
 

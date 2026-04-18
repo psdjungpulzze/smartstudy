@@ -1,5 +1,43 @@
 # Task Breakdown
 
+## MANDATORY: Task Breakdown Rules
+
+### Rule 1: Every Requirement Must Have Tasks
+Before this document is complete, verify:
+- [ ] Every FR-XXX from requirements.md has at least one task
+- [ ] Every US-XXX from user-stories.md has at least one task
+- [ ] The Requirements Coverage Matrix (in requirements.md) has the Tasks column fully filled
+
+### Rule 2: Maximum Task Size = 1 Day
+- Any task estimated at more than 1 day MUST be broken into subtasks
+- Use T-XXXa, T-XXXb, T-XXXc for subtasks
+- Each subtask should be completable in 2-4 hours
+
+### Rule 3: Every User-Facing Feature Needs a UI Task
+- If a requirement involves user interaction, there MUST be a separate UI task
+- UI tasks include: LiveView/component creation, form design, error states, loading states, empty states, mobile responsiveness
+- "UI polish" at the end is NOT a substitute for per-feature UI tasks
+
+### Rule 4: Backend Pipeline Features Need Integration Tasks
+For any multi-step backend pipeline (e.g., upload → OCR → extract → generate):
+- Each step needs its own task
+- There must be an orchestration/integration task
+- There must be an error handling task
+- There must be a progress/status UI task
+
+### Rule 5: Every Task Must Link to Requirements
+Each task description MUST include:
+- **Implements**: FR-XXX, US-XXX (which requirements/stories this fulfills)
+- If a task doesn't implement any requirement, question whether it's needed
+
+### Rule 6: "Should" and "Could" Classification
+- If a feature is in the raw requirements document, it is "Must" — not "Should" or "Could"
+- "Should" = nice-to-have improvements beyond raw requirements
+- "Could" = speculative features not mentioned in requirements
+- NEVER downgrade a raw requirement to "Should" or "Could"
+
+---
+
 ## Project Information
 
 | Field | Value |
@@ -86,19 +124,28 @@ T-005 ───► T-006
 
 ### T-[NUMBER]: [Task Title]
 
+**Implements**: FR-XXX, US-XXX
 **Epic**: [Epic ID]
 **Feature**: [Feature Name]
-**Priority**: High / Medium / Low
-**Estimate**: [Hours / Points / T-shirt size]
+**Priority**: Must | Should | Could
+**Estimate**: S (< 2h) | M (2-4h) | L (4-8h)
+**Type**: Backend | Frontend | Full-Stack | Integration | Testing
 **Owner**: [Assignee]
 **Status**: Todo / In Progress / Review / Done
 
 **Description**:
 [Detailed description of what needs to be done]
 
-**Acceptance Criteria**:
+**Acceptance Criteria** (from linked user story):
 - [ ] [Criterion 1]
 - [ ] [Criterion 2]
+
+**UI Requirements** (if user-facing):
+- [ ] Component/page created
+- [ ] Loading state
+- [ ] Error state
+- [ ] Empty state
+- [ ] Mobile responsive
 
 **Technical Notes**:
 [Any technical details or considerations]
@@ -106,6 +153,10 @@ T-005 ───► T-006
 **Dependencies**:
 - Blocked by: [Task IDs]
 - Blocks: [Task IDs]
+
+**Subtasks** (if estimate > 1 day):
+- T-XXXa: [Subtask 1]
+- T-XXXb: [Subtask 2]
 
 ---
 

@@ -75,6 +75,15 @@
 
 **Notes**: [Additional information]
 
+**Traceability (MANDATORY — fill during Planning phase)**:
+
+| Traces To | IDs |
+|-----------|-----|
+| User Stories | US-XXX, US-XXX |
+| Architecture Section | § X.X |
+| Tasks | T-XXX, T-XXX, T-XXX |
+| Test Cases | TC-XXX |
+
 ---
 
 ### FR-002: [Requirement Name]
@@ -88,6 +97,15 @@
 **Acceptance Criteria**:
 - [ ] [Criterion 1]
 - [ ] [Criterion 2]
+
+**Traceability (MANDATORY — fill during Planning phase)**:
+
+| Traces To | IDs |
+|-----------|-----|
+| User Stories | US-XXX, US-XXX |
+| Architecture Section | § X.X |
+| Tasks | T-XXX, T-XXX, T-XXX |
+| Test Cases | TC-XXX |
 
 ---
 
@@ -181,3 +199,21 @@
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | [Date] | [Name] | Initial draft |
+
+---
+
+## Requirements Coverage Matrix (MANDATORY)
+
+Before exiting Discovery, fill this matrix. Before exiting Planning, update the Tasks column. Before exiting Implementation, update the Status column.
+
+| Req ID | Title | Priority | User Stories | Arch Section | Tasks | UI Tasks | Test Cases | Status |
+|--------|-------|----------|-------------|--------------|-------|----------|-----------|--------|
+| FR-001 | | Must/Should/Could | | | | | | |
+
+### Validation Rules
+1. **Every row must have values in ALL columns** before proceeding to Implementation
+2. **Priority "Must" and "Should" requirements MUST have tasks** — no exceptions
+3. **Every requirement with a user-facing component MUST have at least one UI task**
+4. **"UI Tasks" column cannot be empty** for any user-facing requirement
+5. **Tasks column must have at least 1 task per requirement** — if a requirement maps to 0 tasks, the task breakdown is incomplete
+6. If any cell is empty, STOP and fill it before proceeding

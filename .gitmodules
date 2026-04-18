@@ -7,3 +7,21 @@
 [submodule "interactor-workspace"]
 	path = interactor-workspace
 	url = https://github.com/pulzze/interactor-workspace.git
+[submodule "interactor-workspace"]
+	path = interactor-workspace
+	url = https://github.com/pulzze/interactor-workspace.git
+[submodule "interactor-workspace-docs/interactor-docs"]
+	path = interactor-workspace-docs/interactor-docs
+	url = https://github.com/pulzze/interactor-docs.git
+[submodule "interactor-workspace-docs/user-knowledge-base-docs"]
+	path = interactor-workspace-docs/user-knowledge-base-docs
+	url = https://github.com/pulzze/user-knowledge-base-docs.git
+[submodule "interactor-workspace-docs/service-knowledge-base-docs"]
+	path = interactor-workspace-docs/service-knowledge-base-docs
+	url = https://github.com/pulzze/service-knowledge-base-docs.git
+[submodule "interactor-workspace-docs/account-server-docs"]
+	path = interactor-workspace-docs/account-server-docs
+	url = https://github.com/pulzze/account-server-docs.git
+[submodule "interactor-workspace-docs/billing-server-docs"]
+	path = interactor-workspace-docs/billing-server-docs
+	url = https://github.com/pulzze/billing-server-docs.git

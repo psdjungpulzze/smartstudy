@@ -633,6 +633,30 @@ Run the `validator` skill:
 "Validate the implementation before code review"
 ```
 
+---
+
+## Requirement-Aware Implementation
+
+### Before Starting Each Milestone
+1. List the tasks in this milestone
+2. For each task, identify the requirement(s) it implements
+3. Before coding, read the requirement's acceptance criteria
+4. After coding, verify acceptance criteria are met
+
+### Before Marking a Milestone Complete
+- [ ] All tasks in the milestone are complete
+- [ ] All acceptance criteria for linked requirements are met
+- [ ] UI for all user-facing features in this milestone is functional
+- [ ] Update Requirements Coverage Matrix status column
+
+### Implementation Completion Gate
+Before declaring implementation complete:
+- [ ] Every requirement in the Coverage Matrix has status "Complete" or "Deferred" (with justification)
+- [ ] No "Must" requirement has status "Deferred"
+- [ ] Every LiveView/page is functional with real data
+- [ ] Every pipeline (OCR, AI, export) works end-to-end
+- [ ] Every user role can complete their core workflows
+
 ### 13. Update Team Settings
 
 After the application has been built, update `.claude/settings.json` to reflect the project's technology stack:

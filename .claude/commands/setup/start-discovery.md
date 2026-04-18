@@ -181,3 +181,35 @@ Run the `validator` skill on all discovery artifacts before proceeding to planni
 ```
 
 Only proceed to `/start-planning` when validation passes.
+
+---
+
+## Exit Gate: Discovery → Planning
+
+Before transitioning to Planning, validate ALL of the following:
+
+### Requirements Completeness
+- [ ] Every requirement has a unique ID (FR-XXX)
+- [ ] Every requirement has acceptance criteria
+- [ ] Every requirement has a priority (Must/Should/Could)
+- [ ] Raw requirements document has been fully decomposed — no requirement left unaddressed
+
+### User Story Coverage
+- [ ] Every requirement (FR-XXX) maps to at least one user story (US-XXX)
+- [ ] Every user story references its parent requirement(s)
+- [ ] User stories cover ALL user roles mentioned in requirements
+- [ ] No orphaned user stories
+
+### Traceability Matrix
+- [ ] Requirements Coverage Matrix exists with Req ID, Title, Priority, and User Stories columns filled
+- [ ] No empty cells in the User Stories column
+
+### Cross-Check Procedure
+1. List all FR-XXX IDs from requirements.md
+2. For each FR-XXX, grep user-stories.md for the ID
+3. If any FR-XXX has zero matches, a user story is missing
+4. List all US-XXX IDs from user-stories.md
+5. For each US-XXX, verify it references at least one FR-XXX
+6. Report any gaps
+
+**DO NOT proceed to Planning if any check fails.**

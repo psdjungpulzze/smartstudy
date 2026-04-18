@@ -14,6 +14,8 @@ So that [benefit/value].
 
 ### US-[NUMBER]: [Story Title]
 
+**Addresses Requirements**: FR-XXX, FR-XXX
+
 **Epic**: [Parent epic if applicable]
 
 **Priority**: Must Have / Should Have / Could Have / Won't Have
@@ -273,3 +275,12 @@ And suggestions update as I type
 | US-002 | Product Search | Discovery | Must Have | 5 | Ready |
 | US-003 | Filter Results | Discovery | Should Have | 3 | Backlog |
 | US-004 | User Registration | Auth | Must Have | 5 | In Progress |
+
+---
+
+## User Story Validation Rules
+
+- [ ] Every user story MUST reference at least one requirement (FR-XXX)
+- [ ] Every requirement MUST be referenced by at least one user story
+- [ ] Run cross-check: extract all FR-XXX from requirements.md, verify each appears in at least one user story
+- [ ] No orphaned stories (stories that don't map to any requirement)

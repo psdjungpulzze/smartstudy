@@ -238,6 +238,7 @@ Copy from `.claude/assets/i/brand/` to `priv/static/brand/`:
 | `architecture-planner` | **[SETUP]** Design system architecture |
 | `deployment` | Deployment preparation and verification |
 | `validator` | **Validate any artifact for correctness** (use after every generation) |
+| `requirements-validator` | **Validate requirements traceability and coverage** |
 
 **Note:** Skills marked **[SETUP]** are located in `.claude/skills/setup/`.
 
@@ -257,6 +258,37 @@ Some documentation is automatically synchronized from external Interactor reposi
 ---
 
 ## Development Workflow
+
+### Requirements Traceability (MANDATORY)
+
+Every project MUST maintain a Requirements Traceability Matrix. This matrix is:
+- Created during Discovery (requirements → user stories)
+- Updated during Planning (user stories → tasks)
+- Updated during Implementation (tasks → status)
+- Validated at each phase transition
+
+**Template**: `docs/setup/templates/requirements-traceability-matrix.md`
+**Checklist**: `docs/setup/checklists/requirements-coverage.md`
+
+### Phase Transition Gates
+
+**Discovery → Planning**: Cannot proceed unless:
+- Every raw requirement is in requirements.md
+- Every requirement has user stories
+- Traceability matrix has Req ID, Title, Priority, User Stories filled
+
+**Planning → Implementation**: Cannot proceed unless:
+- Every requirement has tasks
+- Every user-facing requirement has UI tasks
+- No task > 1 day without subtasks
+- Coverage report shows 100% for "Must" requirements
+
+**Implementation → Complete**: Cannot proceed unless:
+- Every "Must" requirement has status "Complete"
+- All acceptance criteria verified
+- UI is functional for all features
+
+---
 
 ### Phase 1: Discovery **[SETUP PHASE]**
 
