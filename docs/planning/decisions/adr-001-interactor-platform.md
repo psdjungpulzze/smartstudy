@@ -1,4 +1,4 @@
-# ADR-001: Use Interactor as the Core Platform for StudySmart
+# ADR-001: Use Interactor as the Core Platform for FunSheep
 
 ## Status
 
@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-StudySmart requires several infrastructure capabilities that are complex to build from scratch:
+FunSheep requires several infrastructure capabilities that are complex to build from scratch:
 
 - **Authentication and user management** -- secure login, JWT tokens, MFA, role-based access
 - **AI agent orchestration** -- multi-agent pipelines for question generation, solving, and validation
@@ -20,15 +20,15 @@ StudySmart requires several infrastructure capabilities that are complex to buil
 
 Building each of these as custom components would require months of development, introduce significant security risk, and create ongoing maintenance burden. The Interactor platform provides all of these as managed services with a consistent API surface.
 
-The StudySmart team is already part of the Interactor ecosystem, which means single sign-on, shared tooling, and direct access to the platform team for support.
+The FunSheep team is already part of the Interactor ecosystem, which means single sign-on, shared tooling, and direct access to the platform team for support.
 
 ## Decision
 
-StudySmart will use the Interactor platform as its core infrastructure layer for authentication, AI agent orchestration, workflow automation, credential management, and real-time streaming.
+FunSheep will use the Interactor platform as its core infrastructure layer for authentication, AI agent orchestration, workflow automation, credential management, and real-time streaming.
 
 ### Service Mapping
 
-| StudySmart Feature | Interactor Service | Details |
+| FunSheep Feature | Interactor Service | Details |
 |---|---|---|
 | User login and registration | Interactor Account Server (OAuth/JWT) | RS256-signed JWTs, JWKS verification, SSO across ecosystem |
 | Question Creator agent | Interactor AI Agents | Agent configured with textbook context, generates derivative questions |
@@ -44,7 +44,7 @@ StudySmart will use the Interactor platform as its core infrastructure layer for
 ### Integration Points
 
 ```
-StudySmart (Elixir/Phoenix)
+FunSheep (Elixir/Phoenix)
     |
     |-- Auth ---------> Interactor Account Server (JWT verification via JWKS)
     |-- AI Agents ----> Interactor Agent API (REST + SSE streaming)
@@ -59,18 +59,18 @@ StudySmart (Elixir/Phoenix)
 
 - **Reduced development time**: Estimated 3-4 months saved by not building auth, agent orchestration, and workflow engine from scratch.
 - **Security by default**: Authentication follows industry best practices (RS256, JWKS, token rotation) without the team needing to implement or maintain it.
-- **Consistent ecosystem**: Users who already have Interactor accounts get SSO into StudySmart with zero friction.
+- **Consistent ecosystem**: Users who already have Interactor accounts get SSO into FunSheep with zero friction.
 - **Agent management UI**: Interactor provides a web interface for configuring and testing AI agents, reducing the need for custom admin tooling.
 - **Operational visibility**: Interactor provides logging, monitoring, and cost tracking for agent invocations and workflow executions.
 - **Credential security**: API keys for third-party services (Google Cloud Vision, S3) are stored in Interactor's encrypted credential store rather than in environment variables or application config.
 
 ### Negative
 
-- **Platform dependency**: StudySmart cannot function without Interactor. An Interactor outage is a StudySmart outage for all AI and auth features.
-- **API versioning risk**: Breaking changes in Interactor APIs would require StudySmart code changes. Mitigated by the team's proximity to the Interactor platform team.
-- **Cost coupling**: AI agent usage costs flow through Interactor's billing. Cost optimization requires understanding both StudySmart usage patterns and Interactor pricing.
+- **Platform dependency**: FunSheep cannot function without Interactor. An Interactor outage is a FunSheep outage for all AI and auth features.
+- **API versioning risk**: Breaking changes in Interactor APIs would require FunSheep code changes. Mitigated by the team's proximity to the Interactor platform team.
+- **Cost coupling**: AI agent usage costs flow through Interactor's billing. Cost optimization requires understanding both FunSheep usage patterns and Interactor pricing.
 - **Vendor lock-in**: Migrating away from Interactor would require rebuilding auth, agent orchestration, workflows, and credential management -- essentially a rewrite of the infrastructure layer.
-- **Debugging complexity**: Issues may span StudySmart and Interactor, requiring cross-system debugging. Mitigated by Interactor's logging and the team's access to both systems.
+- **Debugging complexity**: Issues may span FunSheep and Interactor, requiring cross-system debugging. Mitigated by Interactor's logging and the team's access to both systems.
 
 ## Alternatives Considered
 

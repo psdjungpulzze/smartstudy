@@ -7,19 +7,19 @@
 # General application configuration
 import Config
 
-config :study_smart,
-  ecto_repos: [StudySmart.Repo],
+config :fun_sheep,
+  ecto_repos: [FunSheep.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # Configure the endpoint
-config :study_smart, StudySmartWeb.Endpoint,
+config :fun_sheep, FunSheepWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: StudySmartWeb.ErrorHTML, json: StudySmartWeb.ErrorJSON],
+    formats: [html: FunSheepWeb.ErrorHTML, json: FunSheepWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: StudySmart.PubSub,
+  pubsub_server: FunSheep.PubSub,
   live_view: [signing_salt: "xGk+mfbZ"]
 
 # Configure the mailer
@@ -29,12 +29,12 @@ config :study_smart, StudySmartWeb.Endpoint,
 #
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
-config :study_smart, StudySmart.Mailer, adapter: Swoosh.Adapters.Local
+config :fun_sheep, FunSheep.Mailer, adapter: Swoosh.Adapters.Local
 
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
-  study_smart: [
+  fun_sheep: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
@@ -44,7 +44,7 @@ config :esbuild,
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.1.12",
-  study_smart: [
+  fun_sheep: [
     args: ~w(
       --input=assets/css/app.css
       --output=priv/static/assets/css/app.css

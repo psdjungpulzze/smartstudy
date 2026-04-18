@@ -4,7 +4,7 @@ This file provides comprehensive guidance to Claude Code for AI-driven product d
 
 ## Project Overview
 
-- **Project Name**: StudySmart
+- **Project Name**: FunSheep
 - **Project Type**: web | mobile
 - **Technology Stack**: Elixir, Phoenix Framework, PostgreSQL, LiveView
 - **Current Phase**: implementation

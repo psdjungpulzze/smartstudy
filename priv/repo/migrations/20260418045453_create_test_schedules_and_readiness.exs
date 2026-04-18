@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.CreateTestSchedulesAndReadiness do
+defmodule FunSheep.Repo.Migrations.CreateTestSchedulesAndReadiness do
   use Ecto.Migration
 
   def change do

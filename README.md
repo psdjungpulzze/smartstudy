@@ -1,4 +1,4 @@
-# StudySmart
+# FunSheep
 
 To start your Phoenix server:
 

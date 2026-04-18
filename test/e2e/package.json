@@ -2,7 +2,7 @@
   "name": "studysmart-e2e",
   "version": "1.0.0",
   "private": true,
-  "description": "E2E tests for StudySmart using Playwright",
+  "description": "E2E tests for FunSheep using Playwright",
   "scripts": {
     "test": "npx playwright test",
     "test:headed": "npx playwright test --headed",

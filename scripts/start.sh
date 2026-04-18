@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}StudySmart Development Server${NC}"
+echo -e "${GREEN}FunSheep Development Server${NC}"
 echo "================================"
 
 # Check Docker
@@ -29,7 +29,7 @@ docker compose up -d
 # Wait for PostgreSQL
 echo -e "${YELLOW}Waiting for PostgreSQL...${NC}"
 for i in {1..30}; do
-  if docker exec study_smart_postgres_dev pg_isready -U postgres > /dev/null 2>&1; then
+  if docker exec fun_sheep_postgres_dev pg_isready -U postgres > /dev/null 2>&1; then
     echo -e "${GREEN}PostgreSQL is ready${NC}"
     break
   fi

@@ -1,9 +1,9 @@
-defmodule StudySmart.ContentFixtures do
+defmodule FunSheep.ContentFixtures do
   @moduledoc """
   Test fixtures for the Content context (UploadedMaterial, OcrPage).
   """
 
-  alias StudySmart.Repo
+  alias FunSheep.Repo
 
   @doc """
   Creates the full geo hierarchy (Country -> State -> District -> School)
@@ -12,26 +12,26 @@ defmodule StudySmart.ContentFixtures do
   """
   def create_school(_attrs \\ %{}) do
     {:ok, country} =
-      %StudySmart.Geo.Country{}
-      |> StudySmart.Geo.Country.changeset(%{
+      %FunSheep.Geo.Country{}
+      |> FunSheep.Geo.Country.changeset(%{
         name: "Test Country #{System.unique_integer([:positive])}",
         code: "TC#{System.unique_integer([:positive])}"
       })
       |> Repo.insert()
 
     {:ok, state} =
-      %StudySmart.Geo.State{}
-      |> StudySmart.Geo.State.changeset(%{name: "Test State", country_id: country.id})
+      %FunSheep.Geo.State{}
+      |> FunSheep.Geo.State.changeset(%{name: "Test State", country_id: country.id})
       |> Repo.insert()
 
     {:ok, district} =
-      %StudySmart.Geo.District{}
-      |> StudySmart.Geo.District.changeset(%{name: "Test District", state_id: state.id})
+      %FunSheep.Geo.District{}
+      |> FunSheep.Geo.District.changeset(%{name: "Test District", state_id: state.id})
       |> Repo.insert()
 
     {:ok, school} =
-      %StudySmart.Geo.School{}
-      |> StudySmart.Geo.School.changeset(%{name: "Test School", district_id: district.id})
+      %FunSheep.Geo.School{}
+      |> FunSheep.Geo.School.changeset(%{name: "Test School", district_id: district.id})
       |> Repo.insert()
 
     school
@@ -52,8 +52,8 @@ defmodule StudySmart.ContentFixtures do
     }
 
     {:ok, user_role} =
-      %StudySmart.Accounts.UserRole{}
-      |> StudySmart.Accounts.UserRole.changeset(Map.merge(defaults, attrs))
+      %FunSheep.Accounts.UserRole{}
+      |> FunSheep.Accounts.UserRole.changeset(Map.merge(defaults, attrs))
       |> Repo.insert()
 
     user_role
@@ -70,8 +70,8 @@ defmodule StudySmart.ContentFixtures do
     }
 
     {:ok, course} =
-      %StudySmart.Courses.Course{}
-      |> StudySmart.Courses.Course.changeset(Map.merge(defaults, attrs))
+      %FunSheep.Courses.Course{}
+      |> FunSheep.Courses.Course.changeset(Map.merge(defaults, attrs))
       |> Repo.insert()
 
     course
@@ -98,8 +98,8 @@ defmodule StudySmart.ContentFixtures do
     clean_attrs = Map.drop(attrs, [:user_role, :course])
 
     {:ok, material} =
-      %StudySmart.Content.UploadedMaterial{}
-      |> StudySmart.Content.UploadedMaterial.changeset(Map.merge(defaults, clean_attrs))
+      %FunSheep.Content.UploadedMaterial{}
+      |> FunSheep.Content.UploadedMaterial.changeset(Map.merge(defaults, clean_attrs))
       |> Repo.insert()
 
     material

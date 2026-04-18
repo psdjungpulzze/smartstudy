@@ -5,15 +5,15 @@
 # Inside the script, you can read and write to any of your
 # repositories directly:
 #
-#     StudySmart.Repo.insert!(%StudySmart.SomeSchema{})
+#     FunSheep.Repo.insert!(%FunSheep.SomeSchema{})
 #
 # We recommend using the bang functions (`insert!`, `update!`
 # and so on) as they will fail if something goes wrong.
 
-alias StudySmart.Repo
-alias StudySmart.Geo.{Country, State, District, School}
-alias StudySmart.Learning.Hobby
-alias StudySmart.Courses.{Course, Chapter}
+alias FunSheep.Repo
+alias FunSheep.Geo.{Country, State, District, School}
+alias FunSheep.Learning.Hobby
+alias FunSheep.Courses.{Course, Chapter}
 
 import Ecto.Query
 

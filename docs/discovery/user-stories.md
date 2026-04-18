@@ -1,4 +1,4 @@
-# User Stories — StudySmart
+# User Stories — FunSheep
 
 ## Story Map
 
@@ -625,7 +625,7 @@ So that I can monitor their study progress and test readiness.
 
 **Scenario 1: Link via invite code**
 ```
-Given my child has a StudySmart student account
+Given my child has a FunSheep student account
 When I enter their invite code on my parent dashboard
 Then the link request is sent to my child for confirmation
 And once confirmed, their data appears on my dashboard

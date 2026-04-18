@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.AddGenderNationalityToUserRoles do
+defmodule FunSheep.Repo.Migrations.AddGenderNationalityToUserRoles do
   use Ecto.Migration
 
   def change do

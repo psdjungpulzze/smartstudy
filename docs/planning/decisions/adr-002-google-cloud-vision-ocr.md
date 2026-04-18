@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-StudySmart's core workflow begins with a student uploading a textbook (PDF or image). The platform must extract text from these uploads with high accuracy so that the AI question generation pipeline receives clean input. Poor OCR quality cascades downstream: garbled text produces nonsensical questions, which erode user trust.
+FunSheep's core workflow begins with a student uploading a textbook (PDF or image). The platform must extract text from these uploads with high accuracy so that the AI question generation pipeline receives clean input. Poor OCR quality cascades downstream: garbled text produces nonsensical questions, which erode user trust.
 
 Textbook uploads present specific OCR challenges:
 
@@ -86,7 +86,7 @@ At projected scale (10,000 unique textbooks in year one), total OCR cost is appr
 
 - **Pros**: Free, strong performance on structured documents, good table recognition, active development.
 - **Cons**: Accuracy on English text is competitive with Tesseract but still below Google Cloud Vision. Documentation is primarily in Chinese. Community support for edge cases is limited. Requires GPU infrastructure for acceptable throughput. Self-hosted operational burden.
-- **Rejected because**: While PaddleOCR's table recognition is impressive, overall accuracy on varied English textbook formats does not meet the 98% threshold. Operational complexity of self-hosting a GPU-dependent OCR service is not justified at StudySmart's current scale.
+- **Rejected because**: While PaddleOCR's table recognition is impressive, overall accuracy on varied English textbook formats does not meet the 98% threshold. Operational complexity of self-hosting a GPU-dependent OCR service is not justified at FunSheep's current scale.
 
 ### 3. AWS Textract
 

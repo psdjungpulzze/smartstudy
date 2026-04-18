@@ -8,7 +8,7 @@ Use this document to capture your initial project idea. Don't worry about struct
 
 *Describe what you want to build in your own words. Be as detailed or rough as you like.*
 
-StudySmart is an AI-powered adaptive study platform that helps students prepare for exams. It creates personalized courses by discovering and organizing educational content (textbooks, online resources, videos), extracts and generates practice questions, then uses adaptive testing to identify knowledge gaps and guide students toward test readiness. Think of it as an intelligent tutor that knows exactly what you need to study, tracks your progress per topic, and provides a "Tinder-style" mobile quick-test experience for on-the-go review.
+FunSheep is an AI-powered adaptive study platform that helps students prepare for exams. It creates personalized courses by discovering and organizing educational content (textbooks, online resources, videos), extracts and generates practice questions, then uses adaptive testing to identify knowledge gaps and guide students toward test readiness. Think of it as an intelligent tutor that knows exactly what you need to study, tracks your progress per topic, and provides a "Tinder-style" mobile quick-test experience for on-the-go review.
 
 ---
 
@@ -16,7 +16,7 @@ StudySmart is an AI-powered adaptive study platform that helps students prepare 
 
 *What problem does this solve? Or what opportunity does it address?*
 
-Students waste time studying topics they already know while neglecting weak areas. Current study tools are static — they don't adapt to individual knowledge levels. StudySmart solves this by:
+Students waste time studying topics they already know while neglecting weak areas. Current study tools are static — they don't adapt to individual knowledge levels. FunSheep solves this by:
 - Automatically discovering and organizing course content from multiple sources
 - Using adaptive/progressive testing to precisely identify what a student knows vs. doesn't know
 - Providing targeted study guides pointing to exact textbook pages and reference materials
@@ -273,13 +273,13 @@ Students waste time studying topics they already know while neglecting weak area
 
 **This application MUST make full use of Interactor platform services instead of building custom equivalents.** The interactor-workspace submodule contains the full platform. See `docs/i/interactor-docs/integration-guide/` and `docs/i/account-server-docs/integration-guide/` for API details.
 
-#### Service Mapping: StudySmart Feature → Interactor Service
+#### Service Mapping: FunSheep Feature → Interactor Service
 
-| StudySmart Feature | Interactor Service | How It's Used |
+| FunSheep Feature | Interactor Service | How It's Used |
 |----|----|----|
 | **End-user authentication** | Account Server (User JWT, OAuth/OIDC) | Student/parent/teacher login, registration, MFA. Role stored in user `metadata.role`. |
 | **Admin authentication** | Account Server (Admin JWT) | Separate admin portal login for platform management. Distinct from end-user auth. |
-| **Role enforcement** | Application layer | StudySmart reads `metadata.role` from user record and enforces permissions per route/action. Not enforced at Interactor auth layer. |
+| **Role enforcement** | Application layer | FunSheep reads `metadata.role` from user record and enforces permissions per route/action. Not enforced at Interactor auth layer. |
 | **Hobby domain knowledge** | User Knowledge Base (UKB) | Store hobby domain knowledge (KPOP facts, BTS members, sports terms) for semantic retrieval by agents during question/explanation generation |
 | **Curriculum/subject knowledge** | User Knowledge Base (UKB) | Store curriculum outlines, topic taxonomies, and subject domain knowledge for semantic retrieval by content discovery and question generation agents |
 | **Student progress data** | User Database (UDB) | Agent-queryable data layer for student progress (scores, completion, readiness). Dynamic tables with per-user isolation. Parents/teachers query linked students' data via agents. |
@@ -294,7 +294,7 @@ Students waste time studying topics they already know while neglecting weak area
 | **Real-time AI responses** | Webhooks & SSE | Stream agent responses during assessment and chat-based tutoring |
 | **External service access (YouTube, Google Docs export)** | Credential Management | Store OAuth tokens for Google, YouTube APIs; auto-refresh handled by Interactor |
 | **Per-student usage tracking** | Billing Server | Track AI usage per student via `external_user_id` allocations |
-| **Question bank DB access by agents** | Data Sources | Connect StudySmart's PostgreSQL so agents can query existing questions before generating new ones |
+| **Question bank DB access by agents** | Data Sources | Connect FunSheep's PostgreSQL so agents can query existing questions before generating new ones |
 | **Specialized agent delegation** | Supporting Assistants | Orchestrator agent delegates to specialized agents (question extractor, content discoverer, evaluator) |
 | **External service discovery** | Service Knowledge Base | Search for connectable services (YouTube, Khan Academy, Google Docs) |
 
@@ -302,7 +302,7 @@ Students waste time studying topics they already know while neglecting weak area
 
 ```
 ┌─────────────────────────┐
-│  StudySmart Orchestrator │  (Primary assistant)
+│  FunSheep Orchestrator │  (Primary assistant)
 │  Assistant               │
 └──────────┬──────────────┘
            │ delegates specialized tasks

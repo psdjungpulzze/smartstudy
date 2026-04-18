@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.CreateMaterialsAndOcr do
+defmodule FunSheep.Repo.Migrations.CreateMaterialsAndOcr do
   use Ecto.Migration
 
   def change do

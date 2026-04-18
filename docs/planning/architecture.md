@@ -1,10 +1,10 @@
-# StudySmart System Architecture
+# FunSheep System Architecture
 
 ## Document Information
 
 | Field | Value |
 |-------|-------|
-| **Project** | StudySmart |
+| **Project** | FunSheep |
 | **Version** | 1.0 |
 | **Last Updated** | 2026-04-17 |
 | **Author** | Peter Jung |
@@ -14,7 +14,7 @@
 
 ## 1. System Overview
 
-StudySmart is an AI-powered adaptive study platform built with Elixir/Phoenix/LiveView. It delegates authentication, AI agent orchestration, workflow automation, credential management, and billing to the Interactor platform rather than building custom equivalents.
+FunSheep is an AI-powered adaptive study platform built with Elixir/Phoenix/LiveView. It delegates authentication, AI agent orchestration, workflow automation, credential management, and billing to the Interactor platform rather than building custom equivalents.
 
 ### High-Level System Diagram
 
@@ -46,7 +46,7 @@ StudySmart is an AI-powered adaptive study platform built with Elixir/Phoenix/Li
 │                    ┌──────────────┘                               │               │
 │                    ▼                                              │               │
 │  ┌──────────────────────────┐  ┌──────────────────┐              │               │
-│  │  PostgreSQL (StudySmart) │  │  File Storage    │              │               │
+│  │  PostgreSQL (FunSheep) │  │  File Storage    │              │               │
 │  │  courses, questions,     │  │  (Local → S3)    │              │               │
 │  │  attempts, readiness,    │  │                  │              │               │
 │  │  schedules, OCR pages    │  │  uploads/        │              │               │
@@ -144,7 +144,7 @@ All user-facing interactions happen through LiveView. No separate REST API is ex
 Each context encapsulates a bounded domain. Contexts never call each other's internal functions directly; they communicate through their public API.
 
 ```
-lib/study_smart/
+lib/fun_sheep/
 ├── accounts/                   # User profiles, role management, guardian relationships
 │   ├── accounts.ex             # Context module
 │   ├── student.ex              # Student schema
@@ -216,7 +216,7 @@ lib/study_smart/
 This layer encapsulates all communication with Interactor platform services. Each module handles authentication, request formatting, and response parsing for its service domain.
 
 ```
-lib/study_smart/interactor/
+lib/fun_sheep/interactor/
 ├── auth.ex                     # OAuth/OIDC with Account Server (User JWT + Admin JWT)
 ├── token_cache.ex              # GenServer: caches App JWT, auto-refreshes
 ├── agents.ex                   # AI Agent management (assistants, rooms, messages)
@@ -248,7 +248,7 @@ lib/study_smart/interactor/
 
 **`Interactor.KnowledgeBase`** -- Manages domain knowledge in Interactor's User Knowledge Base (UKB, port 4005). Stores and retrieves two categories of knowledge via semantic search: (1) Hobby domain knowledge -- when a hobby like "KPOP" is discovered, relevant factual data (member names, group details, common scenarios) is stored so agents can use it for personalized questions. (2) Curriculum/subject knowledge -- course syllabi, topic taxonomies, and reference material summaries are stored so agents can generate curriculum-aligned content.
 
-**`Interactor.UserDatabase`** -- Integrates with Interactor's User Database service (UDB, port 4007). Registers StudySmart's PostgreSQL as a Data Source so that AI agents can query student data (readiness scores, assessment history, study progress) via natural language. Manages table registration, schema mapping, and per-user data isolation so agents only access data for the student they are serving.
+**`Interactor.UserDatabase`** -- Integrates with Interactor's User Database service (UDB, port 4007). Registers FunSheep's PostgreSQL as a Data Source so that AI agents can query student data (readiness scores, assessment history, study progress) via natural language. Manages table registration, schema mapping, and per-user data isolation so agents only access data for the student they are serving.
 
 **`Interactor.Billing`** -- Tracks AI token consumption per student via `external_user_id` allocations. Reports usage to Interactor's Billing Server.
 
@@ -260,11 +260,11 @@ lib/study_smart/interactor/
 
 ### 3.1 Agent Overview
 
-StudySmart uses 9 Interactor AI agents organized in an orchestrator-delegate pattern.
+FunSheep uses 9 Interactor AI agents organized in an orchestrator-delegate pattern.
 
 ```
                         ┌───────────────────────────┐
-                        │  StudySmart Orchestrator   │
+                        │  FunSheep Orchestrator   │
                         │  (Primary Assistant)       │
                         │                            │
                         │  Routes tasks to the       │
@@ -331,7 +331,7 @@ All AI-generated questions pass through a three-stage validation pipeline before
 
 ### 3.4 Tool Callbacks
 
-Interactor agents invoke tools that callback to StudySmart's backend. These are POST endpoints that the agents call during execution.
+Interactor agents invoke tools that callback to FunSheep's backend. These are POST endpoints that the agents call during execution.
 
 ```
 POST /api/tools/callback/parse_ocr_text       → Content context
@@ -777,7 +777,7 @@ Generates practice tests matching a student's uploaded exam format.
 |--------|------|-------------|-------------|
 | `id` | `binary_id` | PK, auto-generated | Internal ID |
 | `user_id` | `string` | not null, unique | Interactor Account Server user ID (`external_user_id`) |
-| `role` | `string` | not null, enum: `student`, `parent`, `teacher` | User's role in StudySmart. Stored in Interactor `metadata.role` and mirrored locally. |
+| `role` | `string` | not null, enum: `student`, `parent`, `teacher` | User's role in FunSheep. Stored in Interactor `metadata.role` and mirrored locally. |
 | `school_id` | `binary_id` | FK → schools, nullable | Associated school (for teachers; optional for parents) |
 | `inserted_at` | `utc_datetime` | not null | Created at |
 | `updated_at` | `utc_datetime` | not null | Updated at |
@@ -798,18 +798,18 @@ Generates practice tests matching a student's uploaded exam format.
 
 ## 6. Authentication Flow
 
-StudySmart uses Interactor Account Server as its identity provider. There are two authentication tiers:
+FunSheep uses Interactor Account Server as its identity provider. There are two authentication tiers:
 
 1. **End Users (student, parent, teacher)** -- All use the same OAuth 2.0 Authorization Code flow via Interactor User JWT. A single login page serves all roles. After login, the user's `metadata.role` determines what they see.
 2. **Platform Admins** -- Use Interactor Admin JWT tier via a separate admin portal at `/admin`. Admins log in via `/api/v1/admin/login` and receive Admin-tier JWTs with elevated privileges.
 
-Users never create credentials in StudySmart directly. Role is stored in Interactor user `metadata.role` (values: `"student"`, `"parent"`, `"teacher"`). Role enforcement happens at the StudySmart application layer via Phoenix Plugs.
+Users never create credentials in FunSheep directly. Role is stored in Interactor user `metadata.role` (values: `"student"`, `"parent"`, `"teacher"`). Role enforcement happens at the FunSheep application layer via Phoenix Plugs.
 
 ### 6.1 End-User Login Flow (Student / Parent / Teacher)
 
 ```
 ┌──────────┐       ┌──────────────────┐       ┌──────────────────────┐
-│  User     │       │  StudySmart      │       │  Interactor Account  │
+│  User     │       │  FunSheep      │       │  Interactor Account  │
 │  Browser  │       │  Phoenix App     │       │  Server              │
 └─────┬─────┘       └────────┬─────────┘       └──────────┬───────────┘
       │                      │                             │
@@ -875,7 +875,7 @@ Users never create credentials in StudySmart directly. Role is stored in Interac
 
 ```
 ┌──────────┐       ┌──────────────────┐       ┌──────────────────────┐
-│  Admin    │       │  StudySmart      │       │  Interactor Account  │
+│  Admin    │       │  FunSheep      │       │  Interactor Account  │
 │  Browser  │       │  Admin Portal    │       │  Server              │
 └─────┬─────┘       └────────┬─────────┘       └──────────┬───────────┘
       │                      │                             │
@@ -906,13 +906,13 @@ Users never create credentials in StudySmart directly. Role is stored in Interac
 
 ```elixir
 # RequireRole plug — checks metadata.role on every request
-plug StudySmart.Auth.RequireRole, role: :student   # Only students
-plug StudySmart.Auth.RequireRole, role: :parent     # Only parents
-plug StudySmart.Auth.RequireRole, role: :teacher    # Only teachers
-plug StudySmart.Auth.RequireRole, role: [:parent, :teacher]  # Either
+plug FunSheep.Auth.RequireRole, role: :student   # Only students
+plug FunSheep.Auth.RequireRole, role: :parent     # Only parents
+plug FunSheep.Auth.RequireRole, role: :teacher    # Only teachers
+plug FunSheep.Auth.RequireRole, role: [:parent, :teacher]  # Either
 
 # RequireGuardian plug — verifies parent/teacher has active link to student
-plug StudySmart.Auth.RequireGuardian, student_param: :student_id
+plug FunSheep.Auth.RequireGuardian, student_param: :student_id
 ```
 
 Role enforcement rules:
@@ -923,11 +923,11 @@ Role enforcement rules:
 
 ### 6.2 Machine-to-Machine Authentication (App JWT)
 
-For backend API calls to Interactor Core (agents, workflows, credentials), StudySmart uses the OAuth client credentials grant.
+For backend API calls to Interactor Core (agents, workflows, credentials), FunSheep uses the OAuth client credentials grant.
 
 ```
 ┌──────────────────┐                    ┌──────────────────────┐
-│  StudySmart       │                    │  Interactor Account  │
+│  FunSheep       │                    │  Interactor Account  │
 │  TokenCache       │                    │  Server              │
 │  (GenServer)      │                    │                      │
 └────────┬─────────┘                    └──────────┬───────────┘
@@ -972,7 +972,7 @@ A behaviour module defines the storage interface, allowing transparent swapping 
 
 ```
 ┌─────────────────────────────────────┐
-│        StudySmart.Storage           │
+│        FunSheep.Storage           │
 │        (behaviour)                   │
 │                                      │
 │  @callback store(path, binary)       │
@@ -997,10 +997,10 @@ A behaviour module defines the storage interface, allowing transparent swapping 
 
 ```elixir
 # config/dev.exs
-config :study_smart, :storage, adapter: StudySmart.Storage.LocalStorage
+config :fun_sheep, :storage, adapter: FunSheep.Storage.LocalStorage
 
 # config/prod.exs (Phase 2)
-config :study_smart, :storage, adapter: StudySmart.Storage.S3Storage
+config :fun_sheep, :storage, adapter: FunSheep.Storage.S3Storage
 ```
 
 ### 7.2 File Organization
@@ -1027,7 +1027,7 @@ priv/static/uploads/          # Phase 1 local storage root
 
 ```
 ┌──────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  Student     │     │  StudySmart       │     │  Google Cloud    │
+│  Student     │     │  FunSheep       │     │  Google Cloud    │
 │  uploads     │────>│  Content context  │────>│  Vision API      │
 │  PDF/image   │     │                   │     │                  │
 │              │     │  1. Store file    │     │  2. OCR request  │
@@ -1041,7 +1041,7 @@ priv/static/uploads/          # Phase 1 local storage root
                                                         │ - detected images
                                                         ▼
                      ┌──────────────────┐     ┌──────────────────┐
-                     │  Interactor      │     │  StudySmart       │
+                     │  Interactor      │     │  FunSheep       │
                      │  Question        │◄────│  Content context  │
                      │  Extraction      │     │                   │
                      │  Agent           │     │  4. Store in      │
@@ -1077,7 +1077,7 @@ priv/static/uploads/          # Phase 1 local storage root
 |------|---------------|--------|
 | Upload | Content context | Accept PDF/image, store via `Storage` behaviour, create `uploaded_material` record |
 | Split | Content context | Split multi-page PDFs into individual page images |
-| OCR | Oban worker | Async job calls Google Cloud Vision API per page (via `StudySmart.Workers.OcrWorker`) |
+| OCR | Oban worker | Async job calls Google Cloud Vision API per page (via `FunSheep.Workers.OcrWorker`) |
 | Store | Content context | Save extracted text, bounding boxes, and image references in `ocr_pages` |
 | Extract | Interactor Agent | Send text chunks to Question Extraction Agent; receive questions via tool callbacks |
 | Notify | PubSub | Broadcast `{:ocr_completed, material_id}` so LiveView updates in real-time |
@@ -1099,7 +1099,7 @@ The OCR-first approach avoids sending raw PDFs/images to the LLM:
 
 ```
 ┌──────────────┐         ┌──────────────────┐         ┌──────────────────┐
-│   Student    │◄───────>│   StudySmart      │◄───────>│   Interactor     │
+│   Student    │◄───────>│   FunSheep      │◄───────>│   Interactor     │
 │   Browser    │ LiveView│   Phoenix App     │  HTTP/  │   Core           │
 │              │WebSocket│                   │  SSE    │                  │
 └──────────────┘         └──────────────────┘         └──────────────────┘
@@ -1159,14 +1159,14 @@ Phase 1 exposes no public REST API. All student interactions occur through LiveV
 | Endpoint Type | Path Pattern | Purpose |
 |---------------|-------------|---------|
 | **LiveView routes** | `/*` | All student-facing pages |
-| **Tool callbacks** | `POST /api/tools/callback/:tool_name` | Interactor agents invoke StudySmart functions |
+| **Tool callbacks** | `POST /api/tools/callback/:tool_name` | Interactor agents invoke FunSheep functions |
 | **Webhook receiver** | `POST /api/webhooks/interactor` | Receive Interactor platform events |
 
 ### 10.2 Tool Callback Endpoint Design
 
 ```elixir
 # Router
-scope "/api/tools", StudySmartWeb.API do
+scope "/api/tools", FunSheepWeb.API do
   pipe_through [:api, :verify_interactor_signature]
 
   post "/callback/:tool_name", ToolCallbackController, :execute
@@ -1194,7 +1194,7 @@ The controller dispatches to the appropriate context based on `tool_name`:
 
 ```elixir
 # Router
-scope "/api/webhooks", StudySmartWeb.API do
+scope "/api/webhooks", FunSheepWeb.API do
   pipe_through [:api, :verify_webhook_signature]
 
   post "/interactor", WebhookController, :handle
@@ -1223,7 +1223,7 @@ Subscribed event types:
 │                      Production Host                          │
 │                                                               │
 │  ┌───────────────┐  ┌────────────────────────────────────┐   │
-│  │   Nginx       │  │   StudySmart (Elixir Release)      │   │
+│  │   Nginx       │  │   FunSheep (Elixir Release)      │   │
 │  │   (reverse    │──│                                    │   │
 │  │    proxy,     │  │   Phoenix Endpoint (port 4000)     │   │
 │  │    TLS)       │  │   LiveView WebSocket               │   │
@@ -1234,7 +1234,7 @@ Subscribed event types:
 │                     ▼                                         │
 │  ┌────────────────────────────────────┐                      │
 │  │   PostgreSQL                       │                      │
-│  │   (StudySmart DB + Oban tables)    │                      │
+│  │   (FunSheep DB + Oban tables)    │                      │
 │  └────────────────────────────────────┘                      │
 │                                                               │
 │  ┌────────────────────────────────────┐                      │
@@ -1269,16 +1269,16 @@ Subscribed event types:
 ## 12. OTP Supervision Tree
 
 ```
-StudySmart.Application
-├── StudySmart.Repo                          # Ecto repository
-├── StudySmartWeb.Endpoint                   # Phoenix HTTP/WS endpoint
-├── StudySmart.Interactor.TokenCache         # GenServer: App JWT caching
-├── StudySmart.PubSub                        # Phoenix PubSub (pg2 adapter)
+FunSheep.Application
+├── FunSheep.Repo                          # Ecto repository
+├── FunSheepWeb.Endpoint                   # Phoenix HTTP/WS endpoint
+├── FunSheep.Interactor.TokenCache         # GenServer: App JWT caching
+├── FunSheep.PubSub                        # Phoenix PubSub (pg2 adapter)
 ├── {Oban, oban_config}                      # Background job processing
-│   ├── StudySmart.Workers.OcrWorker         # OCR page processing
-│   ├── StudySmart.Workers.AgentCallWorker   # Async agent invocations
-│   └── StudySmart.Workers.ReadinessWorker   # Score recalculation
-└── StudySmartWeb.Telemetry                  # Metrics and monitoring
+│   ├── FunSheep.Workers.OcrWorker         # OCR page processing
+│   ├── FunSheep.Workers.AgentCallWorker   # Async agent invocations
+│   └── FunSheep.Workers.ReadinessWorker   # Score recalculation
+└── FunSheepWeb.Telemetry                  # Metrics and monitoring
 ```
 
 ---
@@ -1305,7 +1305,7 @@ StudySmart.Application
 
 | Concern | Mitigation |
 |---------|------------|
-| User credentials | Never touch StudySmart; handled entirely by Account Server |
+| User credentials | Never touch FunSheep; handled entirely by Account Server |
 | JWT verification | Validate via JWKS endpoint; verify `iss`, `aud`, `exp` claims |
 | Role enforcement | `RequireRole` plug checks `metadata.role` on every request; never trust client-supplied role |
 | Guardian access | `RequireGuardian` plug verifies active `student_guardians` record before parent/teacher can view student data |

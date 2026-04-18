@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.AddFolderNameToUploadedMaterials do
+defmodule FunSheep.Repo.Migrations.AddFolderNameToUploadedMaterials do
   use Ecto.Migration
 
   def change do

@@ -1,10 +1,10 @@
-# Research Notes — StudySmart
+# Research Notes — FunSheep
 
 ## Interactor Platform Service Mapping
 
 ### Services Available (from interactor-workspace)
 
-| Service | Docs | Relevance to StudySmart |
+| Service | Docs | Relevance to FunSheep |
 |---------|------|------------------------|
 | **Account Server** | `docs/i/account-server-docs/integration-guide/` | Authentication: User JWT (OAuth/OIDC) for students/parents/teachers, Admin JWT for platform admins. User `metadata.role` stores role (student/parent/teacher). Role enforcement at app layer. |
 | **AI Agents** | `docs/i/interactor-docs/integration-guide/04-ai-agents.md` | Core of the product — question extraction, content discovery, answer evaluation, study guide generation |
@@ -23,7 +23,7 @@
 
 1. **external_user_id**: Map to student ID for data isolation
 2. **Config Code Sync**: Define assistants, tools, workflows as code (recommended over API)
-3. **Tool Callbacks**: StudySmart backend exposes tool endpoints that agents can invoke (e.g., search DB, run OCR)
+3. **Tool Callbacks**: FunSheep backend exposes tool endpoints that agents can invoke (e.g., search DB, run OCR)
 4. **Callback Signature Verification**: HMAC-SHA256 on all tool callbacks
 5. **SSE for real-time**: Stream agent responses to frontend during assessment/chat
 6. **Workflow halting states**: Model "waiting for student answer" as halting states
@@ -34,7 +34,7 @@
 |---------|----------|
 | **End users (student/parent/teacher)** | Interactor User JWT via OAuth/OIDC. Role stored in Account Server user `metadata.role`. |
 | **Platform admins** | Interactor Admin JWT. Separate admin portal with its own login flow. |
-| **Role enforcement** | At StudySmart application layer, NOT at auth layer. Middleware reads `metadata.role` from JWT/user record and enforces permissions per route/action. |
+| **Role enforcement** | At FunSheep application layer, NOT at auth layer. Middleware reads `metadata.role` from JWT/user record and enforces permissions per route/action. |
 | **UKB usage** | Hobby domain knowledge (what KPOP is, BTS members, etc.) + curriculum/subject knowledge (chapter outlines, topic taxonomies). Semantic retrieval enables agents to find contextually relevant content. |
 | **UDB usage** | Agent-queryable data layer for student progress data. Dynamic tables with per-user isolation. When a parent/teacher queries progress, agents access linked students' UDB data. |
 
@@ -100,7 +100,7 @@
 
 ## Competitive Analysis
 
-| Platform | Strengths | Weaknesses | StudySmart Differentiator |
+| Platform | Strengths | Weaknesses | FunSheep Differentiator |
 |----------|-----------|------------|--------------------------|
 | **Khan Academy** | Free, video lessons, exercises | Not adaptive, generic (not per-school) | Per-school content, adaptive testing, textbook-linked |
 | **Quizlet** | Card-based review, user-generated | No adaptive testing, no content discovery | AI-powered content discovery, adaptive assessment |
@@ -153,7 +153,7 @@ Upload (PDF/Image)
 
 | Agent | Type | Tools | Purpose |
 |-------|------|-------|---------|
-| StudySmart Orchestrator | Primary | delegate_to_assistant | Routes tasks to specialized agents |
+| FunSheep Orchestrator | Primary | delegate_to_assistant | Routes tasks to specialized agents |
 | Hobby Discovery Agent | Supporting | web_search, ukb_store | Research hobbies by demographics, store in UKB |
 | Content Discovery Agent | Supporting | web_search, scrape_content | Find online questions, videos, lessons (region-aware) |
 | Question Extraction Agent | Supporting | ocr_process, extract_questions | Extract Q&A from processed OCR text |

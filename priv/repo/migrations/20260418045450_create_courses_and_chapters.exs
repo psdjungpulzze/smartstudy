@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.CreateCoursesAndChapters do
+defmodule FunSheep.Repo.Migrations.CreateCoursesAndChapters do
   use Ecto.Migration
 
   def change do

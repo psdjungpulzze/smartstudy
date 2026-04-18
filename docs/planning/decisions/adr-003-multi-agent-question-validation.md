@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-StudySmart generates derivative study questions from textbook content. The correctness of these questions and their answers is non-negotiable: a single wrong answer in a study deck erodes student trust and can actively harm learning outcomes. Students preparing for exams will memorize incorrect information if the platform serves wrong answers.
+FunSheep generates derivative study questions from textbook content. The correctness of these questions and their answers is non-negotiable: a single wrong answer in a study deck erodes student trust and can actively harm learning outcomes. Students preparing for exams will memorize incorrect information if the platform serves wrong answers.
 
 Large language models, even state-of-the-art ones, produce factual errors, ambiguous answer choices, and logically flawed distractors when generating questions in a single pass. Common failure modes include:
 
@@ -146,7 +146,7 @@ Each agent is configured as a separate Interactor AI Agent with:
 - **Approach**: Generate questions with a single agent and serve them directly without any validation.
 - **Pros**: Simplest architecture, lowest cost, fastest throughput.
 - **Cons**: In testing, approximately 10-15% of single-agent questions had some form of error (wrong answer, ambiguity, or poor distractors). For a student studying 50 questions, this means 5-8 wrong or confusing questions per session -- enough to destroy trust.
-- **Rejected because**: Unacceptable error rate for an educational product. One viral social media post about StudySmart serving wrong answers could permanently damage the brand.
+- **Rejected because**: Unacceptable error rate for an educational product. One viral social media post about FunSheep serving wrong answers could permanently damage the brand.
 
 ### 4. Two-Agent Pipeline (Creator + Validator, No Independent Solver)
 

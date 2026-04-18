@@ -131,7 +131,7 @@ Original requirements as provided by the project owner. This document preserves 
 - Teachers can add students to their class, monitor progress, and assign practice activities
 - Separate admin portal for platform management — admins authenticate via **Interactor Admin JWT** (not User JWT)
 - All end users (student/parent/teacher) authenticate via **Interactor User JWT** (OAuth/OIDC)
-- Role enforcement at StudySmart application layer, NOT at Interactor auth layer
+- Role enforcement at FunSheep application layer, NOT at Interactor auth layer
 - Use **Interactor UKB** (User Knowledge Base) for hobby domain knowledge AND curriculum/subject knowledge (semantic retrieval for AI agents)
 - Use **Interactor UDB** (User Database) as agent-queryable data layer for student progress data (dynamic tables with per-user isolation)
 

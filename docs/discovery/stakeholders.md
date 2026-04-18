@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Project Name** | StudySmart |
+| **Project Name** | FunSheep |
 | **Date** | 2026-04-17 |
 | **Author** | Peter Jung |
 

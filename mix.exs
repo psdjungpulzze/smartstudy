@@ -1,9 +1,9 @@
-defmodule StudySmart.MixProject do
+defmodule FunSheep.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :study_smart,
+      app: :fun_sheep,
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -22,7 +22,7 @@ defmodule StudySmart.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {StudySmart.Application, []},
+      mod: {FunSheep.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -92,10 +92,10 @@ defmodule StudySmart.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind study_smart", "esbuild study_smart"],
+      "assets.build": ["compile", "tailwind fun_sheep", "esbuild fun_sheep"],
       "assets.deploy": [
-        "tailwind study_smart --minify",
-        "esbuild study_smart --minify",
+        "tailwind fun_sheep --minify",
+        "esbuild fun_sheep --minify",
         "phx.digest"
       ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]

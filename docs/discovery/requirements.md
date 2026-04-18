@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Project Name** | StudySmart |
+| **Project Name** | FunSheep |
 | **Document Version** | 1.0 |
 | **Last Updated** | 2026-04-17 |
 | **Author** | Peter Jung |
@@ -14,7 +14,7 @@
 
 ## Executive Summary
 
-StudySmart is an AI-powered adaptive study platform that helps students prepare for exams. The platform creates personalized courses by discovering and organizing educational content (textbooks, online resources, videos), extracts and generates practice questions, then uses adaptive testing to identify knowledge gaps and guide students toward test readiness.
+FunSheep is an AI-powered adaptive study platform that helps students prepare for exams. The platform creates personalized courses by discovering and organizing educational content (textbooks, online resources, videos), extracts and generates practice questions, then uses adaptive testing to identify knowledge gaps and guide students toward test readiness.
 
 The application is built on the Interactor platform, leveraging its AI Agents, Workflows, Credential Management, and Authentication services as core infrastructure rather than building custom equivalents.
 
@@ -462,7 +462,7 @@ There is no accessible platform that:
 
 **Priority**: Must Have
 
-**Description**: The platform supports three end-user roles (student, parent, teacher) with role-based permissions. Platform admins are a separate tier with their own admin portal. Roles are stored in Interactor Account Server user `metadata.role` and enforced at the StudySmart application layer, not the auth layer.
+**Description**: The platform supports three end-user roles (student, parent, teacher) with role-based permissions. Platform admins are a separate tier with their own admin portal. Roles are stored in Interactor Account Server user `metadata.role` and enforced at the FunSheep application layer, not the auth layer.
 
 **User Story**: As a user, I want to select my role (student, parent, or teacher) during profile setup, so that the platform shows me features relevant to my role.
 
@@ -470,7 +470,7 @@ There is no accessible platform that:
 - [ ] Three end-user roles: student, parent, teacher
 - [ ] Role selected during profile setup (FR-001 Stage 1) and stored in Account Server user `metadata.role`
 - [ ] Role-based UI: students see study features; parents see child readiness dashboards; teachers see class management
-- [ ] Role enforcement happens at the StudySmart application layer (not at Interactor auth layer)
+- [ ] Role enforcement happens at the FunSheep application layer (not at Interactor auth layer)
 - [ ] All end users authenticate via Interactor User JWT (OAuth/OIDC)
 - [ ] Platform admins authenticate via Interactor Admin JWT (separate admin portal, see FR-019)
 - [ ] Users cannot change their own role after initial setup (admin action required)
@@ -483,7 +483,7 @@ There is no accessible platform that:
 
 **Priority**: Must Have
 
-**Description**: Parents and teachers can link to multiple student accounts to view their readiness, manage their courses, and monitor progress. Relationships are stored in StudySmart's application database.
+**Description**: Parents and teachers can link to multiple student accounts to view their readiness, manage their courses, and monitor progress. Relationships are stored in FunSheep's application database.
 
 **User Story**: As a parent, I want to link my account to my children's student accounts, so that I can monitor their test readiness and study progress.
 
@@ -494,7 +494,7 @@ There is no accessible platform that:
 - [ ] Parents can view each linked student's Test Readiness dashboard, scores, and study activity
 - [ ] Teachers can view each linked student's progress and readiness scores
 - [ ] Teachers can manage courses for their linked students (assign test scopes, recommend practice)
-- [ ] Relationship data stored in StudySmart application DB (not Interactor)
+- [ ] Relationship data stored in FunSheep application DB (not Interactor)
 - [ ] Student data isolation preserved — parents/teachers only see data for their linked students
 - [ ] Student progress data queryable by agents via Interactor UDB (User Database) with per-user isolation
 

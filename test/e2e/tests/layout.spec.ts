@@ -9,8 +9,8 @@ test.describe('Layout', () => {
     const header = page.locator('header');
     await expect(header).toBeVisible();
 
-    // Logo text "StudySmart" should be in the header
-    await expect(header.getByText('StudySmart')).toBeVisible();
+    // Logo text "Fun Sheep" should be in the header
+    await expect(header.getByText('Fun Sheep')).toBeVisible();
   });
 
   test('left sidebar is visible with navigation', async ({ page }) => {

@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-StudySmart needs authentication for three end-user roles (student, parent, teacher) plus platform administrators. Industry best practice for educational platforms uses a single identity provider with RBAC, not separate auth systems per role. Need to decide how to implement this with Interactor Account Server.
+FunSheep needs authentication for three end-user roles (student, parent, teacher) plus platform administrators. Industry best practice for educational platforms uses a single identity provider with RBAC, not separate auth systems per role. Need to decide how to implement this with Interactor Account Server.
 
 Key requirements:
 - Students study and take assessments
@@ -22,7 +22,7 @@ Key requirements:
 
 ## Decision
 
-StudySmart will use a two-tier authentication architecture built on Interactor Account Server:
+FunSheep will use a two-tier authentication architecture built on Interactor Account Server:
 
 ### Tier 1: End Users (Student, Parent, Teacher)
 
@@ -51,7 +51,7 @@ StudySmart will use a two-tier authentication architecture built on Interactor A
 
 ### Relationships
 
-- Parent/teacher to student links are stored in StudySmart's `student_guardians` table
+- Parent/teacher to student links are stored in FunSheep's `student_guardians` table
 - Links use an invite/accept flow: guardian sends request, student must accept
 - Each guardian can be linked to multiple students; each student can have multiple guardians
 - `relationship_type` distinguishes `parent` from `teacher`
@@ -70,7 +70,7 @@ StudySmart will use a two-tier authentication architecture built on Interactor A
 ### Negative
 
 - Role changes require updating Interactor user metadata via API call (not instant local update)
-- `metadata.role` is not enforced by Interactor -- StudySmart must validate on every request via Plugs
+- `metadata.role` is not enforced by Interactor -- FunSheep must validate on every request via Plugs
 - Admin JWT and User JWT are different formats -- admin portal code is separate from user portal
 - Guardian relationship validation adds a database query on parent/teacher requests to student data
 

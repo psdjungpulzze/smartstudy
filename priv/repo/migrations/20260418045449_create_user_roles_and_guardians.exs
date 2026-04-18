@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.CreateUserRolesAndGuardians do
+defmodule FunSheep.Repo.Migrations.CreateUserRolesAndGuardians do
   use Ecto.Migration
 
   def change do

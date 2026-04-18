@@ -1,4 +1,4 @@
-defmodule StudySmart.Repo.Migrations.CreateStudyGuidesAndHobbies do
+defmodule FunSheep.Repo.Migrations.CreateStudyGuidesAndHobbies do
   use Ecto.Migration
 
   def change do
