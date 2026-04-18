@@ -67,6 +67,8 @@ defmodule StudySmart.Courses do
   @doc """
   Lists courses created by or associated with a user role.
   """
+  def list_courses_for_user(nil), do: []
+
   def list_courses_for_user(user_role_id) do
     from(c in Course,
       where: c.created_by_id == ^user_role_id,

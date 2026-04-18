@@ -8,12 +8,14 @@ test.describe('Courses', () => {
 
   test('course search page renders', async ({ page }) => {
     await page.goto('/courses');
+    await page.waitForLoadState('networkidle');
     await expect(page.locator('h1')).toHaveText('Browse Courses');
     await expect(page.getByText('Search for existing courses or create a new one')).toBeVisible();
   });
 
   test('course creation form renders at /courses/new', async ({ page }) => {
     await page.goto('/courses/new');
+    await page.waitForLoadState('networkidle');
     await expect(page.locator('h1')).toHaveText('Create New Course');
     // Check the form fields are present
     await expect(page.getByLabel('Course Name')).toBeVisible();
@@ -23,6 +25,7 @@ test.describe('Courses', () => {
 
   test('can create a course with name and subject', async ({ page }) => {
     await page.goto('/courses/new');
+    await page.waitForLoadState('networkidle');
 
     // Fill in the course form
     await page.getByLabel('Course Name').fill('Test Course E2E');
@@ -32,10 +35,10 @@ test.describe('Courses', () => {
     // Submit the form
     await page.getByRole('button', { name: 'Create Course' }).click();
 
-    // Should redirect to the course detail page or show success
-    // Either we get redirected to /courses/<id> or see a flash message
+    // After successful creation, LiveView push_navigates to course detail
+    // and shows a flash message. Check the flash or the course name heading.
     await expect(
-      page.getByText('Course created successfully').or(page.locator('text=Test Course E2E')),
-    ).toBeVisible({ timeout: 10000 });
+      page.getByText('Course created successfully'),
+    ).toBeVisible({ timeout: 15000 });
   });
 });

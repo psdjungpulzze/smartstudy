@@ -8,18 +8,22 @@ test.describe('Quick Test', () => {
 
   test('quick test page loads', async ({ page }) => {
     await page.goto('/quick-test');
-    await expect(page.locator('h1').or(page.getByText(/Quick Test/i))).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    // The h1 is inside the main content area
+    const main = page.locator('main');
+    await expect(main.locator('h1')).toHaveText('Quick Test');
   });
 
   test('shows empty state or card depending on questions in DB', async ({ page }) => {
     await page.goto('/quick-test');
+    await page.waitForLoadState('networkidle');
 
-    // The page should show either a question card or an empty/no-questions state
+    const main = page.locator('main');
+    // The page should show either a "No Questions Available" message or a question card
     await expect(
-      page
-        .getByText(/no questions/i)
-        .or(page.getByText(/Question/i))
-        .or(page.getByText(/Quick Test/i)),
+      main
+        .getByText(/No Questions Available/i)
+        .or(main.getByText(/Question/i)),
     ).toBeVisible({ timeout: 10000 });
   });
 });

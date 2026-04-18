@@ -8,16 +8,20 @@ test.describe('Study Guides', () => {
 
   test('study guides list page renders', async ({ page }) => {
     await page.goto('/study-guides');
-    await expect(page.locator('h1')).toHaveText('Study Guides');
+    await page.waitForLoadState('networkidle');
+    const main = page.locator('main');
+    await expect(main.locator('h1')).toHaveText('Study Guides');
   });
 
   test('shows "Generate New" section', async ({ page }) => {
     await page.goto('/study-guides');
-    await expect(page.getByText('Generate New Guide')).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    const main = page.locator('main');
+    await expect(main.getByText('Generate New Guide')).toBeVisible();
     // Should have a schedule dropdown and generate button
-    await expect(page.locator('select[name="schedule_id"]')).toBeVisible();
+    await expect(main.locator('select[name="schedule_id"]')).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Generate/i }),
+      main.getByRole('button', { name: /Generate/i }),
     ).toBeVisible();
   });
 });

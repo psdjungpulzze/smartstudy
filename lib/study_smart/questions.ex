@@ -195,7 +195,10 @@ defmodule StudySmart.Questions do
   Lists questions for a quick test session. Prioritizes: wrong answers > unseen > previously correct.
   Optionally filters by course. Shuffles and limits results.
   """
-  def list_questions_for_quick_test(user_role_id, course_id \\ nil, limit \\ 20) do
+  def list_questions_for_quick_test(user_role_id, course_id \\ nil, limit \\ 20)
+  def list_questions_for_quick_test(nil, _course_id, _limit), do: []
+
+  def list_questions_for_quick_test(user_role_id, course_id, limit) do
     base_query =
       from(q in Question,
         left_join: qa in QuestionAttempt,

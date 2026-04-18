@@ -100,9 +100,9 @@ defmodule StudySmartWeb.Layouts do
         [
           %{label: "Dashboard", path: "/dashboard", icon: "hero-home"},
           %{label: "My Courses", path: "/courses", icon: "hero-book-open"},
-          %{label: "Assessments", path: "/assessments", icon: "hero-clipboard-document-check"},
+          %{label: "Assessments", path: "/tests", icon: "hero-clipboard-document-check"},
           %{label: "Quick Test", path: "/quick-test", icon: "hero-bolt"},
-          %{label: "Study Guides", path: "/guides", icon: "hero-document-text"}
+          %{label: "Study Guides", path: "/study-guides", icon: "hero-document-text"}
         ]
 
       "parent" ->

@@ -13,14 +13,19 @@ test.describe('Student Dashboard', () => {
   });
 
   test('dashboard shows "My Courses" section', async ({ page }) => {
-    await expect(page.getByText('My Courses')).toBeVisible();
+    // Scope to main content; there are two "My Courses" headings (h3 card + h2 section)
+    // Use h2 specifically for the section heading
+    const main = page.locator('main');
+    await expect(main.locator('h2', { hasText: 'My Courses' })).toBeVisible();
   });
 
   test('"Browse Courses" button is visible', async ({ page }) => {
-    await expect(page.getByRole('link', { name: /Browse Courses/i })).toBeVisible();
+    const main = page.locator('main');
+    await expect(main.getByRole('link', { name: /Browse Courses/i }).first()).toBeVisible();
   });
 
   test('"Create Course" button is visible', async ({ page }) => {
-    await expect(page.getByRole('link', { name: /Create Course/i })).toBeVisible();
+    const main = page.locator('main');
+    await expect(main.getByRole('link', { name: /Create Course/i })).toBeVisible();
   });
 });

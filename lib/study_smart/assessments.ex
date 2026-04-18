@@ -33,6 +33,8 @@ defmodule StudySmart.Assessments do
   Lists test schedules for a user, preloading course.
   Alias matching the task spec.
   """
+  def list_test_schedules_for_user(nil), do: []
+
   def list_test_schedules_for_user(user_role_id) do
     from(ts in TestSchedule,
       where: ts.user_role_id == ^user_role_id,

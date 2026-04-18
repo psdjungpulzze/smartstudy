@@ -21,12 +21,12 @@ test.describe('Test Schedule', () => {
 
     // The form should have a name input and date input at minimum
     const nameInput = page.getByLabel(/name/i).or(page.locator('input[name*="name"]'));
-    if (await nameInput.count() > 0) {
+    if ((await nameInput.count()) > 0) {
       await nameInput.first().fill('E2E Test Schedule');
     }
 
     const dateInput = page.getByLabel(/date/i).or(page.locator('input[type="date"]'));
-    if (await dateInput.count() > 0) {
+    if ((await dateInput.count()) > 0) {
       // Set a date 7 days in the future
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + 7);
@@ -35,7 +35,8 @@ test.describe('Test Schedule', () => {
     }
 
     // The page may require selecting a course first
-    // Verify the form is at least interactable
-    await expect(page.locator('form, [phx-submit]')).toBeVisible();
+    // Verify the phx-submit form is at least interactable (scope to main to avoid header logout form)
+    const main = page.locator('main');
+    await expect(main.locator('form[phx-submit], form[phx-change]')).toBeVisible();
   });
 });

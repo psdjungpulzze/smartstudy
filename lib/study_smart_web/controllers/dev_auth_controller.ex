@@ -1,9 +1,20 @@
 defmodule StudySmartWeb.DevAuthController do
   use StudySmartWeb, :controller
 
+  # Deterministic UUIDs for dev roles so sessions are consistent
+  @dev_uuids %{
+    "student" => "00000000-0000-4000-a000-000000000001",
+    "parent" => "00000000-0000-4000-a000-000000000002",
+    "teacher" => "00000000-0000-4000-a000-000000000003",
+    "admin" => "00000000-0000-4000-a000-000000000004"
+  }
+
   def create(conn, %{"role" => role}) do
+    dev_id = Map.get(@dev_uuids, role, Ecto.UUID.generate())
+
     user = %{
-      "id" => "dev_#{role}_#{:rand.uniform(1000)}",
+      "id" => dev_id,
+      "user_role_id" => dev_id,
       "role" => role,
       "email" => "dev_#{role}@studysmart.test",
       "display_name" => "Dev #{String.capitalize(role)}",

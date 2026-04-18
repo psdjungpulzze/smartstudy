@@ -58,7 +58,7 @@ defmodule StudySmartWeb.GuardianInviteLiveTest do
 
       html =
         view
-        |> form("form", %{email: student.email})
+        |> form("form[phx-submit=\"invite\"]", %{email: student.email})
         |> render_submit()
 
       assert html =~ "Invitation sent!"
@@ -72,7 +72,7 @@ defmodule StudySmartWeb.GuardianInviteLiveTest do
 
       html =
         view
-        |> form("form", %{email: "nobody@test.com"})
+        |> form("form[phx-submit=\"invite\"]", %{email: "nobody@test.com"})
         |> render_submit()
 
       assert html =~ "No student found with that email"

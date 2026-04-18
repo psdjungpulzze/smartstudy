@@ -12,17 +12,17 @@ test.describe('Parent Dashboard', () => {
   });
 
   test('shows empty state when no children linked', async ({ page }) => {
+    const main = page.locator('main');
     // In a fresh DB with no children linked, we expect the empty state
     await expect(
-      page
-        .getByText('No children linked yet')
-        .or(page.getByText(/children/i)),
+      main.getByText('No children linked yet'),
     ).toBeVisible();
   });
 
   test('shows "Add Child" button', async ({ page }) => {
+    const main = page.locator('main');
     await expect(
-      page.getByRole('link', { name: /Add Child/i }),
+      main.getByRole('link', { name: /Add Child/i }),
     ).toBeVisible();
   });
 });

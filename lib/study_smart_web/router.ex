@@ -22,6 +22,7 @@ defmodule StudySmartWeb.Router do
 
   # Authenticated LiveView routes
   live_session :authenticated,
+    layout: {StudySmartWeb.Layouts, :app},
     on_mount: [{StudySmartWeb.LiveHelpers, :require_auth}] do
     scope "/", StudySmartWeb do
       pipe_through [:browser, StudySmartWeb.Plugs.DevAuth]
@@ -62,6 +63,7 @@ defmodule StudySmartWeb.Router do
 
   # Admin LiveView routes
   live_session :admin,
+    layout: {StudySmartWeb.Layouts, :app},
     on_mount: [{StudySmartWeb.LiveHelpers, :require_admin}] do
     scope "/admin", StudySmartWeb do
       pipe_through [:browser, StudySmartWeb.Plugs.DevAuth]

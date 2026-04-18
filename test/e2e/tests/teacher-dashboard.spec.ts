@@ -12,16 +12,16 @@ test.describe('Teacher Dashboard', () => {
   });
 
   test('shows empty state when no students linked', async ({ page }) => {
+    const main = page.locator('main');
     await expect(
-      page
-        .getByText('No students linked yet')
-        .or(page.getByText(/students/i)),
+      main.getByText('No students linked yet'),
     ).toBeVisible();
   });
 
   test('shows "Add Students" button', async ({ page }) => {
+    const main = page.locator('main');
     await expect(
-      page.getByRole('link', { name: /Add Students/i }),
+      main.getByRole('link', { name: /Add Students/i }),
     ).toBeVisible();
   });
 });
