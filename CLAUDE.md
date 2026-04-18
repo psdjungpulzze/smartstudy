@@ -4,10 +4,10 @@ This file provides comprehensive guidance to Claude Code for AI-driven product d
 
 ## Project Overview
 
-- **Project Name**: [Your Project Name]
-- **Project Type**: [web | mobile | backend | cli]
+- **Project Name**: StudySmart
+- **Project Type**: web | mobile
 - **Technology Stack**: Elixir, Phoenix Framework, PostgreSQL, LiveView
-- **Current Phase**: [discovery | planning | implementation | testing | review | deployment]
+- **Current Phase**: implementation
 
 ## Technology Stack
 

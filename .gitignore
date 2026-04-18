@@ -1,106 +1,50 @@
-# Dependencies
-node_modules/
-vendor/
-.pnp
-.pnp.js
+# The directory Mix will write compiled artifacts to.
+/_build/
 
-# Build outputs
-dist/
-build/
-_build/
-out/
-.next/
-.nuxt/
-.output/
-*.egg-info/
-__pycache__/
-*.pyc
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
 
-# Environment files
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Where 3rd-party dependencies like ExDoc output generated docs.
+/doc/
+
+# Ignore .fetch files in case you like to edit your project deps locally.
+/.fetch
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Temporary files, for example, from tests.
+/tmp/
+
+# Ignore package tarball (built via "mix hex.build").
+study_smart-*.tar
+
+# Ignore assets that are produced by build tools.
+/priv/static/assets/
+
+# Ignore digested assets cache.
+/priv/static/cache_manifest.json
+
+# In case you use Node.js/npm, you want to ignore these.
+npm-debug.log
+/assets/node_modules/
+/test/e2e/node_modules/
+
+# Playwright
+/test/e2e/test-results/
+/test/e2e/playwright-report/
+
+# File uploads
+/priv/uploads/
+
+# Environment
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
 .env.production
-.env.*.local
 
-# IDE and editor files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.project
-.classpath
-.settings/
-
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-Thumbs.db
-ehthumbs.db
-
-# Claude Code local settings
-.claude/settings.local.json
-.claude/*.local.*
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Testing
-coverage/
-.nyc_output/
-*.lcov
-.coverage
-htmlcov/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.temp
-*.bak
-
-# Secrets and credentials
-secrets/
-credentials/
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
-
-# Database files
-*.sqlite
-*.sqlite3
-*.db
-
-# Cache
-.cache/
-.parcel-cache/
-.eslintcache
-.stylelintcache
-*.tsbuildinfo
-
-# Package manager locks (uncomment if not using)
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
-
-# Documentation build
-docs/_build/
-site/
-
-# Misc
-*.pid
-*.seed
-*.pid.lock

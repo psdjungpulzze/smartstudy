@@ -1,0 +1,15 @@
+{
+  "name": "studysmart-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E2E tests for StudySmart using Playwright",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:ui": "npx playwright test --ui",
+    "test:report": "npx playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

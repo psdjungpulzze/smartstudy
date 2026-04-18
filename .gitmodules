@@ -4,6 +4,6 @@
 [submodule "docs/i/interactor-docs"]
 	path = docs/i/interactor-docs
 	url = https://github.com/pulzze/interactor-docs.git
-[submodule "docs/i-i/interactor-workspace-docs"]
-	path = docs/i-i/interactor-workspace-docs
+[submodule "interactor-workspace"]
+	path = interactor-workspace
 	url = https://github.com/pulzze/interactor-workspace.git
