@@ -9,6 +9,22 @@ This file provides comprehensive guidance to Claude Code for AI-driven product d
 - **Technology Stack**: Elixir, Phoenix Framework, PostgreSQL, LiveView
 - **Current Phase**: implementation
 
+---
+
+## ABSOLUTE RULE: NO FAKE, MOCK, OR HARDCODED CONTENT
+
+**This is a production application. Users rely on this data. Violating this rule is a critical defect.**
+
+1. **NEVER generate hardcoded/fake/mock/fallback content** that gets shown to users as if it were real. This includes: fake questions, hardcoded chapter lists, mock search results, template textbook lists, placeholder data of any kind.
+2. **If an AI service or external API is unavailable, the operation MUST FAIL HONESTLY.** Set status to `"failed"` with a clear error message. Never silently substitute fake data.
+3. **No "fallback" data that masquerades as real content.** Fallbacks that produce user-visible fake content are worse than an error message — they erode trust and corrupt the user's course.
+4. **Every piece of content shown to users must come from a real source**: AI generation that actually ran, OCR extraction from real materials, or user input. Period.
+5. **When something fails, tell the user it failed** so they can retry or report the issue. A course with 0 questions and a "failed" status is infinitely better than a course with 150 fake questions and a "ready" status.
+
+**How to check yourself:** If you are writing code that contains hardcoded strings like question text, chapter names, textbook titles, or search results that will be inserted into the database and shown to users — STOP. That is fake content. It either comes from a real source or it doesn't exist.
+
+---
+
 ## Technology Stack
 
 ### Core Technologies
@@ -345,12 +361,18 @@ When working on planning tasks:
 When writing code:
 1. Use `/start-implementation` to setup the phase **[SETUP command]**
 2. Follow `.claude/rules/i/code-style.md` for formatting
-3. Apply TDD - write tests first when possible
-4. **ALWAYS create test scripts for every new module, function, or feature** - no code is considered complete without corresponding tests
+3. **ALWAYS write tests for every code change** - no exceptions
+4. Apply TDD - write tests first when possible
 5. Use meaningful commit messages per `.claude/rules/i/git-workflow.md`
 6. Reference `docs/setup/phases/03-implementation/ai-collaboration-guide.md` for initial setup collaboration **[SETUP]**
 7. Reference `docs/i/phases/03-implementation/` for ongoing development standards
 8. Run `mix test --cover` after implementation to verify coverage stays above 80%
+
+**Mandatory testing rule**:
+- Every new module, function, or feature **must** have a corresponding test file
+- Every bug fix **must** include a regression test
+- Every LiveView **must** have a corresponding `*_test.exs` file
+- Run `mix test --cover` after implementation and verify coverage stays above 80%
 
 **Best practices**:
 - Commit frequently with atomic changes
@@ -360,7 +382,35 @@ When writing code:
 - **Every PR/commit that adds or modifies code MUST include test scripts** — unit tests at minimum, integration/e2e tests where applicable
 - **Test coverage must remain above 80% at all times** — run `mix test --cover` to verify before considering work complete
 
-**Exit criteria**: Feature complete, tests passing, **test coverage > 80%**, code reviewed.
+**Mandatory visual verification for UI/UX changes**:
+- After implementing any UI/UX feature or change, you **MUST** visually verify it using Playwright before reporting it as complete
+- Use `scripts/i/visual-test.sh` to manage an isolated test server:
+  ```bash
+  # Start a server on a random available port (4041-4099)
+  PORT=$(./scripts/i/visual-test.sh start)
+
+  # Get the URL for a specific page
+  ./scripts/i/visual-test.sh url /dev/login
+
+  # When done testing
+  ./scripts/i/visual-test.sh stop
+  ```
+- Steps:
+  1. Run `PORT=$(./scripts/i/visual-test.sh start)` to start an isolated server
+  2. Use Playwright to navigate to `http://localhost:$PORT/dev/login` and log in as a test user
+  3. Navigate to the affected page(s) and take screenshots
+  4. Verify the UI renders correctly and the feature works as expected
+  5. If the visual test reveals issues, fix them and re-verify before marking the task as done
+  6. Run `./scripts/i/visual-test.sh stop` to clean up
+- This is **not optional** — do not claim a UI feature is implemented without visual confirmation
+- Use the `visual-tester` agent for Playwright-based screenshot verification
+
+**Parallel session isolation**:
+- Each Claude session **MUST** use its own port via `scripts/i/visual-test.sh` — never share port 4040 for Playwright tests
+- The script automatically finds an available port, so multiple sessions can run simultaneously without conflict
+- Port 4040 is reserved for the user's manual development server — do not use it for automated tests
+
+**Exit criteria**: Feature complete, tests passing, coverage >= 80%, code reviewed, **UI visually verified via Playwright if applicable**.
 
 ---
 
@@ -377,7 +427,6 @@ When testing:
 
 **Coverage requirements**:
 - **Absolute minimum overall: 80%** — code cannot be merged or deployed below this threshold
-- Target overall: 80%
 - Critical paths: 100%
 - New code: **MUST always include test scripts** — no exceptions
 - **LiveView: MUST include LiveView tests** — every LiveView module must have corresponding tests using `Phoenix.LiveViewTest` (render, events, navigation, form submissions)
@@ -617,12 +666,21 @@ mix compile --warnings-as-errors  # Must pass
 mix format --check-formatted      # Must pass
 mix credo --strict                # Should pass
 mix test                          # Must pass
+<<<<<<< HEAD
 mix test --cover                  # Must pass — coverage must be > 80%
 
 # Before commits
 mix test --cover                  # Verify coverage > 80% — MANDATORY
+=======
+mix test --cover                  # Must pass - verify >= 80% coverage
+
+# Before commits
+mix test --cover                  # Coverage must be >= 50% overall
+>>>>>>> ec8b253 (Remove all fake/mock/fallback content from course processing pipeline)
 mix sobelow                       # Security check
 ```
+
+> **HARD RULE**: If `mix test --cover` reports overall coverage below 80%, you MUST write additional tests before proceeding. No code change is considered complete without its corresponding tests.
 
 ### Phase Gate Validation
 
