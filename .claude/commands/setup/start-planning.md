@@ -27,10 +27,89 @@ Check if the following exist, create if missing:
 - `docs/planning/risks.md`
 - `docs/planning/decisions/` directory for ADRs
 
-### 4. Display Planning Checklist
+### 4. Determine Deployment Mode (MANDATORY — Ask Before Proceeding)
+
+**You MUST ask the developer this question before continuing with any other planning step.** Do not skip or assume.
+
+Present the following to the developer:
+
+```markdown
+## ⚠️ Deployment Mode Decision Required
+
+Before we design the architecture, I need to understand how this application will be deployed.
+This determines how authentication, billing, and user flows are implemented.
+
+**Option A: Interactor Mode** (`*.interactor.com`)
+- App will run on an Interactor subdomain (e.g., `app.interactor.com`)
+- Users authenticate via Interactor auth (`auth.interactor.com`)
+- Billing handled by Interactor billing UI
+- Good for: internal tools, Interactor ecosystem apps
+
+**Option B: Customer Mode** (white-label / customer's own domain)
+- App will run on the customer's own domain (e.g., `app.customer.com`)
+- Users NEVER leave the customer's domain — no redirects to `*.interactor.com`
+- App must have its own login, registration, billing (payment, history, credit cards), and user management UI
+- Interactor APIs can be used server-to-server on the backend, but the UI is fully self-contained
+- Good for: SaaS products, white-label apps, customer-facing products
+
+**Which mode is this application? (A or B)**
+```
+
+**Wait for the developer's answer.** Then:
+
+1. Record the decision as an ADR in `docs/planning/decisions/001-deployment-mode.md`
+2. Update `CLAUDE.md` Project Overview to include `- **Deployment Mode**: interactor | customer`
+3. Adjust all subsequent planning steps based on the chosen mode:
+   - **Customer Mode**: Add tasks for login UI, registration UI, password reset UI, billing UI (payment forms, history, credit card management), user profile/settings UI
+   - **Interactor Mode**: Plan Interactor auth integration, SharedAuth or JWT token exchange
+
+### 5. Interactor Capability Review (MANDATORY — Before Architecture)
+
+**Before designing the architecture**, review requirements tagged with `[INTERACTOR:*]` from Discovery and validate that Interactor services will be used wherever applicable.
+
+#### Step 1: Review Tagged Requirements
+
+Read `docs/discovery/requirements.md` and identify all requirements with Interactor overlap tags. For each:
+
+| Requirement | Interactor Service | Decision | ADR Needed? |
+|---|---|---|---|
+| FR-XXX: [title] | Account Server / Credentials / Agents / Workflows / Webhooks | Use Interactor / Custom (with reason) | Yes if Custom |
+
+#### Step 2: Read Interactor Documentation for Each Service
+
+For each Interactor service that will be used, read the full integration guide:
+- Account Server → `docs/i/account-server-docs/integration-guide.md`
+- Credentials → `docs/i/interactor-docs/integration-guide/03-credential-management.md`
+- AI Agents → `docs/i/interactor-docs/integration-guide/04-ai-agents.md`
+- Workflows → `docs/i/interactor-docs/integration-guide/05-workflows.md`
+- Webhooks → `docs/i/interactor-docs/integration-guide/06-webhooks-and-streaming.md`
+
+#### Step 3: Create ADRs for Any Custom Implementations
+
+If any requirement that overlaps with an Interactor capability will NOT use Interactor, create an ADR documenting:
+- What Interactor service was available
+- Why it cannot be used (compliance, offline, separate user base, etc.)
+- What custom approach will be used instead
+
+#### Step 4: Record in Architecture Document
+
+In `docs/planning/architecture.md`, add an **"Interactor Platform Integration"** section listing:
+- Which Interactor services will be used and for what
+- API integration approach (server-to-server vs. client-side)
+- Any custom implementations with ADR references
+
+**DO NOT proceed to architecture design until this review is complete.**
+
+### 6. Display Planning Checklist
 
 ```markdown
 ## Planning Phase Checklist
+
+### Interactor Capability Review
+- [ ] All `[INTERACTOR:*]` tagged requirements reviewed
+- [ ] Interactor docs read for each service to be used
+- [ ] ADRs created for any custom implementations that override Interactor
+- [ ] Architecture document has "Interactor Platform Integration" section
 
 ### Architecture Design
 - [ ] System architecture defined
@@ -45,11 +124,17 @@ Check if the following exist, create if missing:
 - [ ] Infrastructure requirements defined
 - [ ] Third-party services selected
 
+### Deployment Mode
+- [ ] Deployment mode decided (Interactor or Customer) — **ADR recorded**
+- [ ] Auth strategy matches deployment mode
+- [ ] Billing strategy matches deployment mode
+- [ ] No `*.interactor.com` redirects if Customer Mode
+
 ### Authentication Architecture
-- [ ] Use Interactor server for authentication (recommended)
-- [ ] Authentication flow designed (JWT tokens via Interactor)
+- [ ] **If Interactor Mode**: Use Interactor server for authentication (SharedAuth or JWT)
+- [ ] **If Customer Mode**: Design self-contained login/registration/password-reset UI
+- [ ] Authentication flow designed
 - [ ] Session management approach defined
-- [ ] Cross-domain auth requirements identified
 
 ### Task Breakdown
 - [ ] Features broken into tasks
@@ -68,7 +153,7 @@ Check if the following exist, create if missing:
 - [ ] API documentation started
 ```
 
-### 5. Initialize Phoenix Project
+### 6. Initialize Phoenix Project
 
 **IMPORTANT**: Check if a Phoenix project exists before proceeding with detailed planning.
 
@@ -153,7 +238,7 @@ mix test              # Should pass
 Now proceeding with architecture design...
 ```
 
-### 6. Invoke Architecture Planner
+### 7. Invoke Architecture Planner
 
 Suggest using the `architecture-planner` skill:
 
@@ -167,31 +252,44 @@ I can help design the architecture. Would you like me to:
 Use the architecture-planner skill for detailed guidance.
 ```
 
-### 6. Interactor Authentication Planning
+### 8. Authentication & Billing Planning (Based on Deployment Mode)
 
-**IMPORTANT**: All new applications should use Interactor server for authentication.
+**The approach here depends entirely on the Deployment Mode chosen in Step 4.**
 
-#### Why Interactor Authentication?
+#### If Interactor Mode (`*.interactor.com`):
+
+Use Interactor server for authentication:
 - Single sign-on across all Interactor ecosystem apps
-- JWT tokens with RS256 signing for secure verification
+- JWT tokens with RS256 signing via JWKS endpoint
 - No need to implement password hashing, session management, etc.
-- JWKS endpoint for external token verification
-- Built-in user management
+- Built-in user management and billing
 
-#### Authentication Architecture Decision
-Create an ADR documenting the choice to use Interactor authentication:
-- **Context**: Need user authentication for the application
-- **Decision**: Use Interactor server as the identity provider
-- **Consequences**: Users must have Interactor accounts; app depends on Interactor availability
-
-#### Planning Considerations
+**Planning Considerations:**
 1. **Same Domain/Subdomain**: Use SharedAuth (cookie-based, automatic)
 2. **Different Domain**: Use JWT token exchange via API
 3. **API-only Apps**: Use Bearer token authentication
 
+Create an ADR documenting the choice to use Interactor authentication.
+
 See: `docs/i/guides/interactor-authentication.md` for implementation details.
 
-### 7. Suggested Prompts
+#### If Customer Mode (customer's own domain):
+
+**The app MUST provide its own complete user-facing flows. Users must NEVER be redirected to `*.interactor.com`.**
+
+Plan and create tasks for:
+- **Login page** — email/password form, error handling, "forgot password" link
+- **Registration page** — sign-up form with validation
+- **Password reset** — request flow + reset flow
+- **User profile / settings** — name, email, password change
+- **Billing UI** — payment method management (credit card add/remove/update), billing history, invoices, plan selection
+- **Session management** — cookie-based sessions, remember me, logout
+
+Interactor APIs may be used **server-to-server** on the backend (e.g., for token verification, user provisioning), but all UI must be self-contained within the app.
+
+Create an ADR documenting the choice to use self-contained auth/billing with the rationale that users must not leave the customer's domain.
+
+### 9. Suggested Prompts
 
 ```
 "Design the architecture for [feature/system]"
@@ -261,6 +359,9 @@ After generating each artifact, validate it:
 ### Exit Gate Validation
 Before proceeding to `/start-implementation`:
 
+- [ ] **Interactor capability review complete** — all `[INTERACTOR:*]` requirements addressed
+- [ ] **No Interactor feature being reimplemented without an ADR** justifying the custom approach
+- [ ] **Architecture doc has "Interactor Platform Integration" section** listing services to use
 - [ ] Architecture document reviewed for Phoenix patterns
 - [ ] Database schema has proper indexes and constraints
 - [ ] API design follows REST conventions
