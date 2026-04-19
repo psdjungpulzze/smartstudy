@@ -262,15 +262,14 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       Return ONLY the JSON array.
       """
 
-      case Agents.send_message("question_extract", prompt) do
-        {:ok, %{"data" => _data}} ->
-          # Mock mode — return empty (regex already handled what it can)
-          []
-
-        {:ok, response} when is_binary(response) ->
+      case Agents.chat("question_extract", prompt, %{
+             metadata: %{course_id: course.id, source_url: source.url}
+           }) do
+        {:ok, response} ->
           parse_ai_questions(response, source)
 
-        _ ->
+        {:error, reason} ->
+          Logger.warning("[Scraper] AI extraction failed: #{inspect(reason)}")
           []
       end
     end

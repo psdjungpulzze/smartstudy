@@ -4,7 +4,7 @@ defmodule FunSheepWeb.AssessmentLive do
   import FunSheepWeb.BillingComponents
 
   alias FunSheep.{Assessments, Billing, Questions}
-  alias FunSheep.Assessments.Engine
+  alias FunSheep.Assessments.{Engine, StateCache}
 
   @impl true
   def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
@@ -12,6 +12,17 @@ defmodule FunSheepWeb.AssessmentLive do
     role = socket.assigns.current_user["role"]
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
 
+    # On reconnect, try to restore cached state instead of resetting
+    case StateCache.get(user_role_id, schedule_id) do
+      {:ok, cached} ->
+        {:ok, restore_from_cache(socket, course_id, schedule, cached)}
+
+      :miss ->
+        mount_fresh(socket, user_role_id, role, course_id, schedule)
+    end
+  end
+
+  defp mount_fresh(socket, user_role_id, role, course_id, schedule) do
     case Billing.check_test_allowance(user_role_id, role) do
       :ok ->
         Billing.record_test_usage(user_role_id, "assessment", course_id)
@@ -41,6 +52,31 @@ defmodule FunSheepWeb.AssessmentLive do
 
         {:ok, socket}
     end
+  end
+
+  defp restore_from_cache(socket, course_id, schedule, cached) do
+    question_sources = Questions.list_question_sources(course_id)
+
+    socket
+    |> assign(
+      page_title: "Assessment: #{schedule.name}",
+      course_id: course_id,
+      schedule: schedule,
+      billing_blocked: false,
+      billing_stats: nil,
+      engine_state: cached.engine_state,
+      current_question: cached.current_question,
+      current_question_stats: cached.current_question_stats,
+      selected_answer: cached.selected_answer,
+      feedback: cached.feedback,
+      question_number: cached.question_number,
+      start_time: System.monotonic_time(:second),
+      question_sources: question_sources,
+      enabled_sources: cached.enabled_sources,
+      assessment_complete: cached.assessment_complete,
+      summary: cached.summary,
+      phase: cached.phase
+    )
   end
 
   defp mount_assessment(socket, course_id, schedule) do
@@ -76,7 +112,11 @@ defmodule FunSheepWeb.AssessmentLive do
     socket =
       if socket.assigns.phase == :testing do
         state = Engine.start_assessment(schedule)
-        socket |> assign(engine_state: state) |> advance_to_next_question()
+
+        socket
+        |> assign(engine_state: state)
+        |> advance_to_next_question()
+        |> save_state_to_cache()
       else
         socket
       end
@@ -124,6 +164,7 @@ defmodule FunSheepWeb.AssessmentLive do
       socket
       |> assign(engine_state: state, phase: :testing)
       |> advance_to_next_question()
+      |> save_state_to_cache()
 
     {:noreply, socket}
   end
@@ -166,14 +207,18 @@ defmodule FunSheepWeb.AssessmentLive do
 
       new_state = Engine.record_answer(state, question.id, answer, is_correct)
 
-      {:noreply,
-       assign(socket,
-         engine_state: new_state,
-         feedback: %{
-           is_correct: is_correct,
-           correct_answer: question.answer
-         }
-       )}
+      socket =
+        socket
+        |> assign(
+          engine_state: new_state,
+          feedback: %{
+            is_correct: is_correct,
+            correct_answer: question.answer
+          }
+        )
+        |> save_state_to_cache()
+
+      {:noreply, socket}
     end
   end
 
@@ -182,6 +227,7 @@ defmodule FunSheepWeb.AssessmentLive do
       socket
       |> assign(feedback: nil, selected_answer: nil)
       |> advance_to_next_question()
+      |> save_state_to_cache()
 
     {:noreply, socket}
   end
@@ -222,6 +268,31 @@ defmodule FunSheepWeb.AssessmentLive do
           summary: summary
         )
     end
+  end
+
+  defp save_state_to_cache(socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    schedule_id = socket.assigns.schedule.id
+    assessment_complete = Map.get(socket.assigns, :assessment_complete, false)
+
+    if assessment_complete do
+      StateCache.delete(user_role_id, schedule_id)
+    else
+      StateCache.put(user_role_id, schedule_id, %{
+        engine_state: socket.assigns.engine_state,
+        current_question: socket.assigns.current_question,
+        current_question_stats: Map.get(socket.assigns, :current_question_stats),
+        selected_answer: socket.assigns.selected_answer,
+        feedback: socket.assigns.feedback,
+        question_number: socket.assigns.question_number,
+        enabled_sources: socket.assigns.enabled_sources,
+        assessment_complete: assessment_complete,
+        summary: Map.get(socket.assigns, :summary),
+        phase: socket.assigns.phase
+      })
+    end
+
+    socket
   end
 
   defp check_answer(question, answer) do

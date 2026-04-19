@@ -16,6 +16,8 @@ defmodule FunSheep.Application do
       FunSheep.Interactor.Auth,
       # Registry for AI tutor sessions (one GenServer per active student+question)
       {Registry, keys: :unique, name: FunSheep.Tutor.SessionRegistry},
+      # Cache for in-progress assessment state (survives LiveView reconnects)
+      FunSheep.Assessments.StateCache,
       # Background job processing
       {Oban, Application.fetch_env!(:fun_sheep, Oban)},
       # Start to serve requests, typically the last entry

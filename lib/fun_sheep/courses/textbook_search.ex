@@ -67,15 +67,17 @@ defmodule FunSheep.Courses.TextbookSearch do
   defp parse_openlibrary_doc(doc, subject) do
     cover_id = doc["cover_i"]
 
-    cover_url =
-      if cover_id do
-        "https://covers.openlibrary.org/b/id/#{cover_id}-M.jpg"
-      end
-
     isbn =
       case doc["isbn"] do
         [first | _] -> first
         _ -> nil
+      end
+
+    cover_url =
+      cond do
+        cover_id -> "https://covers.openlibrary.org/b/id/#{cover_id}-M.jpg"
+        isbn -> "https://covers.openlibrary.org/b/isbn/#{isbn}-M.jpg"
+        true -> nil
       end
 
     %{

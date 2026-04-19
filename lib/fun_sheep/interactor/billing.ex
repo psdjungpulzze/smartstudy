@@ -211,7 +211,7 @@ defmodule FunSheep.Interactor.Billing do
            "metrics" => [
              %{
                "metric_name" => "tests",
-               "base_limit" => 3,
+               "base_limit" => 20,
                "reset_period" => "weekly",
                "base_limit_type" => "hard"
              }

@@ -89,9 +89,132 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
   return { cancel: () => { cancelled = true; uploadState.inFlight -= queue.length; queue = [] } }
 }
 
+// ── SwipeCard Hook ──────────────────────────────────────────────────────────
+// Tinder-style swipe gesture handler for question cards.
+// Detects horizontal swipes (right = know, left = don't know) and vertical
+// swipes (up = skip). Falls back to button taps for accessibility.
+// Communicates swipe direction back to LiveView via pushEvent.
+
+const SWIPE_THRESHOLD = 80    // px to commit a horizontal swipe
+const SKIP_THRESHOLD = 120    // px to commit a vertical swipe (up)
+const ROTATION_FACTOR = 0.08  // degrees per px of horizontal drag
+
+const SwipeCardHook = {
+  mounted() {
+    this._startX = 0
+    this._startY = 0
+    this._currentX = 0
+    this._currentY = 0
+    this._dragging = false
+    this._card = this.el
+
+    // Touch events
+    this._card.addEventListener("touchstart", (e) => this._onStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true })
+    this._card.addEventListener("touchmove", (e) => {
+      if (this._dragging) e.preventDefault()
+      this._onMove(e.touches[0].clientX, e.touches[0].clientY)
+    }, { passive: false })
+    this._card.addEventListener("touchend", () => this._onEnd())
+    this._card.addEventListener("touchcancel", () => this._onEnd())
+
+    // Mouse events (for desktop testing, won't affect desktop layout)
+    this._card.addEventListener("mousedown", (e) => { this._onStart(e.clientX, e.clientY); this._mouseDown = true })
+    document.addEventListener("mousemove", this._mouseMoveHandler = (e) => {
+      if (this._mouseDown) this._onMove(e.clientX, e.clientY)
+    })
+    document.addEventListener("mouseup", this._mouseUpHandler = () => {
+      if (this._mouseDown) { this._mouseDown = false; this._onEnd() }
+    })
+  },
+
+  destroyed() {
+    document.removeEventListener("mousemove", this._mouseMoveHandler)
+    document.removeEventListener("mouseup", this._mouseUpHandler)
+  },
+
+  _onStart(x, y) {
+    this._startX = x
+    this._startY = y
+    this._currentX = 0
+    this._currentY = 0
+    this._dragging = true
+    this._card.style.transition = "none"
+  },
+
+  _onMove(x, y) {
+    if (!this._dragging) return
+    this._currentX = x - this._startX
+    this._currentY = y - this._startY
+
+    const rotate = this._currentX * ROTATION_FACTOR
+    this._card.style.transform = `translate(${this._currentX}px, ${Math.min(this._currentY, 0)}px) rotate(${rotate}deg)`
+
+    // Visual feedback overlays
+    const rightOverlay = this._card.querySelector("[data-swipe-right]")
+    const leftOverlay = this._card.querySelector("[data-swipe-left]")
+    const upOverlay = this._card.querySelector("[data-swipe-up]")
+
+    const hOpacity = Math.min(Math.abs(this._currentX) / SWIPE_THRESHOLD, 1)
+    const vOpacity = Math.min(Math.abs(Math.min(this._currentY, 0)) / SKIP_THRESHOLD, 1)
+
+    if (rightOverlay) rightOverlay.style.opacity = this._currentX > 20 ? hOpacity : 0
+    if (leftOverlay) leftOverlay.style.opacity = this._currentX < -20 ? hOpacity : 0
+    if (upOverlay) upOverlay.style.opacity = this._currentY < -20 ? vOpacity : 0
+  },
+
+  _onEnd() {
+    if (!this._dragging) return
+    this._dragging = false
+
+    const dx = this._currentX
+    const dy = this._currentY
+
+    if (dx > SWIPE_THRESHOLD) {
+      this._flyOut("right")
+    } else if (dx < -SWIPE_THRESHOLD) {
+      this._flyOut("left")
+    } else if (dy < -SKIP_THRESHOLD) {
+      this._flyOut("up")
+    } else {
+      // Spring back
+      this._card.style.transition = "transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
+      this._card.style.transform = "translate(0, 0) rotate(0deg)"
+      this._resetOverlays()
+    }
+  },
+
+  _flyOut(direction) {
+    const offscreen = window.innerWidth + 100
+    let tx, ty, rot
+    switch (direction) {
+      case "right": tx = offscreen; ty = 0; rot = 20; break
+      case "left": tx = -offscreen; ty = 0; rot = -20; break
+      case "up": tx = 0; ty = -(window.innerHeight + 100); rot = 0; break
+    }
+
+    this._card.style.transition = "transform 0.35s ease-out, opacity 0.35s ease-out"
+    this._card.style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}deg)`
+    this._card.style.opacity = "0"
+
+    // Haptic feedback
+    if (navigator.vibrate) navigator.vibrate(15)
+
+    setTimeout(() => {
+      this.pushEvent("swipe", { direction })
+    }, 200)
+  },
+
+  _resetOverlays() {
+    const overlays = this._card.querySelectorAll("[data-swipe-right], [data-swipe-left], [data-swipe-up]")
+    overlays.forEach(el => { el.style.opacity = "0" })
+  },
+}
+
 // Custom hooks
 const Hooks = {
   ...colocatedHooks,
+
+  SwipeCard: SwipeCardHook,
 
   // ── Stripe Card Setup (Payment Method Collection) ──────────────────────
   // Mounts Stripe Elements for secure credit card input. Uses a SetupIntent
@@ -255,28 +378,26 @@ const Hooks = {
               }
             })
         } else {
-          // Clipboard fallback for desktop
-          const shareText = text ? `${text}\n${url}` : url
-          navigator.clipboard.writeText(shareText)
-            .then(() => {
-              this.pushEvent("share_completed", { method: "clipboard" })
-              this._showToast("Link copied!")
-            })
-            .catch(() => {
-              // Final fallback: select + copy
-              const ta = document.createElement("textarea")
-              ta.value = shareText
-              ta.style.position = "fixed"
-              ta.style.opacity = "0"
-              document.body.appendChild(ta)
-              ta.select()
-              document.execCommand("copy")
-              document.body.removeChild(ta)
-              this.pushEvent("share_completed", { method: "clipboard" })
-              this._showToast("Link copied!")
-            })
+          // Clipboard fallback for desktop — use textarea method directly
+          // as navigator.clipboard.writeText can silently fail on Linux
+          this._copyViaTextarea(url)
+          this.pushEvent("share_completed", { method: "clipboard" })
+          this._showToast("Link copied!")
         }
       })
+    },
+
+    _copyViaTextarea(text) {
+      const ta = document.createElement("textarea")
+      ta.value = text
+      ta.style.position = "fixed"
+      ta.style.left = "-9999px"
+      ta.style.opacity = "0"
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      document.execCommand("copy")
+      document.body.removeChild(ta)
     },
 
     _showToast(message) {
@@ -286,6 +407,13 @@ const Hooks = {
       document.body.appendChild(toast)
       setTimeout(() => { toast.style.opacity = "0" }, 1500)
       setTimeout(() => { toast.remove() }, 2000)
+    }
+  },
+
+  // Scrolls element into view when it appears in the DOM.
+  ScrollIntoView: {
+    mounted() {
+      this.el.scrollIntoView({ behavior: "smooth", block: "start" })
     }
   },
 
@@ -424,7 +552,6 @@ const liveSocket = new LiveSocket("/live", Socket, {
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
-
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 

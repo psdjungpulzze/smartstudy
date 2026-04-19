@@ -50,15 +50,26 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     # so questions get properly tagged to their topic
     if mode == "from_curriculum" and is_nil(chapter_id) and course.chapters != [] do
       per_chapter = max(div(count, length(course.chapters)), 3)
+      chapter_count = length(course.chapters)
 
       total_inserted =
-        Enum.reduce(course.chapters, 0, fn ch, acc ->
+        course.chapters
+        |> Enum.with_index(1)
+        |> Enum.reduce(0, fn {ch, idx}, acc ->
+          broadcast(course_id, %{
+            sub_step: "Generating questions for chapter #{idx}/#{chapter_count}: #{String.slice(ch.name, 0, 40)}..."
+          })
+
           context = build_context(course, ch, args)
           prompt = build_prompt(mode, course, ch, context, per_chapter)
 
           case send_to_ai(prompt, course, ch) do
             {:ok, questions} ->
-              acc + insert_questions(questions, course, ch)
+              inserted = insert_questions(questions, course, ch)
+              broadcast(course_id, %{
+                sub_step: "Created #{inserted} questions for #{String.slice(ch.name, 0, 40)}"
+              })
+              acc + inserted
 
             {:error, _reason} ->
               acc
@@ -265,18 +276,11 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   end
 
   defp send_to_ai(prompt, course, _chapter) do
-    case Agents.send_message("question_gen", prompt, %{
+    case Agents.chat("question_gen", prompt, %{
            metadata: %{course_id: course.id, subject: course.subject}
          }) do
-      {:ok, %{"data" => data}} when is_binary(data) ->
-        parse_ai_response(data)
-
-      {:ok, response} when is_binary(response) ->
+      {:ok, response} ->
         parse_ai_response(response)
-
-      {:ok, _unexpected} ->
-        Logger.error("[AIGen] AI returned unexpected non-string response")
-        {:error, :unexpected_response_format}
 
       {:error, reason} ->
         Logger.error("[AIGen] AI unavailable: #{inspect(reason)}")
@@ -344,6 +348,10 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   defp normalize_difficulty("easy"), do: :easy
   defp normalize_difficulty("hard"), do: :hard
   defp normalize_difficulty(_), do: :medium
+
+  defp broadcast(course_id, data) do
+    Phoenix.PubSub.broadcast(FunSheep.PubSub, "course:#{course_id}", {:processing_update, data})
+  end
 
   defp finalize_course(course_id, new_count) do
     course = Courses.get_course!(course_id)

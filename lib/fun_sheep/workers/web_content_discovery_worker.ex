@@ -51,24 +51,38 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
     # Build search queries based on course context
     queries = build_search_queries(course)
+    total_queries = length(queries)
 
-    # Execute searches and collect results
-    all_results =
+    # Execute searches and collect results, broadcasting progress for each query
+    {all_results, _} =
       queries
-      |> Enum.flat_map(fn {query, source_type} ->
-        case search_web(query) do
-          {:ok, results} ->
-            Enum.map(results, fn r -> Map.put(r, :source_type, source_type) end)
+      |> Enum.reduce({[], 1}, fn {query, source_type}, {acc, idx} ->
+        # Broadcast which query we're running
+        short_query = String.slice(query, 0, 60)
+        broadcast(course_id, %{
+          sub_step: "Searching (#{idx}/#{total_queries}): \"#{short_query}\"..."
+        })
 
-          {:error, _} ->
-            []
-        end
+        results =
+          case search_web(query) do
+            {:ok, results} ->
+              Enum.map(results, fn r -> Map.put(r, :source_type, source_type) end)
+
+            {:error, _} ->
+              []
+          end
+
+        {acc ++ results, idx + 1}
       end)
+
+    broadcast(course_id, %{sub_step: "Deduplicating #{length(all_results)} results..."})
 
     # Deduplicate by URL
     unique_results =
       all_results
       |> Enum.uniq_by(fn r -> r[:url] || r[:title] end)
+
+    broadcast(course_id, %{sub_step: "Saving #{length(unique_results)} unique sources..."})
 
     # Store discovered sources
     stored_count =
@@ -258,40 +272,16 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     Return ONLY the JSON array.
     """
 
-    case Agents.send_message("web_search", prompt, %{
+    case Agents.chat("web_search", prompt, %{
            metadata: %{search_query: query}
          }) do
-      {:ok, %{"data" => data}} ->
-        parse_search_results(data, query)
-
-      {:ok, response} when is_binary(response) ->
+      {:ok, response} ->
         parse_search_response_text(response, query)
 
       {:error, reason} ->
         Logger.warning("[WebDiscovery] Search failed for '#{query}': #{inspect(reason)}")
         {:error, reason}
     end
-  end
-
-  defp parse_search_results(data, query) when is_list(data) do
-    results =
-      Enum.map(data, fn item ->
-        %{
-          title: item["title"],
-          url: item["url"],
-          snippet: item["snippet"],
-          publisher: item["publisher"],
-          confidence: item["confidence"] || 0.5,
-          search_query: query
-        }
-      end)
-
-    {:ok, results}
-  end
-
-  defp parse_search_results(data, _query) do
-    Logger.error("[WebDiscovery] Unexpected search result format: #{inspect(data)}")
-    {:error, :unexpected_format}
   end
 
   defp parse_search_response_text(text, query) do

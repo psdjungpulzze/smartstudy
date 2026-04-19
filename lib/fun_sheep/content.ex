@@ -41,6 +41,18 @@ defmodule FunSheep.Content do
     |> Repo.all()
   end
 
+  @doc """
+  Lists unlinked materials (no course_id) for a user.
+  These are staged uploads not yet processed.
+  """
+  def list_unlinked_materials_for_user(user_role_id) do
+    from(m in UploadedMaterial,
+      where: m.user_role_id == ^user_role_id and is_nil(m.course_id),
+      order_by: [asc: m.folder_name, asc: m.file_name]
+    )
+    |> Repo.all()
+  end
+
   def list_materials_by_batch(batch_id) do
     from(m in UploadedMaterial,
       where: m.batch_id == ^batch_id,
@@ -65,6 +77,17 @@ defmodule FunSheep.Content do
 
   def link_batch_to_course(batch_id, course_id) do
     from(m in UploadedMaterial, where: m.batch_id == ^batch_id)
+    |> Repo.update_all(set: [course_id: course_id])
+  end
+
+  @doc """
+  Links all unlinked materials for a user to a course.
+  Used when processing staged uploads.
+  """
+  def link_unlinked_materials_to_course(user_role_id, course_id) do
+    from(m in UploadedMaterial,
+      where: m.user_role_id == ^user_role_id and is_nil(m.course_id)
+    )
     |> Repo.update_all(set: [course_id: course_id])
   end
 

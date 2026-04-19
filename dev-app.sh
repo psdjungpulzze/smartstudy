@@ -148,15 +148,96 @@ docker_status() {
 }
 
 # =============================================================================
+# Interactor Workspace Services
+# =============================================================================
+
+IW_DIR="$SCRIPT_DIR/interactor-workspace"
+
+check_iw_services() {
+  if [[ ! -f "$IW_DIR/dev-services.sh" ]]; then
+    echo -e "${YELLOW}[iw-services]${NC} interactor-workspace not found, skipping"
+    return 0
+  fi
+  local status_output
+  status_output=$("$IW_DIR/dev-services.sh" status 2>/dev/null)
+  local down_services=()
+
+  # Parse "Application Services" section for "Not running" entries
+  local in_app_section=false
+  while IFS= read -r line; do
+    if echo "$line" | grep -q "Application Services"; then
+      in_app_section=true
+      continue
+    fi
+    if [[ "$in_app_section" == true ]]; then
+      # Skip stripe-webhooks and playwright-renderer (optional services)
+      if echo "$line" | grep -q "stripe-webhooks\|playwright-renderer"; then
+        continue
+      fi
+      if echo "$line" | grep -q "Not running"; then
+        local svc
+        svc=$(echo "$line" | sed 's/.*\[\(.*\)\].*/\1/')
+        down_services+=("$svc")
+      fi
+    fi
+  done <<< "$status_output"
+
+  if [[ ${#down_services[@]} -eq 0 ]]; then
+    echo -e "${GREEN}[iw-services]${NC} All required services running"
+    return 0
+  fi
+
+  echo -e "${YELLOW}[iw-services]${NC} Down services: ${down_services[*]}"
+  for svc in "${down_services[@]}"; do
+    echo -e "${BLUE}[iw-services]${NC} Starting $svc..."
+    "$IW_DIR/dev-services.sh" start "$svc" 2>&1 | tail -3
+  done
+  return 0
+}
+
+# =============================================================================
 # App Management
 # =============================================================================
 
-start_app() {
+app_is_healthy() {
+  local http_code
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$APP_PORT/" 2>/dev/null)
+  [[ "$http_code" -ge 200 && "$http_code" -lt 500 ]]
+}
+
+kill_app_process() {
+  # Kill by PID file
   if [[ -f "$PID_FILE" ]]; then
     local pid=$(cat "$PID_FILE")
     if kill -0 "$pid" 2>/dev/null; then
-      echo -e "${YELLOW}[fun-sheep]${NC} Already running (PID: $pid)"
-      return 0
+      echo -e "${YELLOW}[fun-sheep]${NC} Stopping stale process (PID: $pid)..."
+      pkill -P "$pid" 2>/dev/null
+      kill "$pid" 2>/dev/null
+      sleep 1
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    fi
+    rm -f "$PID_FILE"
+  fi
+  # Kill anything still on the port
+  lsof -ti:$APP_PORT 2>/dev/null | xargs kill -9 2>/dev/null
+  sleep 1
+}
+
+start_app() {
+  # Check if already running AND healthy
+  if [[ -f "$PID_FILE" ]]; then
+    local pid=$(cat "$PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
+      if app_is_healthy; then
+        echo -e "${GREEN}[fun-sheep]${NC} Already running and healthy (PID: $pid)"
+        return 0
+      else
+        echo -e "${YELLOW}[fun-sheep]${NC} Process alive (PID: $pid) but not responding — restarting..."
+        kill_app_process
+      fi
+    else
+      echo -e "${YELLOW}[fun-sheep]${NC} Stale PID file (process gone) — cleaning up..."
+      rm -f "$PID_FILE"
     fi
   fi
   # Also check if port is already in use
@@ -174,16 +255,48 @@ start_app() {
   (
     cd "$APP_DIR"
     load_env
-    exec elixir --sname fun_sheep --cookie fun_sheep_dev -S mix phx.server >> "$LOG_FILE" 2>&1
+    # Auto-restart loop: if the server crashes (e.g., live reloader failure),
+    # wait briefly and restart. Caps at 5 consecutive crashes to avoid infinite loops.
+    MAX_CRASHES=5
+    crash_count=0
+    while true; do
+      elixir --sname fun_sheep --cookie fun_sheep_dev -S mix phx.server >> "$LOG_FILE" 2>&1
+      exit_code=$?
+      crash_count=$((crash_count + 1))
+      if [[ $crash_count -ge $MAX_CRASHES ]]; then
+        echo "[fun-sheep] Crashed $MAX_CRASHES times in a row — giving up. Check $LOG_FILE" >> "$LOG_FILE"
+        break
+      fi
+      echo "[fun-sheep] Server exited (code $exit_code), restarting in 3s... (crash $crash_count/$MAX_CRASHES)" >> "$LOG_FILE"
+      # Clear port before restart
+      lsof -ti:$APP_PORT 2>/dev/null | xargs kill -9 2>/dev/null
+      sleep 3
+    done
   ) &
   local pid=$!
   disown $pid 2>/dev/null
   echo $pid > "$PID_FILE"
-  sleep 2
+  # Wait for HTTP health (up to 30s for compilation)
+  local max_wait=30 elapsed=0
+  echo -e "${BLUE}[fun-sheep]${NC} Waiting for HTTP health..."
+  while [[ $elapsed -lt $max_wait ]]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo -e "${RED}[fun-sheep]${NC} Process died — check $LOG_FILE"
+      rm -f "$PID_FILE"
+      return 1
+    fi
+    if app_is_healthy; then
+      echo -e "${GREEN}[fun-sheep]${NC} Started and healthy (PID: $pid) - Logs: $LOG_FILE"
+      return 0
+    fi
+    sleep 2; elapsed=$((elapsed + 2))
+  done
+  # Process is alive but not responding yet — may still be compiling
   if kill -0 "$pid" 2>/dev/null; then
-    echo -e "${GREEN}[fun-sheep]${NC} Started (PID: $pid) - Logs: $LOG_FILE"
+    echo -e "${YELLOW}[fun-sheep]${NC} Started (PID: $pid) but not yet responding — may still be compiling"
+    echo -e "${YELLOW}[fun-sheep]${NC} Check: curl http://localhost:$APP_PORT/ or ./dev-app.sh logs"
   else
-    echo -e "${RED}[fun-sheep]${NC} Failed to start - Check $LOG_FILE"
+    echo -e "${RED}[fun-sheep]${NC} Failed to start — check $LOG_FILE"
     rm -f "$PID_FILE"
     return 1
   fi
@@ -268,6 +381,8 @@ case "$COMMAND" in
     check_docker_available || exit 1
     ensure_docker_containers
     echo ""
+    check_iw_services
+    echo ""
     load_env
     echo ""
     start_app
@@ -295,6 +410,8 @@ case "$COMMAND" in
     check_docker_available || exit 1
     ensure_docker_containers
     echo ""
+    check_iw_services
+    echo ""
     load_env
     echo ""
     start_app
@@ -311,6 +428,18 @@ case "$COMMAND" in
     docker_status
     echo ""
     status_app
+    if app_is_healthy; then
+      echo -e "  ${GREEN}HTTP health: OK${NC}"
+    else
+      echo -e "  ${RED}HTTP health: NOT RESPONDING${NC}"
+    fi
+    echo ""
+    echo -e "${BLUE}Interactor Workspace Services:${NC}"
+    if [[ -f "$IW_DIR/dev-services.sh" ]]; then
+      "$IW_DIR/dev-services.sh" status 2>/dev/null | grep -E "^\[|Running|Not running"
+    else
+      echo -e "  ${YELLOW}Not available${NC}"
+    fi
     ;;
 
   logs)

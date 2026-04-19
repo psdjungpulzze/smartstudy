@@ -20,6 +20,18 @@ defmodule FunSheepWeb.CourseDetailLive do
     discovered_sources = Content.list_discovered_sources(course_id)
     question_count = Questions.count_questions_by_course(course_id)
 
+    # Materials: course-linked + unlinked (staged uploads not yet processed)
+    {materials, has_pending} =
+      if user_role_id do
+        course_mats = Content.list_materials_by_course_for_user(course_id, user_role_id)
+        unlinked = Content.list_unlinked_materials_for_user(user_role_id)
+        all = course_mats ++ unlinked
+        pending = Enum.any?(all, fn m -> m.ocr_status == :pending end)
+        {all, pending}
+      else
+        {[], false}
+      end
+
     {:ok,
      assign(socket,
        page_title: course.name,
@@ -36,7 +48,14 @@ defmodule FunSheepWeb.CourseDetailLive do
        expanded_chapters: MapSet.new(),
        # Discovered content sources
        discovered_sources: discovered_sources,
-       show_sources: false
+       show_sources: false,
+       # Real-time sub-step progress (Claude Code-style)
+       processing_sub_step: nil,
+       # Upload state — auto-show when there are pending materials
+       show_upload: has_pending,
+       upload_batch_id: Ecto.UUID.generate(),
+       uploaded_materials: materials,
+       upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0}
      )}
   end
 
@@ -69,11 +88,36 @@ defmodule FunSheepWeb.CourseDetailLive do
   end
 
   @impl true
+  def handle_info({:processing_update, %{sub_step: sub_step} = update}, socket)
+      when is_binary(sub_step) do
+    # Sub-step updates are lightweight — just update the text, don't reload everything
+    socket = assign(socket, processing_sub_step: sub_step)
+
+    # Only do a full reload if there's also a status/step change
+    socket =
+      if Map.has_key?(update, :status) or Map.has_key?(update, :step) do
+        course = Courses.get_course_with_chapters!(socket.assigns.course.id)
+        discovered_sources = Content.list_discovered_sources(course.id)
+        question_count = Questions.count_questions_by_course(course.id)
+        assign(socket, course: course, discovered_sources: discovered_sources, question_count: question_count)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
   def handle_info({:processing_update, _update}, socket) do
     course = Courses.get_course_with_chapters!(socket.assigns.course.id)
     discovered_sources = Content.list_discovered_sources(course.id)
     question_count = Questions.count_questions_by_course(course.id)
-    {:noreply, assign(socket, course: course, discovered_sources: discovered_sources, question_count: question_count)}
+    # Clear sub_step when a major step completes
+    {:noreply, assign(socket, course: course, discovered_sources: discovered_sources, question_count: question_count, processing_sub_step: nil)}
+  end
+
+  def handle_info({:material_relevance_warning, _warning}, socket) do
+    # Relevance warnings from MaterialRelevanceWorker — acknowledged but not surfaced in UI
+    {:noreply, socket}
   end
 
   def handle_info({:questions_generated, _data}, socket) do
@@ -110,6 +154,76 @@ defmodule FunSheepWeb.CourseDetailLive do
     {:ok, _course} = Courses.reprocess_course(socket.assigns.course.id)
     course = Courses.get_course_with_chapters!(socket.assigns.course.id)
     {:noreply, assign(socket, course: course) |> put_flash(:info, "Reprocessing started!")}
+  end
+
+  # ── Upload & Enrich events ─────────────────────────────────────────────
+
+  def handle_event("toggle_upload", _params, socket) do
+    {:noreply, assign(socket, show_upload: !socket.assigns.show_upload)}
+  end
+
+  def handle_event("upload_progress", params, socket) do
+    progress = %{
+      completed: params["completed"] || 0,
+      failed: params["failed"] || 0,
+      total: params["total"] || 0,
+      in_flight: params["in_flight"] || 0
+    }
+
+    # Refresh materials list when uploads complete
+    # Files are staged under batch_id (not yet linked to course), so query by batch
+    socket =
+      if progress.in_flight == 0 and progress.total > 0 do
+        batch_materials = Content.list_materials_by_batch(socket.assigns.upload_batch_id)
+
+        user_role_id = socket.assigns.current_user["user_role_id"]
+        course_materials = Content.list_materials_by_course_for_user(socket.assigns.course.id, user_role_id)
+
+        # Combine: course-linked materials + new batch materials (deduplicated)
+        existing_ids = MapSet.new(course_materials, & &1.id)
+        new_batch = Enum.reject(batch_materials, fn m -> MapSet.member?(existing_ids, m.id) end)
+        assign(socket, uploaded_materials: course_materials ++ new_batch)
+      else
+        socket
+      end
+
+    {:noreply, assign(socket, upload_progress: progress)}
+  end
+
+  def handle_event("folder_metadata", _params, socket) do
+    # Folder structure info from JS — acknowledged but not needed server-side
+    {:noreply, socket}
+  end
+
+  def handle_event("enrich_course", _params, socket) do
+    course = socket.assigns.course
+    user_role_id = socket.assigns.current_user["user_role_id"]
+
+    # Link current batch + any unlinked materials to this course
+    Content.link_batch_to_course(socket.assigns.upload_batch_id, course.id)
+    Content.link_unlinked_materials_to_course(user_role_id, course.id)
+
+    {:ok, _} = Courses.enrich_course(course.id)
+    course = Courses.get_course_with_chapters!(course.id)
+
+    {:noreply,
+     socket
+     |> assign(
+       course: course,
+       show_upload: false,
+       upload_batch_id: Ecto.UUID.generate(),
+       upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0}
+     )
+     |> put_flash(:info, "Processing uploaded materials...")}
+  end
+
+  def handle_event("delete_material", %{"id" => material_id}, socket) do
+    material = Content.get_uploaded_material!(material_id)
+    {:ok, _} = Content.delete_uploaded_material(material)
+
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    materials = Content.list_materials_by_course_for_user(socket.assigns.course.id, user_role_id)
+    {:noreply, assign(socket, uploaded_materials: materials)}
   end
 
   # ── Chapter management toggle ──────────────────────────────────────────
@@ -414,9 +528,28 @@ defmodule FunSheepWeb.CourseDetailLive do
               style={:icon}
             />
             <button
+              phx-click="toggle_upload"
+              class={[
+                "p-2.5 rounded-full border shadow-sm transition-colors touch-target",
+                if(@show_upload,
+                  do: "bg-blue-50 text-[#007AFF] border-blue-300 hover:bg-blue-100",
+                  else: "bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-700 border-gray-200"
+                )
+              ]}
+              title={if(@show_upload, do: "Hide upload panel", else: "Upload textbook pages")}
+            >
+              <.icon name="hero-arrow-up-tray" class="w-4 h-4" />
+            </button>
+            <button
               phx-click="toggle_chapters"
-              class="bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-700 p-2.5 rounded-full border border-gray-200 shadow-sm transition-colors touch-target"
-              title="Manage chapters"
+              class={[
+                "p-2.5 rounded-full border shadow-sm transition-colors touch-target",
+                if(@show_chapters,
+                  do: "bg-[#E8F8EB] text-[#3DBF55] border-[#4CD964] hover:bg-[#d6f5dc]",
+                  else: "bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-700 border-gray-200"
+                )
+              ]}
+              title={if(@show_chapters, do: "Hide chapter management", else: "Manage chapters")}
             >
               <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
             </button>
@@ -430,15 +563,30 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
+      <%!-- ═══ UPLOAD MATERIALS PANEL ═══ --%>
+      <.upload_panel
+        :if={@show_upload}
+        batch_id={@upload_batch_id}
+        user_role_id={@current_user && @current_user["user_role_id"]}
+        materials={@uploaded_materials}
+        progress={@upload_progress}
+        course={@course}
+      />
+
       <%!-- Processing Status --%>
+      <.failed_banner
+        :if={@course.processing_status == "failed"}
+        course={@course}
+      />
       <.processing_progress
         :if={
           @course.processing_status &&
-            @course.processing_status not in ["ready", "cancelled"]
+            @course.processing_status not in ["ready", "cancelled", "failed"]
         }
         course={@course}
         discovered_sources={@discovered_sources}
         question_count={@question_count}
+        sub_step={@processing_sub_step}
       />
       <.cancelled_banner :if={@course.processing_status == "cancelled"} />
       <.ready_banner
@@ -573,7 +721,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ CHAPTER MANAGEMENT (Hidden by default, toggled via gear icon) ═══ --%>
-      <div :if={@show_chapters} class="mb-6">
+      <div :if={@show_chapters} id="chapter-management" phx-hook="ScrollIntoView" class="mb-6">
         <.chapter_management
           course={@course}
           chapter_form={@chapter_form}
@@ -688,9 +836,182 @@ defmodule FunSheepWeb.CourseDetailLive do
 
   # ── Processing Status Banner Components ────────────────────────────────
 
+  # ── Upload Panel Component ──────────────────────────────────────────────
+
+  attr :batch_id, :string, required: true
+  attr :user_role_id, :string, required: true
+  attr :materials, :list, default: []
+  attr :progress, :map, required: true
+  attr :course, :map, required: true
+
+  defp upload_panel(assigns) do
+    pending_materials = Enum.filter(assigns.materials, fn m -> m.ocr_status == :pending end)
+    has_pending = pending_materials != []
+    uploading = assigns.progress.total > 0 and assigns.progress.in_flight > 0
+
+    assigns =
+      assign(assigns,
+        pending_count: length(pending_materials),
+        has_pending: has_pending,
+        uploading: uploading
+      )
+
+    ~H"""
+    <div
+      id="upload-panel"
+      phx-hook="DirectUploader"
+      data-batch-id={@batch_id}
+      data-user-role-id={@user_role_id}
+      class="bg-white rounded-2xl shadow-md p-6 mb-6"
+    >
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-semibold text-[#1C1C1E]">Upload Textbook Pages</h2>
+          <p class="text-sm text-[#8E8E93] mt-0.5">
+            Upload scanned pages or photos of your textbook to improve course content
+          </p>
+        </div>
+      </div>
+
+      <%!-- Upload buttons --%>
+      <div class="flex flex-col sm:flex-row gap-3 mb-4">
+        <button
+          id="file-picker-btn"
+          phx-hook="FilePicker"
+          class="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-[#F5F5F7] hover:bg-[#EBEBED] text-[#1C1C1E] rounded-2xl border-2 border-dashed border-[#E5E5EA] hover:border-[#007AFF] transition-colors cursor-pointer"
+        >
+          <.icon name="hero-document-plus" class="w-5 h-5 text-[#007AFF]" />
+          <span class="text-sm font-medium">Select Files</span>
+        </button>
+        <button
+          id="folder-picker-btn"
+          phx-hook="FolderPicker"
+          class="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-[#F5F5F7] hover:bg-[#EBEBED] text-[#1C1C1E] rounded-2xl border-2 border-dashed border-[#E5E5EA] hover:border-[#007AFF] transition-colors cursor-pointer"
+        >
+          <.icon name="hero-folder-plus" class="w-5 h-5 text-[#007AFF]" />
+          <span class="text-sm font-medium">Select Folder</span>
+        </button>
+      </div>
+
+      <%!-- Upload progress --%>
+      <div :if={@progress.total > 0} class="mb-4">
+        <div class="flex items-center justify-between text-sm mb-1.5">
+          <span class="text-[#8E8E93]">
+            <%= if @uploading do %>
+              Uploading {@progress.completed + @progress.in_flight}/{@progress.total} files...
+            <% else %>
+              {@progress.completed}/{@progress.total} files uploaded
+              <%= if @progress.failed > 0 do %>
+                <span class="text-[#FF3B30]">({@progress.failed} failed)</span>
+              <% end %>
+            <% end %>
+          </span>
+        </div>
+        <div class="w-full bg-[#F5F5F7] rounded-full h-2">
+          <div
+            class="bg-[#4CD964] h-2 rounded-full transition-all duration-500"
+            style={"width: #{if @progress.total > 0, do: round(@progress.completed / @progress.total * 100), else: 0}%"}
+          />
+        </div>
+      </div>
+
+      <%!-- Uploaded files list --%>
+      <div :if={@materials != []} class="mb-4">
+        <h3 class="text-sm font-medium text-[#1C1C1E] mb-2">
+          Uploaded Materials ({length(@materials)})
+        </h3>
+        <div class="max-h-48 overflow-y-auto space-y-1.5">
+          <div
+            :for={mat <- @materials}
+            class="flex items-center justify-between px-3 py-2 bg-[#F5F5F7] rounded-xl text-sm"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <.icon name={file_type_icon(mat.file_type)} class="w-4 h-4 text-[#8E8E93] shrink-0" />
+              <span class="text-[#1C1C1E] truncate">{mat.file_name}</span>
+              <span :if={mat.folder_name} class="text-[10px] text-[#8E8E93] px-1.5 py-0.5 bg-white rounded-full shrink-0">
+                {mat.folder_name}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0 ml-2">
+              <span class={[
+                "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                ocr_status_class(mat.ocr_status)
+              ]}>
+                {ocr_status_label(mat.ocr_status)}
+              </span>
+              <button
+                :if={mat.ocr_status == :pending}
+                phx-click="delete_material"
+                phx-value-id={mat.id}
+                class="text-[#8E8E93] hover:text-[#FF3B30] transition-colors"
+                title="Remove"
+              >
+                <.icon name="hero-x-mark" class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Process button --%>
+      <div :if={@has_pending && !@uploading} class="flex items-center justify-between pt-3 border-t border-[#F5F5F7]">
+        <p class="text-xs text-[#8E8E93]">
+          <span class="font-medium text-[#1C1C1E]">{@pending_count} new file(s)</span>
+          ready to process — this will update chapters, sections, and questions from your textbook
+        </p>
+        <button
+          phx-click="enrich_course"
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm whitespace-nowrap ml-3"
+        >
+          <.icon name="hero-sparkles" class="w-4 h-4 inline mr-1" /> Process Materials
+        </button>
+      </div>
+
+      <%!-- Helpful info --%>
+      <div :if={@materials == [] && @progress.total == 0} class="pt-3 border-t border-[#F5F5F7]">
+        <div class="flex items-start gap-2.5">
+          <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
+          <p class="text-xs text-[#8E8E93]">
+            <span class="font-medium text-[#1C1C1E]">Supported formats:</span>
+            PDF, JPG, PNG, DOC, DOCX, PPT, TXT.
+            Upload your textbook's table of contents and chapter pages for the best results.
+          </p>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp file_type_icon(type) when is_binary(type) do
+    cond do
+      String.contains?(type, "pdf") -> "hero-document-text"
+      String.contains?(type, "image") -> "hero-photo"
+      String.contains?(type, "word") or String.contains?(type, "doc") -> "hero-document"
+      String.contains?(type, "presentation") or String.contains?(type, "ppt") -> "hero-presentation-chart-bar"
+      true -> "hero-document"
+    end
+  end
+
+  defp file_type_icon(_), do: "hero-document"
+
+  defp ocr_status_class(:pending), do: "bg-[#F5F5F7] text-[#8E8E93]"
+  defp ocr_status_class(:processing), do: "bg-blue-50 text-[#007AFF]"
+  defp ocr_status_class(:completed), do: "bg-[#E8F8EB] text-[#4CD964]"
+  defp ocr_status_class(:failed), do: "bg-red-50 text-[#FF3B30]"
+  defp ocr_status_class(_), do: "bg-[#F5F5F7] text-[#8E8E93]"
+
+  defp ocr_status_label(:pending), do: "Pending"
+  defp ocr_status_label(:processing), do: "Processing..."
+  defp ocr_status_label(:completed), do: "Done"
+  defp ocr_status_label(:failed), do: "Failed"
+  defp ocr_status_label(_), do: "Unknown"
+
+  # ── Processing Status Banner Components ────────────────────────────────
+
   attr :course, :map, required: true
   attr :discovered_sources, :list, default: []
   attr :question_count, :integer, default: 0
+  attr :sub_step, :string, default: nil
 
   defp processing_progress(assigns) do
     meta = assigns.course.metadata || %{}
@@ -853,6 +1174,14 @@ defmodule FunSheepWeb.CourseDetailLive do
         />
       </div>
 
+      <%!-- Live sub-step detail (Claude Code-style) --%>
+      <div :if={@sub_step} class="mt-4 ml-10">
+        <div class="flex items-center gap-2 px-3 py-2 bg-[#F5F5F7] rounded-xl">
+          <div class="w-1.5 h-1.5 rounded-full bg-[#007AFF] animate-pulse shrink-0" />
+          <p class="text-xs text-[#8E8E93] font-mono truncate">{@sub_step}</p>
+        </div>
+      </div>
+
       <%!-- Helpful tip at bottom --%>
       <div class="mt-5 pt-4 border-t border-[#F5F5F7]">
         <div class="flex items-start gap-2.5">
@@ -931,6 +1260,53 @@ defmodule FunSheepWeb.CourseDetailLive do
   defp step_indicator_class(:done), do: "bg-[#4CD964]"
   defp step_indicator_class(:active), do: "bg-[#007AFF]"
   defp step_indicator_class(_), do: "bg-[#F5F5F7]"
+
+  attr :course, :map, required: true
+
+  defp failed_banner(assigns) do
+    error_message =
+      cond do
+        assigns.course.processing_step && assigns.course.processing_step != "" ->
+          assigns.course.processing_step
+
+        assigns.course.processing_error && assigns.course.processing_error != "" ->
+          assigns.course.processing_error
+
+        true ->
+          "Something went wrong while setting up your course."
+      end
+
+    assigns = assign(assigns, error_message: error_message)
+
+    ~H"""
+    <div class="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6">
+      <div class="flex items-start gap-3">
+        <div class="w-8 h-8 rounded-full bg-[#FF3B30] flex items-center justify-center shrink-0 mt-0.5">
+          <.icon name="hero-exclamation-triangle" class="w-4.5 h-4.5 text-white" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-sm font-bold text-[#FF3B30] mb-1">Setup failed</h3>
+          <p class="text-sm text-red-700 mb-4">{@error_message}</p>
+          <div class="flex items-center gap-2">
+            <button
+              phx-click="restart_processing"
+              class="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-[#4CD964] hover:bg-[#3DBF55] px-4 py-2 rounded-full shadow-sm transition-colors"
+            >
+              <.icon name="hero-arrow-path" class="w-3.5 h-3.5" /> Try Again
+            </button>
+            <button
+              phx-click="reprocess_course"
+              data-confirm="This will delete all existing data and start fresh. Continue?"
+              class="text-xs font-medium text-[#8E8E93] hover:text-[#FF3B30] px-3 py-2 rounded-full border border-[#E5E5EA] hover:border-red-200 hover:bg-red-50 transition-colors"
+            >
+              Start Over
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
 
   defp cancelled_banner(assigns) do
     ~H"""

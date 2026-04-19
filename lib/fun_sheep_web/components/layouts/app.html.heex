@@ -1,5 +1,8 @@
 <%!-- Top Navigation Bar - Test Prep Journey Style --%>
-<header class="bg-white border-b border-gray-100 h-14 sm:h-16 fixed top-0 left-0 right-0 z-50 safe-area-top">
+<header class={[
+  "bg-white border-b border-gray-100 h-14 sm:h-16 fixed top-0 left-0 right-0 z-50 safe-area-top",
+  if((@current_path || "") == "/practice", do: "hidden lg:block", else: "")
+]}>
   <div class="max-w-5xl mx-auto h-full flex items-center justify-between px-3 sm:px-4">
     <%!-- Left: Logo --%>
     <a href="/dashboard" class="flex items-center gap-2 shrink-0 touch-target">
@@ -116,12 +119,25 @@
 </header>
 
 <%!-- Main Content - Centered column with responsive padding --%>
-<main class="mt-14 sm:mt-16 pb-20 md:pb-8 min-h-screen bg-[#F5F5F7]">
-  <div class="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+<%!-- On /practice (mobile), the LiveView renders its own full-screen chrome,
+     so we only show the standard layout wrapper on desktop or non-practice pages. --%>
+<main class={[
+  "min-h-screen bg-[#F5F5F7]",
+  if((@current_path || "") == "/practice",
+    do: "mt-0 pb-0 lg:mt-16 lg:pb-8",
+    else: "mt-14 sm:mt-16 pb-20 md:pb-8"
+  )
+]}>
+  <div class={[
+    if((@current_path || "") == "/practice",
+      do: "lg:max-w-3xl lg:mx-auto lg:px-6 lg:py-6",
+      else: "max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6"
+    )
+  ]}>
     <.flash_group flash={@flash} />
 
-    <%!-- Profile completion nudge — persistent until complete --%>
-    <%= if assigns[:profile_gaps] && assigns[:profile_gaps] != [] do %>
+    <%!-- Profile completion nudge — persistent until complete (hidden on practice mobile) --%>
+    <%= if assigns[:profile_gaps] && assigns[:profile_gaps] != [] && (@current_path || "") != "/practice" do %>
       <div class="mb-4 bg-white rounded-2xl border border-amber-200 p-4 shadow-sm">
         <div class="flex items-start gap-3">
           <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
@@ -171,8 +187,11 @@
   </div>
 </main>
 
-<%!-- Bottom Tab Bar (mobile only, hidden on tablet+) --%>
-<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 z-50 safe-area-bottom">
+<%!-- Bottom Tab Bar (mobile only, hidden on tablet+ and on practice page) --%>
+<nav class={[
+  "fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 z-50 safe-area-bottom",
+  if((@current_path || "") == "/practice", do: "hidden lg:hidden", else: "md:hidden")
+]}>
   <div class="flex items-center justify-around py-1.5 px-1">
     <%= for item <- FunSheepWeb.Layouts.nav_items_for_role(@current_role) |> Enum.take(5) do %>
       <.link

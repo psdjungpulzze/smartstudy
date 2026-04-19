@@ -9,6 +9,8 @@ defmodule FunSheepWeb.TestScheduleLive do
     course = Courses.get_course!(course_id)
     schedules = list_schedules(user_role_id, course_id)
     readiness_map = build_readiness_map(user_role_id, schedules)
+    chapters = Courses.list_chapters_by_course(course_id)
+    chapter_map = Map.new(chapters, fn ch -> {ch.id, ch} end)
 
     {:ok,
      assign(socket,
@@ -17,6 +19,7 @@ defmodule FunSheepWeb.TestScheduleLive do
        course_id: course_id,
        schedules: schedules,
        readiness_map: readiness_map,
+       chapter_map: chapter_map,
        today: Date.utc_today()
      )}
   end
@@ -79,6 +82,22 @@ defmodule FunSheepWeb.TestScheduleLive do
     end
   end
 
+  defp scope_summary(schedule, chapter_map) do
+    chapter_ids = get_in(schedule.scope, ["chapter_ids"]) || []
+
+    names =
+      chapter_ids
+      |> Enum.map(fn id -> chapter_map[id] end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sort_by(& &1.position)
+      |> Enum.map(& &1.name)
+
+    case names do
+      [] -> nil
+      _ -> Enum.join(names, ", ")
+    end
+  end
+
   defp urgency_text_color(test_date) do
     days = days_remaining(test_date)
 
@@ -137,6 +156,10 @@ defmodule FunSheepWeb.TestScheduleLive do
               </p>
               <p class="text-sm text-[#8E8E93]">
                 {Calendar.strftime(schedule.test_date, "%B %d, %Y")}
+              </p>
+              <p :if={scope_summary(schedule, @chapter_map)} class="text-sm text-[#8E8E93] mt-0.5 truncate">
+                <.icon name="hero-book-open" class="w-3.5 h-3.5 inline-block mr-1 align-text-bottom" />
+                {scope_summary(schedule, @chapter_map)}
               </p>
             </div>
             <div class="flex items-center gap-4 sm:gap-6 shrink-0">

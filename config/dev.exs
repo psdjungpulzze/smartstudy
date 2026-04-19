@@ -96,7 +96,7 @@ config :swoosh, :api_client, false
 config :fun_sheep,
   interactor_mock: false,
   interactor_url: System.get_env("INTERACTOR_URL", "http://localhost:4001"),
-  interactor_core_url: System.get_env("INTERACTOR_CORE_URL", "https://core.interactor.com"),
+  interactor_core_url: System.get_env("INTERACTOR_CORE_URL", "http://localhost:4002"),
   interactor_ukb_url: "http://localhost:4005",
   interactor_udb_url: "http://localhost:4007",
   interactor_org_name: System.get_env("INTERACTOR_ORG_NAME", "studysmart"),

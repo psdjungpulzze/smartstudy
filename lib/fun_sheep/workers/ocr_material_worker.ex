@@ -59,7 +59,14 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     if new_count >= total do
       Logger.info("[OCR] All #{total} materials processed for course #{course_id}")
       mark_ocr_complete(course_id)
-      maybe_trigger_extraction(course_id)
+
+      # If we're in enrichment mode, EnrichDiscoveryWorker handles the next steps
+      course = Courses.get_course!(course_id)
+      enriching = get_in(course.metadata || %{}, ["enriching"]) == true
+
+      unless enriching do
+        maybe_trigger_extraction(course_id)
+      end
     end
 
     :ok

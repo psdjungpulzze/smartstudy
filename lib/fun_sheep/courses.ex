@@ -249,6 +249,24 @@ defmodule FunSheep.Courses do
     })
   end
 
+  @doc """
+  Enrich an existing course with newly uploaded materials.
+
+  Unlike `reprocess_course`, this keeps existing questions and only:
+  1. OCRs new pending materials
+  2. Re-discovers chapters from textbook content
+  3. Re-generates questions from combined content
+  """
+  def enrich_course(course_id) do
+    course = get_course!(course_id)
+
+    %{course_id: course_id}
+    |> FunSheep.Workers.EnrichCourseWorker.new()
+    |> Oban.insert()
+
+    {:ok, course}
+  end
+
   @doc "Atomically increment ocr_completed_count and return the new count + total."
   def increment_ocr_completed(course_id) do
     {1, [result]} =

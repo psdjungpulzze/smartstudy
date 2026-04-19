@@ -6,8 +6,8 @@ defmodule FunSheep.Billing do
   payment methods, and invoices via the Interactor Billing Server.
 
   ## Free Tier Limits
-    - 5 initial free tests (lifetime)
-    - 3 free tests per week (rolling 7-day window)
+    - 50 initial free tests (lifetime)
+    - 20 free tests per week (rolling 7-day window)
 
   ## Paid Plans
     - Monthly ($30/month) - unlimited tests
@@ -24,8 +24,8 @@ defmodule FunSheep.Billing do
   alias FunSheep.Billing.{Subscription, TestUsage}
   alias FunSheep.Interactor.Billing, as: BillingClient
 
-  @initial_free_tests 5
-  @weekly_free_tests 3
+  @initial_free_tests 50
+  @weekly_free_tests 20
 
   ## Subscription Management
 
@@ -302,8 +302,8 @@ defmodule FunSheep.Billing do
         interval: nil,
         description: "Get started with FunSheep",
         features: [
-          "5 free tests to try",
-          "3 tests per week",
+          "50 free tests to try",
+          "20 tests per week",
           "Practice mode (unlimited)",
           "Study guides"
         ]

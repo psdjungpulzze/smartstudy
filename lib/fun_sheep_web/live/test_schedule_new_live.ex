@@ -375,7 +375,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
               value={@form_test_date}
               min={Date.to_iso8601(Date.utc_today())}
               required
-              class="w-full px-4 py-3 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors"
+              class="w-full px-4 py-3 min-h-[48px] bg-[#F5F5F7] dark:bg-[#2C2C2E] text-base text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-2xl sm:rounded-full outline-none transition-colors appearance-none"
+              style="-webkit-appearance: none; -moz-appearance: none;"
             />
           </div>
 

@@ -39,6 +39,7 @@ defmodule FunSheepWeb.Router do
       pipe_through [:browser, FunSheepWeb.Plugs.DevAuth]
 
       live "/dashboard", DashboardLive, :index
+      live "/practice", QuickPracticeLive, :index
       live "/profile/setup", ProfileSetupLive, :index
       live "/parent", ParentDashboardLive, :index
       live "/teacher", TeacherDashboardLive, :index

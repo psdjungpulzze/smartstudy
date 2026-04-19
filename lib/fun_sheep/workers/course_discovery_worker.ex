@@ -14,6 +14,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Courses.{Chapter, Section}
+  alias FunSheep.Interactor.Agents
 
   require Logger
 
@@ -51,6 +52,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
       :ok
     else
       # Create chapters (and sections if discovered) in DB
+      broadcast(course_id, %{sub_step: "Creating #{length(chapters)} chapters in database..."})
       created_count = create_chapters(chapters, course_id)
 
       Courses.update_course(course, %{
@@ -72,14 +74,30 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
     subject = course.subject
     grade = course.grade
 
+    broadcast(course.id, %{sub_step: "Building curriculum analysis for #{subject} (Grade #{grade})..."})
+
     prompt = build_discovery_prompt(subject, grade, textbook_name, source_context)
 
-    case call_ai(prompt) do
-      {:ok, chapters} ->
-        chapters
+    broadcast(course.id, %{sub_step: "Asking AI to identify chapters and sections..."})
+
+    case Agents.chat("course_discovery", prompt, %{
+           metadata: %{course_id: course.id, subject: subject, grade: grade}
+         }) do
+      {:ok, response} ->
+        case parse_chapters_json(response) do
+          {:ok, chapters} ->
+            broadcast(course.id, %{sub_step: "AI returned #{length(chapters)} chapters, processing..."})
+            chapters
+
+          {:error, reason} ->
+            Logger.error("[Discovery] Failed to parse AI response for course #{course.id}: #{inspect(reason)}")
+            broadcast(course.id, %{sub_step: "AI returned invalid format, retrying..."})
+            []
+        end
 
       {:error, reason} ->
         Logger.error("[Discovery] AI discovery failed for course #{course.id}: #{inspect(reason)}")
+        broadcast(course.id, %{sub_step: "AI request failed: #{inspect(reason)}"})
         []
     end
   end
@@ -138,39 +156,6 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
     Return ONLY the JSON array, no other text. Include 8-20 chapters based on what's standard for this subject and grade level.
     """
-  end
-
-  defp call_ai(prompt) do
-    # Use Interactor AI agent if available, otherwise use a direct API call
-    interactor_url =
-      Application.get_env(:fun_sheep, :interactor_core_url, "http://localhost:4002")
-
-    body = %{
-      "messages" => [%{"role" => "user", "content" => prompt}],
-      "model" => "default",
-      "response_format" => %{"type" => "json_object"}
-    }
-
-    case Req.post("#{interactor_url}/api/v1/chat/completions",
-           json: body,
-           headers: [{"authorization", "Bearer #{get_interactor_token()}"}],
-           receive_timeout: 30_000
-         ) do
-      {:ok, %{status: 200, body: %{"choices" => [%{"message" => %{"content" => content}} | _]}}} ->
-        parse_chapters_json(content)
-
-      {:ok, %{status: status, body: resp_body}} ->
-        Logger.warning("[Discovery] Interactor API returned #{status}: #{inspect(resp_body)}")
-        {:error, {:api_error, status}}
-
-      {:error, reason} ->
-        Logger.warning("[Discovery] Interactor API call failed: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  defp get_interactor_token do
-    Application.get_env(:fun_sheep, :interactor_client_secret, "")
   end
 
   defp parse_chapters_json(content) do

@@ -322,8 +322,15 @@ defmodule FunSheepWeb.CourseNewLive do
         errors
       end
 
-    if is_nil(assigns.selected_grade) or assigns.selected_grade == "" do
-      Map.put(errors, :grade, "Grade level is required")
+    errors =
+      if is_nil(assigns.selected_grade) or assigns.selected_grade == "" do
+        Map.put(errors, :grade, "Grade level is required")
+      else
+        errors
+      end
+
+    if assigns.textbook_mode == :none do
+      Map.put(errors, :textbook, "Please select a textbook")
     else
       errors
     end
@@ -470,16 +477,16 @@ defmodule FunSheepWeb.CourseNewLive do
   defp textbook_selector(assigns) do
     ~H"""
     <div class="mt-2">
-      <label class="block text-sm font-medium text-gray-900 mb-2">Textbook (optional)</label>
+      <label class="block text-sm font-medium text-gray-900 mb-2">Textbook <span class="text-red-500">*</span></label>
 
       <%!-- Selected textbook confirmation --%>
       <div
         :if={@textbook_mode == :selected && @selected_textbook}
         class="flex items-center gap-4 p-4 border-2 border-purple-400 bg-purple-50 rounded-2xl"
       >
-        <.textbook_cover url={textbook_field(@selected_textbook, :cover_image_url)} />
+        <.textbook_cover url={textbook_field(@selected_textbook, :cover_image_url)} size="lg" />
         <div class="flex-1 min-w-0">
-          <p class="font-semibold text-gray-900 truncate">
+          <p class="font-semibold text-gray-900">
             {textbook_field(@selected_textbook, :title)}
           </p>
           <p
@@ -617,18 +624,37 @@ defmodule FunSheepWeb.CourseNewLive do
   end
 
   attr :url, :string, default: nil
+  attr :size, :string, default: "sm"
 
   defp textbook_cover(assigns) do
+    {img_class, icon_class} =
+      case assigns.size do
+        "lg" -> {"w-16 h-20 object-cover rounded-lg bg-gray-100 shrink-0", "w-8 h-8 text-gray-400"}
+        _ -> {"w-12 h-16 object-cover rounded-lg bg-gray-100 shrink-0", "w-6 h-6 text-gray-400"}
+      end
+
+    container_class =
+      case assigns.size do
+        "lg" -> "w-16 h-20 bg-gray-100 rounded-lg shrink-0"
+        _ -> "w-12 h-16 bg-gray-100 rounded-lg shrink-0"
+      end
+
+    assigns =
+      assigns
+      |> assign(:img_class, img_class)
+      |> assign(:icon_class, icon_class)
+      |> assign(:container_class, container_class)
+
     ~H"""
     <%= if @url do %>
       <img
         src={@url}
-        class="w-12 h-16 object-cover rounded-lg bg-gray-100 shrink-0"
+        class={@img_class}
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
       />
-      <div class="w-12 h-16 bg-gray-100 rounded-lg shrink-0 items-center justify-center hidden">
+      <div class={[@container_class, "items-center justify-center hidden"]}>
         <svg
-          class="w-6 h-6 text-gray-400"
+          class={@icon_class}
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -643,9 +669,9 @@ defmodule FunSheepWeb.CourseNewLive do
         </svg>
       </div>
     <% else %>
-      <div class="w-12 h-16 bg-gray-100 rounded-lg shrink-0 flex items-center justify-center">
+      <div class={[@container_class, "flex items-center justify-center"]}>
         <svg
-          class="w-6 h-6 text-gray-400"
+          class={@icon_class}
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"

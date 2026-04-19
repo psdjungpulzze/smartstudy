@@ -48,6 +48,33 @@
   "hooks": {
     "PostToolUse": [
       {
+        "matcher": "Bash(mix compile*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./scripts/ensure-server.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write(**/*.ex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./scripts/ensure-server.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write(**/*.heex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./scripts/ensure-server.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Edit(**/live/**/*.ex)",
         "hooks": [
           {
