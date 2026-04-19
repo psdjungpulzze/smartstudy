@@ -44,25 +44,37 @@ defmodule FunSheepWeb.Router do
       live "/teacher", TeacherDashboardLive, :index
       live "/guardians", GuardianInviteLive, :index
 
+      live "/subscription", SubscriptionLive, :index
+      live "/leaderboard", LeaderboardLive, :index
+
       live "/courses", CourseSearchLive, :index
       live "/courses/new", CourseNewLive, :new
       live "/courses/:id/edit", CourseNewLive, :edit
       live "/courses/:id", CourseDetailLive, :show
       live "/courses/:course_id/questions", QuestionBankLive, :index
       live "/courses/:course_id/practice", PracticeLive, :index
+      live "/courses/:course_id/quick-test", QuickTestLive, :index
+      live "/courses/:course_id/daily-shear", DailyChallengeLive, :index
+      live "/courses/:course_id/review", ReviewLive, :index
 
-      live "/quick-test", QuickTestLive, :index
+      live "/courses/:course_id/tests", TestScheduleLive, :index
+      live "/courses/:course_id/tests/new", TestScheduleNewLive, :new
+      live "/courses/:course_id/tests/:schedule_id/edit", TestScheduleNewLive, :edit
+      live "/courses/:course_id/tests/:schedule_id/assess", AssessmentLive, :show
+      live "/courses/:course_id/tests/:schedule_id/readiness", ReadinessDashboardLive, :show
+      live "/courses/:course_id/tests/:schedule_id/format", TestFormatLive, :show
+      live "/courses/:course_id/tests/:schedule_id/format-test", FormatTestLive, :show
 
-      live "/tests", TestScheduleLive, :index
-      live "/tests/new", TestScheduleNewLive, :new
-      live "/tests/:schedule_id/assess", AssessmentLive, :show
-      live "/tests/:schedule_id/readiness", ReadinessDashboardLive, :show
-      live "/tests/:schedule_id/format", TestFormatLive, :show
-      live "/tests/:schedule_id/format-test", FormatTestLive, :show
-
-      live "/study-guides", StudyGuidesListLive, :index
-      live "/study-guides/:id", StudyGuideLive, :show
+      live "/courses/:course_id/study-guides", StudyGuidesListLive, :index
+      live "/courses/:course_id/study-guides/:id", StudyGuideLive, :show
     end
+  end
+
+  # File upload endpoint (direct HTTP, not LiveView)
+  scope "/api", FunSheepWeb do
+    pipe_through [:browser, FunSheepWeb.Plugs.DevAuth]
+
+    post "/upload", UploadController, :create
   end
 
   # Export routes (file downloads, outside live_session)
@@ -82,6 +94,13 @@ defmodule FunSheepWeb.Router do
 
       live "/", AdminDashboardLive, :index
     end
+  end
+
+  # Public proof card sharing (no auth required)
+  scope "/share", FunSheepWeb do
+    pipe_through :browser
+
+    live "/progress/:token", ProofCardLive, :show
   end
 
   # Interactor webhook and tool callback routes (no auth required)

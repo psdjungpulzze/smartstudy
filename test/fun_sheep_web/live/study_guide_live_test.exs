@@ -47,48 +47,53 @@ defmodule FunSheepWeb.StudyGuideLiveTest do
   end
 
   describe "study guide page" do
-    test "renders study guide", %{conn: conn, user_role: ur, guide: guide} do
+    test "renders study guide", %{conn: conn, user_role: ur, schedule: schedule, guide: guide} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/study-guides/#{guide.id}")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{schedule.course_id}/study-guides/#{guide.id}")
 
       assert html =~ "Study Guide: Bio Final"
       assert html =~ "Test Course"
     end
 
-    test "shows sections with priority badges", %{conn: conn, user_role: ur, guide: guide} do
+    test "shows sections with priority badges", %{
+      conn: conn,
+      user_role: ur,
+      schedule: schedule,
+      guide: guide
+    } do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/study-guides/#{guide.id}")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{schedule.course_id}/study-guides/#{guide.id}")
 
       assert html =~ "Biology Basics"
       assert html =~ "Critical"
     end
 
-    test "shows aggregate score", %{conn: conn, user_role: ur, guide: guide} do
+    test "shows aggregate score", %{conn: conn, user_role: ur, schedule: schedule, guide: guide} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/study-guides/#{guide.id}")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{schedule.course_id}/study-guides/#{guide.id}")
 
-      assert html =~ "aggregate score"
+      assert html =~ "readiness"
     end
   end
 
   describe "study guides list" do
-    test "renders list page", %{conn: conn, user_role: ur} do
+    test "renders list page", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/study-guides")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.id}/study-guides")
 
       assert html =~ "Study Guides"
     end
 
-    test "shows generated guides", %{conn: conn, user_role: ur} do
+    test "shows generated guides", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/study-guides")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.id}/study-guides")
 
       assert html =~ "Study Guide: Bio Final"
     end
 
-    test "shows generate new section", %{conn: conn, user_role: ur} do
+    test "shows generate new section", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/study-guides")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.id}/study-guides")
 
       assert html =~ "Generate New Guide"
       assert html =~ "Select a test schedule"

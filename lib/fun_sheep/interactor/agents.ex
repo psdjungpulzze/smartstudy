@@ -42,4 +42,10 @@ defmodule FunSheep.Interactor.Agents do
   def list_messages(room_id) do
     Client.get("#{@base_path}/rooms/#{room_id}/messages")
   end
+
+  @doc "Closes a room, ending the conversation."
+  @spec close_room(String.t()) :: {:ok, map()} | {:error, term()}
+  def close_room(room_id) do
+    Client.post("#{@base_path}/rooms/#{room_id}/close", %{})
+  end
 end

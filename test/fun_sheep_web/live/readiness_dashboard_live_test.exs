@@ -45,7 +45,9 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
   describe "readiness dashboard" do
     test "renders with test info", %{conn: conn, user_role: ur, schedule: schedule, course: c} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/readiness")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
       assert html =~ "Biology Midterm"
       assert html =~ c.name
@@ -54,7 +56,9 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
 
     test "shows chapter breakdown", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/readiness")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
       assert html =~ "Chapter Breakdown"
       assert html =~ "Chapter 1"
@@ -62,7 +66,9 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
 
     test "shows aggregate score", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/readiness")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
       # Default score is 0%
       assert html =~ "0%"
@@ -70,7 +76,9 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
 
     test "shows action buttons", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/readiness")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
       assert html =~ "Start Assessment"
       assert html =~ "Generate Study Guide"
@@ -79,7 +87,9 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
 
     test "recalculate readiness creates score", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/tests/#{schedule.id}/readiness")
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
       render_click(view, "calculate_readiness")
 

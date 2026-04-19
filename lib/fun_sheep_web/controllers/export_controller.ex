@@ -34,7 +34,7 @@ defmodule FunSheepWeb.ExportController do
       else
         conn
         |> put_flash(:error, "No readiness data available yet")
-        |> redirect(to: ~p"/tests/#{schedule_id}/assess")
+        |> redirect(to: ~p"/courses/#{schedule.course_id}/tests/#{schedule_id}/assess")
       end
     else
       conn

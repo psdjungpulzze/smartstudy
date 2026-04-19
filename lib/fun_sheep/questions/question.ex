@@ -31,8 +31,10 @@ defmodule FunSheep.Questions.Question do
     belongs_to :chapter, FunSheep.Courses.Chapter
     belongs_to :section, FunSheep.Courses.Section
     belongs_to :school, FunSheep.Geo.School
+    belongs_to :source_material, FunSheep.Content.UploadedMaterial
 
     has_many :question_attempts, FunSheep.Questions.QuestionAttempt
+    has_one :stats, FunSheep.Questions.QuestionStats
 
     timestamps(type: :utc_datetime)
   end
@@ -54,7 +56,8 @@ defmodule FunSheep.Questions.Question do
       :course_id,
       :chapter_id,
       :section_id,
-      :school_id
+      :school_id,
+      :source_material_id
     ])
     |> validate_required([:content, :answer, :question_type, :difficulty, :course_id])
     |> foreign_key_constraint(:course_id)

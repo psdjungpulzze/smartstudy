@@ -3,72 +3,210 @@ defmodule FunSheepWeb.TestScheduleNewLive do
 
   alias FunSheep.{Assessments, Courses}
 
-  @impl true
-  def mount(_params, _session, socket) do
-    user_role_id = socket.assigns.current_user["user_role_id"]
-    courses = if user_role_id, do: Courses.list_courses_for_user(user_role_id), else: []
+  @question_types ~w(multiple_choice short_answer free_response true_false)
 
-    changeset =
-      Assessments.change_test_schedule(%Assessments.TestSchedule{}, %{})
+  @impl true
+  def mount(%{"course_id" => course_id} = params, _session, socket) do
+    course = Courses.get_course!(course_id)
+    chapters = Courses.list_chapters_by_course(course_id)
+
+    {schedule, changeset, form_name, form_date, selected_chapters, selected_sections, action} =
+      case params do
+        %{"schedule_id" => schedule_id} ->
+          schedule = Assessments.get_test_schedule!(schedule_id)
+          cs = Assessments.change_test_schedule(schedule)
+          scope = schedule.scope || %{}
+          ch_ids = MapSet.new(scope["chapter_ids"] || [])
+          sec_ids = MapSet.new(scope["section_ids"] || [])
+
+          {schedule, cs, schedule.name, Date.to_iso8601(schedule.test_date), ch_ids, sec_ids,
+           :edit}
+
+        _ ->
+          cs = Assessments.change_test_schedule(%Assessments.TestSchedule{}, %{})
+          {nil, cs, "", "", MapSet.new(), MapSet.new(), :new}
+      end
 
     {:ok,
      assign(socket,
-       page_title: "Schedule New Test",
-       courses: courses,
-       chapters: [],
-       sections: [],
-       selected_course_id: nil,
-       selected_chapter_ids: MapSet.new(),
-       selected_section_ids: MapSet.new(),
+       page_title:
+         if(action == :edit,
+           do: "Edit Test - #{course.name}",
+           else: "Schedule New Test - #{course.name}"
+         ),
+       live_action: action,
+       course: course,
+       course_id: course_id,
+       chapters: chapters,
+       selected_course_id: course_id,
+       schedule: schedule,
+       selected_chapter_ids: selected_chapters,
+       selected_section_ids: selected_sections,
+       expanded_chapter_ids: MapSet.new(),
        form: to_form(changeset),
-       form_name: "",
-       form_test_date: ""
+       form_name: form_name,
+       form_test_date: form_date,
+       # Format sections
+       format_sections: [],
+       new_section_name: "",
+       new_section_type: "multiple_choice",
+       new_section_count: 10,
+       new_section_points: 1,
+       time_limit: nil,
+       question_types: @question_types
      )}
   end
 
   @impl true
-  def handle_event("select_course", %{"course_id" => course_id}, socket) do
-    chapters =
-      if course_id != "" do
-        Courses.list_chapters_by_course(course_id)
+  def handle_event("toggle_expand", %{"chapter-id" => chapter_id}, socket) do
+    expanded = socket.assigns.expanded_chapter_ids
+
+    expanded =
+      if MapSet.member?(expanded, chapter_id) do
+        MapSet.delete(expanded, chapter_id)
       else
-        []
+        MapSet.put(expanded, chapter_id)
+      end
+
+    {:noreply, assign(socket, expanded_chapter_ids: expanded)}
+  end
+
+  def handle_event("toggle_chapter", %{"chapter-id" => chapter_id}, socket) do
+    selected_chapters = socket.assigns.selected_chapter_ids
+    selected_sections = socket.assigns.selected_section_ids
+
+    chapter = Enum.find(socket.assigns.chapters, &(&1.id == chapter_id))
+    section_ids = if chapter, do: Enum.map(chapter.sections, & &1.id), else: []
+
+    if MapSet.member?(selected_chapters, chapter_id) do
+      # Deselect chapter and all its sections
+      {:noreply,
+       assign(socket,
+         selected_chapter_ids: MapSet.delete(selected_chapters, chapter_id),
+         selected_section_ids: Enum.reduce(section_ids, selected_sections, &MapSet.delete(&2, &1))
+       )}
+    else
+      # Select chapter and all its sections
+      {:noreply,
+       assign(socket,
+         selected_chapter_ids: MapSet.put(selected_chapters, chapter_id),
+         selected_section_ids: Enum.reduce(section_ids, selected_sections, &MapSet.put(&2, &1))
+       )}
+    end
+  end
+
+  def handle_event(
+        "toggle_section",
+        %{"section-id" => section_id, "chapter-id" => chapter_id},
+        socket
+      ) do
+    selected_sections = socket.assigns.selected_section_ids
+    selected_chapters = socket.assigns.selected_chapter_ids
+
+    chapter = Enum.find(socket.assigns.chapters, &(&1.id == chapter_id))
+
+    selected_sections =
+      if MapSet.member?(selected_sections, section_id) do
+        MapSet.delete(selected_sections, section_id)
+      else
+        MapSet.put(selected_sections, section_id)
+      end
+
+    # Update chapter selection based on section state
+    selected_chapters =
+      if chapter do
+        all_section_ids = MapSet.new(Enum.map(chapter.sections, & &1.id))
+        selected_in_chapter = MapSet.intersection(selected_sections, all_section_ids)
+
+        cond do
+          MapSet.size(selected_in_chapter) == 0 ->
+            MapSet.delete(selected_chapters, chapter_id)
+
+          true ->
+            MapSet.put(selected_chapters, chapter_id)
+        end
+      else
+        selected_chapters
       end
 
     {:noreply,
      assign(socket,
-       selected_course_id: course_id,
-       chapters: chapters,
-       sections: [],
+       selected_section_ids: selected_sections,
+       selected_chapter_ids: selected_chapters
+     )}
+  end
+
+  def handle_event("select_all_chapters", _params, socket) do
+    all_chapter_ids = MapSet.new(Enum.map(socket.assigns.chapters, & &1.id))
+
+    all_section_ids =
+      socket.assigns.chapters
+      |> Enum.flat_map(& &1.sections)
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    {:noreply,
+     assign(socket,
+       selected_chapter_ids: all_chapter_ids,
+       selected_section_ids: all_section_ids
+     )}
+  end
+
+  def handle_event("deselect_all_chapters", _params, socket) do
+    {:noreply,
+     assign(socket,
        selected_chapter_ids: MapSet.new(),
        selected_section_ids: MapSet.new()
      )}
   end
 
-  def handle_event("toggle_chapter", %{"chapter-id" => chapter_id}, socket) do
-    selected = socket.assigns.selected_chapter_ids
-
-    selected =
-      if MapSet.member?(selected, chapter_id) do
-        MapSet.delete(selected, chapter_id)
-      else
-        MapSet.put(selected, chapter_id)
-      end
-
-    {:noreply, assign(socket, selected_chapter_ids: selected)}
-  end
-
-  def handle_event("select_all_chapters", _params, socket) do
-    all_ids = MapSet.new(Enum.map(socket.assigns.chapters, & &1.id))
-    {:noreply, assign(socket, selected_chapter_ids: all_ids)}
-  end
-
-  def handle_event("deselect_all_chapters", _params, socket) do
-    {:noreply, assign(socket, selected_chapter_ids: MapSet.new())}
-  end
-
   def handle_event("update_form", %{"name" => name, "test_date" => test_date}, socket) do
     {:noreply, assign(socket, form_name: name, form_test_date: test_date)}
+  end
+
+  def handle_event("update_section_form", params, socket) do
+    {:noreply,
+     assign(socket,
+       new_section_name: params["name"] || "",
+       new_section_type: params["question_type"] || "multiple_choice",
+       new_section_count: parse_int(params["count"], 10),
+       new_section_points: parse_int(params["points_per_question"], 1)
+     )}
+  end
+
+  def handle_event("update_time_limit", %{"time_limit" => time_limit}, socket) do
+    {:noreply, assign(socket, time_limit: parse_int_or_nil(time_limit))}
+  end
+
+  def handle_event("add_section", _params, socket) do
+    name = socket.assigns.new_section_name
+
+    if name == "" do
+      {:noreply, put_flash(socket, :error, "Section name is required")}
+    else
+      new_section = %{
+        "name" => name,
+        "question_type" => socket.assigns.new_section_type,
+        "count" => socket.assigns.new_section_count,
+        "points_per_question" => socket.assigns.new_section_points,
+        "chapter_ids" => []
+      }
+
+      {:noreply,
+       assign(socket,
+         format_sections: socket.assigns.format_sections ++ [new_section],
+         new_section_name: "",
+         new_section_type: "multiple_choice",
+         new_section_count: 10,
+         new_section_points: 1
+       )}
+    end
+  end
+
+  def handle_event("remove_section", %{"index" => index_str}, socket) do
+    index = String.to_integer(index_str)
+    sections = List.delete_at(socket.assigns.format_sections, index)
+    {:noreply, assign(socket, format_sections: sections)}
   end
 
   def handle_event("save", %{"name" => name, "test_date" => test_date}, socket) do
@@ -87,16 +225,113 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       course_id: course_id
     }
 
-    case Assessments.create_test_schedule(attrs) do
-      {:ok, _schedule} ->
+    result =
+      if socket.assigns.live_action == :edit && socket.assigns.schedule do
+        Assessments.update_test_schedule(socket.assigns.schedule, attrs)
+      else
+        Assessments.create_test_schedule(attrs)
+      end
+
+    case result do
+      {:ok, schedule} ->
+        # Create format template if sections were defined (only on new)
+        if socket.assigns.live_action == :new && socket.assigns.format_sections != [] do
+          structure = %{
+            "sections" => socket.assigns.format_sections,
+            "time_limit_minutes" => socket.assigns.time_limit
+          }
+
+          case Assessments.create_test_format_template(%{
+                 name: "#{name} Format",
+                 structure: structure,
+                 course_id: course_id,
+                 created_by_id: user_role_id
+               }) do
+            {:ok, template} ->
+              Assessments.update_test_schedule(schedule, %{format_template_id: template.id})
+
+            _ ->
+              :ok
+          end
+        end
+
+        flash_msg =
+          if socket.assigns.live_action == :edit,
+            do: "Test updated successfully!",
+            else: "Test scheduled successfully!"
+
         {:noreply,
          socket
-         |> put_flash(:info, "Test scheduled successfully!")
-         |> push_navigate(to: ~p"/tests")}
+         |> put_flash(:info, flash_msg)
+         |> push_navigate(to: ~p"/courses/#{socket.assigns.course_id}/tests")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end
+  end
+
+  defp parse_int(nil, default), do: default
+  defp parse_int("", default), do: default
+
+  defp parse_int(val, default) when is_binary(val) do
+    case Integer.parse(val) do
+      {n, _} -> n
+      :error -> default
+    end
+  end
+
+  defp parse_int(val, _default) when is_integer(val), do: val
+  defp parse_int(_, default), do: default
+
+  defp parse_int_or_nil(nil), do: nil
+  defp parse_int_or_nil(""), do: nil
+
+  defp parse_int_or_nil(val) when is_binary(val) do
+    case Integer.parse(val) do
+      {n, _} -> n
+      :error -> nil
+    end
+  end
+
+  defp parse_int_or_nil(val) when is_integer(val), do: val
+  defp parse_int_or_nil(_), do: nil
+
+  defp format_question_type(type) do
+    type
+    |> String.replace("_", " ")
+    |> String.split(" ")
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
+  end
+
+  defp chapter_selection_state(chapter, selected_section_ids) do
+    section_ids = MapSet.new(Enum.map(chapter.sections, & &1.id))
+    selected_in_chapter = MapSet.intersection(selected_section_ids, section_ids)
+    total = MapSet.size(section_ids)
+    selected = MapSet.size(selected_in_chapter)
+
+    cond do
+      total == 0 -> :no_sections
+      selected == total -> :all
+      selected > 0 -> :partial
+      true -> :none
+    end
+  end
+
+  defp count_selected_items(chapters, selected_chapter_ids, selected_section_ids) do
+    chapters_without_sections = Enum.filter(chapters, &(&1.sections == []))
+
+    selected_no_section_chapters =
+      Enum.count(chapters_without_sections, &MapSet.member?(selected_chapter_ids, &1.id))
+
+    selected_sections = MapSet.size(selected_section_ids)
+
+    total_items =
+      Enum.reduce(chapters, 0, fn ch, acc ->
+        if ch.sections == [], do: acc + 1, else: acc + length(ch.sections)
+      end)
+
+    {selected_no_section_chapters + selected_sections, total_items}
   end
 
   @impl true
@@ -104,10 +339,18 @@ defmodule FunSheepWeb.TestScheduleNewLive do
     ~H"""
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center gap-4 mb-8">
-        <.link navigate={~p"/tests"} class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors">
+        <.link
+          navigate={~p"/courses/#{@course_id}/tests"}
+          class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+        >
           <.icon name="hero-arrow-left" class="w-6 h-6" />
         </.link>
-        <h1 class="text-3xl font-bold text-[#1C1C1E]">Schedule New Test</h1>
+        <div>
+          <h1 class="text-3xl font-bold text-[#1C1C1E]">
+            {if @live_action == :edit, do: "Edit Test", else: "Schedule New Test"}
+          </h1>
+          <p class="text-sm text-[#8E8E93]">{@course.name}</p>
+        </div>
       </div>
 
       <div class="bg-white rounded-2xl shadow-md p-8">
@@ -120,26 +363,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
               value={@form_name}
               placeholder="e.g., Midterm Exam, Chapter 5 Quiz"
               required
-              class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
+              class="w-full px-4 py-3 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors"
             />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-[#1C1C1E] mb-2">Course</label>
-            <select
-              name="course_id"
-              phx-change="select_course"
-              class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
-            >
-              <option value="">Select a course...</option>
-              <option
-                :for={course <- @courses}
-                value={course.id}
-                selected={course.id == @selected_course_id}
-              >
-                {course.name}
-              </option>
-            </select>
           </div>
 
           <div>
@@ -150,14 +375,14 @@ defmodule FunSheepWeb.TestScheduleNewLive do
               value={@form_test_date}
               min={Date.to_iso8601(Date.utc_today())}
               required
-              class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
+              class="w-full px-4 py-3 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors"
             />
           </div>
 
           <div :if={@chapters != []}>
             <div class="flex items-center justify-between mb-2">
               <label class="block text-sm font-medium text-[#1C1C1E]">
-                Test Scope (Select Chapters)
+                Test Scope
               </label>
               <div class="flex gap-2">
                 <button
@@ -177,29 +402,81 @@ defmodule FunSheepWeb.TestScheduleNewLive do
                 </button>
               </div>
             </div>
-            <div class="space-y-2 max-h-64 overflow-y-auto bg-[#F5F5F7] rounded-xl p-4">
-              <label
-                :for={chapter <- @chapters}
-                class="flex items-center gap-3 p-2 rounded-lg hover:bg-white cursor-pointer transition-colors"
-              >
-                <input
-                  type="checkbox"
-                  checked={MapSet.member?(@selected_chapter_ids, chapter.id)}
-                  phx-click="toggle_chapter"
-                  phx-value-chapter-id={chapter.id}
-                  class="w-5 h-5 rounded accent-[#4CD964]"
-                />
-                <span class="text-[#1C1C1E]">{chapter.name}</span>
-              </label>
+            <div class="space-y-1 max-h-96 overflow-y-auto bg-[#F5F5F7] rounded-xl p-4">
+              <%= for chapter <- @chapters do %>
+                <% state = chapter_selection_state(chapter, @selected_section_ids) %>
+                <% has_sections = chapter.sections != [] %>
+                <% expanded = MapSet.member?(@expanded_chapter_ids, chapter.id) %>
+
+                <div class="rounded-lg">
+                  <%!-- Chapter/Unit row --%>
+                  <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white transition-colors">
+                    <%= if has_sections do %>
+                      <button
+                        type="button"
+                        phx-click="toggle_expand"
+                        phx-value-chapter-id={chapter.id}
+                        class="text-[#8E8E93] hover:text-[#1C1C1E] p-0.5 transition-colors"
+                      >
+                        <.icon
+                          name={if expanded, do: "hero-chevron-down", else: "hero-chevron-right"}
+                          class="w-4 h-4"
+                        />
+                      </button>
+                    <% else %>
+                      <span class="w-5" />
+                    <% end %>
+
+                    <label class="flex items-center gap-3 flex-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={MapSet.member?(@selected_chapter_ids, chapter.id)}
+                        phx-click="toggle_chapter"
+                        phx-value-chapter-id={chapter.id}
+                        class={"w-5 h-5 rounded accent-[#4CD964] #{if state == :partial, do: "opacity-60"}"}
+                      />
+                      <span class="text-[#1C1C1E] font-medium text-sm">{chapter.name}</span>
+                      <span :if={has_sections} class="text-xs text-[#8E8E93] ml-auto">
+                        {MapSet.size(
+                          MapSet.intersection(
+                            @selected_section_ids,
+                            MapSet.new(Enum.map(chapter.sections, & &1.id))
+                          )
+                        )} / {length(chapter.sections)}
+                      </span>
+                    </label>
+                  </div>
+
+                  <%!-- Sections (children) --%>
+                  <div :if={has_sections && expanded} class="ml-10 space-y-0.5 pb-1">
+                    <label
+                      :for={section <- chapter.sections}
+                      class="flex items-center gap-3 p-1.5 pl-2 rounded-lg hover:bg-white cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={MapSet.member?(@selected_section_ids, section.id)}
+                        phx-click="toggle_section"
+                        phx-value-section-id={section.id}
+                        phx-value-chapter-id={chapter.id}
+                        class="w-4 h-4 rounded accent-[#4CD964]"
+                      />
+                      <span class="text-[#1C1C1E] text-sm">{section.name}</span>
+                    </label>
+                  </div>
+                </div>
+              <% end %>
             </div>
+            <% {selected, total} =
+              count_selected_items(@chapters, @selected_chapter_ids, @selected_section_ids) %>
             <p class="text-xs text-[#8E8E93] mt-1">
-              {MapSet.size(@selected_chapter_ids)} of {length(@chapters)} chapters selected
+              {selected} of {total} items selected
             </p>
           </div>
 
           <div class="flex items-center justify-end gap-4 pt-4">
             <.link
-              navigate={~p"/tests"}
+              navigate={~p"/courses/#{@course_id}/tests"}
               class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
             >
               Cancel
@@ -208,10 +485,117 @@ defmodule FunSheepWeb.TestScheduleNewLive do
               type="submit"
               class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
             >
-              Schedule Test
+              {if @live_action == :edit, do: "Save Changes", else: "Schedule Test"}
             </button>
           </div>
         </form>
+      </div>
+
+      <%!-- Test Format (Optional) --%>
+      <div class="bg-white rounded-2xl shadow-md p-8 mt-6">
+        <h2 class="text-lg font-semibold text-[#1C1C1E] mb-1">Test Format</h2>
+        <p class="text-sm text-[#8E8E93] mb-4">Define how the test is structured (optional)</p>
+
+        <%!-- Existing sections --%>
+        <div :if={@format_sections != []} class="space-y-2 mb-4">
+          <div
+            :for={{section, index} <- Enum.with_index(@format_sections)}
+            class="flex items-center justify-between p-3 bg-[#F5F5F7] rounded-xl"
+          >
+            <div>
+              <p class="font-medium text-[#1C1C1E] text-sm">{section["name"]}</p>
+              <p class="text-xs text-[#8E8E93]">
+                {format_question_type(section["question_type"])} · {section["count"]} questions · {section[
+                  "points_per_question"
+                ]} pts each
+              </p>
+            </div>
+            <button
+              phx-click="remove_section"
+              phx-value-index={index}
+              class="text-[#FF3B30] hover:text-red-700 p-1.5 rounded-lg transition-colors"
+            >
+              <.icon name="hero-trash" class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <%!-- Add section form --%>
+        <form phx-change="update_section_form" phx-submit="add_section" class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-[#8E8E93] mb-1">Section Name</label>
+              <input
+                type="text"
+                name="name"
+                value={@new_section_name}
+                placeholder="e.g., Multiple Choice"
+                class="w-full px-4 py-2.5 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors text-sm"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-[#8E8E93] mb-1">Question Type</label>
+              <select
+                name="question_type"
+                class="w-full px-4 py-2.5 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors text-sm"
+              >
+                <option
+                  :for={qt <- @question_types}
+                  value={qt}
+                  selected={qt == @new_section_type}
+                >
+                  {format_question_type(qt)}
+                </option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-[#8E8E93] mb-1"># Questions</label>
+              <input
+                type="number"
+                name="count"
+                value={@new_section_count}
+                min="1"
+                class="w-full px-4 py-2.5 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors text-sm"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-[#8E8E93] mb-1">Points Each</label>
+              <input
+                type="number"
+                name="points_per_question"
+                value={@new_section_points}
+                min="1"
+                class="w-full px-4 py-2.5 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors text-sm"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            class="text-sm font-medium text-[#4CD964] hover:text-[#3DBF55] transition-colors"
+          >
+            + Add Section
+          </button>
+        </form>
+
+        <%!-- Time Limit --%>
+        <div class="mt-4 pt-4 border-t border-[#F5F5F7]">
+          <form phx-change="update_time_limit">
+            <div class="flex items-center gap-3">
+              <label class="text-sm font-medium text-[#1C1C1E]">Time Limit</label>
+              <input
+                type="number"
+                name="time_limit"
+                value={@time_limit}
+                placeholder="No limit"
+                min="1"
+                class="w-24 px-3 py-2 bg-[#F5F5F7] dark:bg-[#2C2C2E] text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors text-sm"
+              />
+              <span class="text-sm text-[#8E8E93]">minutes</span>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
     """

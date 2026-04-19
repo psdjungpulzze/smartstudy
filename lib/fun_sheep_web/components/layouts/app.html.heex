@@ -1,21 +1,23 @@
-<%!-- Top Navigation Bar - Duolingo-style --%>
-<header class="bg-white border-b border-gray-100 h-16 fixed top-0 left-0 right-0 z-50">
-  <div class="max-w-5xl mx-auto h-full flex items-center justify-between px-4">
+<%!-- Top Navigation Bar - Test Prep Journey Style --%>
+<header class="bg-white border-b border-gray-100 h-14 sm:h-16 fixed top-0 left-0 right-0 z-50 safe-area-top">
+  <div class="max-w-5xl mx-auto h-full flex items-center justify-between px-3 sm:px-4">
     <%!-- Left: Logo --%>
-    <a href="/dashboard" class="flex items-center gap-2 shrink-0">
+    <a href="/dashboard" class="flex items-center gap-2 shrink-0 touch-target">
       <span class="text-2xl">🐑</span>
-      <span class="font-extrabold text-gray-900 text-lg tracking-tight hidden sm:inline">Fun Sheep</span>
+      <span class="font-extrabold text-gray-900 text-lg tracking-tight hidden sm:inline">
+        Fun Sheep
+      </span>
     </a>
 
-    <%!-- Center: Nav Tabs (desktop only) --%>
+    <%!-- Center: Nav Tabs (tablet+ only) --%>
     <nav class="hidden md:flex items-center gap-1">
       <%= for item <- FunSheepWeb.Layouts.nav_items_for_role(@current_role) do %>
         <.link
           navigate={item.path}
           class={[
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all",
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all touch-target",
             if(item.path == (@current_path || ""),
-              do: "bg-purple-100 text-purple-700",
+              do: "bg-green-50 text-[#4CD964]",
               else: "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
             )
           ]}
@@ -27,84 +29,168 @@
     </nav>
 
     <%!-- Right: Streak + XP + Avatar --%>
-    <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+    <div class="flex items-center gap-1.5 sm:gap-3 shrink-0">
       <%!-- Streak --%>
-      <div class="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-orange-50 border border-orange-100">
-        <span class="text-base animate-streak">🔥</span>
-        <span class="text-sm font-extrabold text-orange-600">3</span>
+      <div class="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-orange-50 border border-orange-100">
+        <span class="text-sm sm:text-base animate-streak">🔥</span>
+        <span class="text-xs sm:text-sm font-extrabold text-orange-600">
+          {assigns[:streak_count] || 0}
+        </span>
       </div>
 
-      <%!-- XP --%>
+      <%!-- Review Cards Due Badge --%>
+      <%= if (assigns[:due_reviews] || 0) > 0 do %>
+        <div class="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-blue-50 border border-blue-100">
+          <span class="text-sm sm:text-base">🧠</span>
+          <span class="text-xs sm:text-sm font-extrabold text-blue-600">
+            {assigns[:due_reviews]}
+          </span>
+        </div>
+      <% end %>
+
+      <%!-- Fleece Points (hidden on small phones, visible on large phones+) --%>
       <div class="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-100">
         <span class="text-base">⚡</span>
-        <span class="text-sm font-extrabold text-amber-600">150</span>
+        <span class="text-sm font-extrabold text-amber-600">{assigns[:total_xp] || 0}</span>
+        <span class="text-[10px] text-amber-400 font-medium">FP</span>
       </div>
-
-      <%!-- Search Button --%>
-      <button
-        class="p-2 rounded-xl hover:bg-gray-50 text-gray-400 hover:text-gray-600 transition-colors"
-        aria-label="Search"
-      >
-        <.icon name="hero-magnifying-glass" class="w-5 h-5" />
-      </button>
 
       <%!-- Avatar + Dropdown --%>
-      <div class="flex items-center gap-2">
-        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-400 to-indigo-500 flex items-center justify-center text-white text-sm font-bold ring-2 ring-purple-100">
+      <div class="relative" phx-click-away={JS.hide(to: "#profile-dropdown")}>
+        <button
+          phx-click={JS.toggle(to: "#profile-dropdown")}
+          class="w-9 h-9 rounded-full bg-gradient-to-br from-[#4CD964] to-emerald-600 flex items-center justify-center text-white text-sm font-bold ring-2 ring-green-100 cursor-pointer hover:ring-green-300 transition-all touch-target"
+          aria-label="Profile menu"
+        >
           {String.first(@current_user["display_name"] || "U")}
+        </button>
+
+        <div
+          id="profile-dropdown"
+          class="hidden absolute right-0 top-12 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50"
+        >
+          <.link
+            navigate="/profile/setup"
+            class="flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors touch-target"
+          >
+            <.icon name="hero-user" class="w-4 h-4 text-gray-400" />
+            <span>Profile</span>
+          </.link>
+
+          <.link
+            navigate="/subscription"
+            class="flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors touch-target"
+          >
+            <.icon name="hero-credit-card" class="w-4 h-4 text-gray-400" />
+            <span>Subscription</span>
+          </.link>
+
+          <div class="border-t border-gray-100 my-1"></div>
+
+          <form
+            action={
+              if Application.get_env(:fun_sheep, :dev_routes),
+                do: "/dev/auth",
+                else: "/auth/logout"
+            }
+            method="post"
+          >
+            <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+            <input
+              type="hidden"
+              name="_method"
+              value={if Application.get_env(:fun_sheep, :dev_routes), do: "delete", else: "post"}
+            />
+            <button
+              type="submit"
+              class="flex items-center gap-2 w-full px-4 py-3 text-sm text-red-500 hover:bg-red-50 transition-colors touch-target"
+            >
+              <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
+              <span>Sign out</span>
+            </button>
+          </form>
         </div>
       </div>
-
-      <%!-- Logout --%>
-      <form
-        action={
-          if Application.get_env(:fun_sheep, :dev_routes), do: "/dev/auth", else: "/auth/logout"
-        }
-        method="post"
-        class="inline"
-      >
-        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-        <input
-          type="hidden"
-          name="_method"
-          value={if Application.get_env(:fun_sheep, :dev_routes), do: "delete", else: "post"}
-        />
-        <button
-          type="submit"
-          class="p-2 rounded-xl hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
-          aria-label="Logout"
-        >
-          <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
-        </button>
-      </form>
     </div>
   </div>
 </header>
 
-<%!-- Main Content - Centered column like Duolingo --%>
-<main class="mt-16 pb-24 md:pb-8 min-h-screen bg-[#FAFAF9]">
-  <div class="max-w-3xl mx-auto px-4 py-6">
+<%!-- Main Content - Centered column with responsive padding --%>
+<main class="mt-14 sm:mt-16 pb-20 md:pb-8 min-h-screen bg-[#F5F5F7]">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
     <.flash_group flash={@flash} />
+
+    <%!-- Profile completion nudge — persistent until complete --%>
+    <%= if assigns[:profile_gaps] && assigns[:profile_gaps] != [] do %>
+      <div class="mb-4 bg-white rounded-2xl border border-amber-200 p-4 shadow-sm">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
+            <span class="text-lg">🐑</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2">
+              <p class="font-semibold text-gray-900 text-sm">Complete your profile</p>
+              <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full shrink-0">
+                {profile_completion_pct(assigns[:profile_gaps])}% done
+              </span>
+            </div>
+            <p class="text-xs text-gray-500 mt-0.5">
+              {profile_nudge_message(assigns[:profile_gaps])}
+            </p>
+            <div class="flex flex-wrap gap-2 mt-2">
+              <%= if :grade in assigns[:profile_gaps] do %>
+                <a
+                  href="/profile/setup"
+                  class="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-full transition-colors"
+                >
+                  <span class="w-1.5 h-1.5 bg-amber-400 rounded-full"></span> Set up profile
+                </a>
+              <% end %>
+              <%= if :hobbies in assigns[:profile_gaps] do %>
+                <a
+                  href="/profile/setup"
+                  class="inline-flex items-center gap-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-full transition-colors"
+                >
+                  <span class="w-1.5 h-1.5 bg-purple-400 rounded-full"></span> Add hobbies
+                </a>
+              <% end %>
+            </div>
+            <%!-- Progress bar --%>
+            <div class="mt-2 w-full bg-gray-100 rounded-full h-1.5">
+              <div
+                class="bg-amber-400 h-1.5 rounded-full transition-all"
+                style={"width: #{profile_completion_pct(assigns[:profile_gaps])}%"}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
     {@inner_content}
   </div>
 </main>
 
-<%!-- Bottom Tab Bar (mobile only) --%>
-<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
-  <div class="flex items-center justify-around py-2 px-2">
+<%!-- Bottom Tab Bar (mobile only, hidden on tablet+) --%>
+<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 z-50 safe-area-bottom">
+  <div class="flex items-center justify-around py-1.5 px-1">
     <%= for item <- FunSheepWeb.Layouts.nav_items_for_role(@current_role) |> Enum.take(5) do %>
       <.link
         navigate={item.path}
         class={[
-          "flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-[56px]",
+          "flex flex-col items-center justify-center gap-0.5 py-1.5 px-2 rounded-xl transition-all touch-target flex-1",
           if(item.path == (@current_path || ""),
-            do: "text-purple-600",
-            else: "text-gray-400"
+            do: "text-[#4CD964]",
+            else: "text-gray-400 active:text-gray-600"
           )
         ]}
       >
-        <span class="text-xl">{nav_emoji(item.icon)}</span>
-        <span class="text-[10px] font-bold">{item.label}</span>
+        <span class="text-xl leading-none">{nav_emoji(item.icon)}</span>
+        <span class="text-[10px] font-bold leading-tight">{item.label}</span>
+        <div
+          :if={item.path == (@current_path || "")}
+          class="w-5 h-0.5 rounded-full bg-[#4CD964] mt-0.5"
+        />
       </.link>
     <% end %>
   </div>

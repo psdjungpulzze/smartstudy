@@ -24,10 +24,34 @@ defmodule FunSheepWeb.DevLoginLive do
 
         <%!-- Role Cards Grid --%>
         <div class="grid grid-cols-2 gap-4">
-          <.role_card role="student" title="Student" emoji="🎒" description="Courses, tests & study guides" color="purple" />
-          <.role_card role="parent" title="Parent" emoji="👨‍👩‍👧" description="Track your kid's progress" color="indigo" />
-          <.role_card role="teacher" title="Teacher" emoji="🎓" description="Classes, students & content" color="amber" />
-          <.role_card role="admin" title="Admin" emoji="⚙️" description="Full system access" color="rose" />
+          <.role_card
+            role="student"
+            title="Student"
+            emoji="🎒"
+            description="Courses, tests & study guides"
+            color="purple"
+          />
+          <.role_card
+            role="parent"
+            title="Parent"
+            emoji="👨‍👩‍👧"
+            description="Track your kid's progress"
+            color="indigo"
+          />
+          <.role_card
+            role="teacher"
+            title="Teacher"
+            emoji="🎓"
+            description="Classes, students & content"
+            color="amber"
+          />
+          <.role_card
+            role="admin"
+            title="Admin"
+            emoji="⚙️"
+            description="Full system access"
+            color="rose"
+          />
         </div>
 
         <p class="text-center text-xs text-gray-400 mt-8">

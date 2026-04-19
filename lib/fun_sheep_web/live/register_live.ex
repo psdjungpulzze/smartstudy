@@ -139,7 +139,10 @@ defmodule FunSheepWeb.RegisterLive do
         </div>
 
         <%!-- Success State --%>
-        <div :if={@success} class="bg-white rounded-2xl shadow-lg p-8 text-center border border-emerald-200 animate-slide-up">
+        <div
+          :if={@success}
+          class="bg-white rounded-2xl shadow-lg p-8 text-center border border-emerald-200 animate-slide-up"
+        >
           <div class="animate-confetti">
             <span class="text-6xl">🎉</span>
           </div>

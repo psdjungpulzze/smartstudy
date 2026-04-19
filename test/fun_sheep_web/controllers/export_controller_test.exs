@@ -105,7 +105,7 @@ defmodule FunSheepWeb.ExportControllerTest do
       conn = auth_conn(conn, ur)
       conn = get(conn, ~p"/export/readiness/#{schedule.id}")
 
-      assert redirected_to(conn) =~ "/tests/#{schedule.id}/assess"
+      assert redirected_to(conn) =~ "/courses/#{schedule.course_id}/tests/#{schedule.id}/assess"
     end
   end
 end

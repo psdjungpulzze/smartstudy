@@ -71,18 +71,18 @@ defmodule FunSheepWeb.QuickTestLiveTest do
   end
 
   describe "quick test page" do
-    test "renders card with question", %{conn: conn, user_role: ur} do
+    test "renders card with question", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/quick-test")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
       assert html =~ "Quick Test"
       # Should show one of the question contents
       assert html =~ "powerhouse" or html =~ "DNA" or html =~ "sky blue"
     end
 
-    test "'I Know This' advances to next card", %{conn: conn, user_role: ur} do
+    test "'I Know This' advances to next card", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/quick-test")
+      {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
       html = render_click(view, "mark_known")
 
@@ -90,9 +90,9 @@ defmodule FunSheepWeb.QuickTestLiveTest do
       assert html =~ "Quick Test"
     end
 
-    test "'I Don't Know' shows explanation", %{conn: conn, user_role: ur} do
+    test "'I Don't Know' shows explanation", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/quick-test")
+      {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
       html = render_click(view, "mark_unknown")
 
@@ -100,9 +100,9 @@ defmodule FunSheepWeb.QuickTestLiveTest do
       assert html =~ "Got It"
     end
 
-    test "completing all cards shows summary", %{conn: conn, user_role: ur} do
+    test "completing all cards shows summary", %{conn: conn, user_role: ur, course: course} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/quick-test")
+      {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
       # Process all 3 cards with "I Know This"
       render_click(view, "mark_known")

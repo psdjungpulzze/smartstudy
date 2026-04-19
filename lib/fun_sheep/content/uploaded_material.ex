@@ -17,10 +17,15 @@ defmodule FunSheep.Content.UploadedMaterial do
     field :file_type, :string
     field :file_size, :integer
     field :folder_name, :string
+    field :batch_id, Ecto.UUID
 
     field :ocr_status, Ecto.Enum,
       values: [:pending, :processing, :completed, :failed],
       default: :pending
+
+    field :relevance_status, :string, default: "pending"
+    field :relevance_score, :float
+    field :relevance_notes, :string
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :course, FunSheep.Courses.Course
@@ -39,7 +44,11 @@ defmodule FunSheep.Content.UploadedMaterial do
       :file_type,
       :file_size,
       :folder_name,
+      :batch_id,
       :ocr_status,
+      :relevance_status,
+      :relevance_score,
+      :relevance_notes,
       :user_role_id,
       :course_id
     ])
@@ -48,8 +57,7 @@ defmodule FunSheep.Content.UploadedMaterial do
       :file_name,
       :file_type,
       :file_size,
-      :user_role_id,
-      :course_id
+      :user_role_id
     ])
     |> foreign_key_constraint(:user_role_id)
     |> foreign_key_constraint(:course_id)

@@ -1,14 +1,40 @@
 defmodule FunSheepWeb.FormatTestLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Questions}
+  import FunSheepWeb.BillingComponents
+
+  alias FunSheep.{Assessments, Billing, Questions}
   alias FunSheep.Assessments.FormatReplicator
 
   @impl true
-  def mount(%{"schedule_id" => schedule_id}, _session, socket) do
+  def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
     user_role_id = socket.assigns.current_user["user_role_id"]
+    role = socket.assigns.current_user["role"]
 
+    case Billing.check_test_allowance(user_role_id, role) do
+      :ok ->
+        Billing.record_test_usage(user_role_id, "format_test", course_id)
+        mount_format_test(socket, course_id, schedule, user_role_id)
+
+      {:error, :limit_reached, _info} ->
+        billing_stats = Billing.usage_stats(user_role_id)
+
+        {:ok,
+         assign(socket,
+           page_title: "Format Test: #{schedule.name}",
+           course_id: course_id,
+           schedule: schedule,
+           billing_blocked: true,
+           billing_stats: billing_stats,
+           no_template: false,
+           submitted: false,
+           results: nil
+         )}
+    end
+  end
+
+  defp mount_format_test(socket, course_id, schedule, user_role_id) do
     if schedule.format_template_id do
       practice_test =
         FormatReplicator.generate_practice_test(
@@ -45,7 +71,10 @@ defmodule FunSheepWeb.FormatTestLive do
       {:ok,
        assign(socket,
          page_title: "Format Test: #{schedule.name}",
+         course_id: course_id,
          schedule: schedule,
+         billing_blocked: false,
+         billing_stats: nil,
          user_role_id: user_role_id,
          practice_test: practice_test,
          sections_with_questions: sections_with_questions,
@@ -65,7 +94,10 @@ defmodule FunSheepWeb.FormatTestLive do
        socket
        |> assign(
          page_title: "Format Test",
+         course_id: course_id,
          schedule: schedule,
+         billing_blocked: false,
+         billing_stats: nil,
          no_template: true
        )}
     end
@@ -183,7 +215,7 @@ defmodule FunSheepWeb.FormatTestLive do
 
             # Record attempt
             if user_role_id && answer do
-              Questions.create_question_attempt(%{
+              Questions.record_attempt_with_stats(%{
                 user_role_id: user_role_id,
                 question_id: question.id,
                 answer_given: answer,
@@ -215,6 +247,13 @@ defmodule FunSheepWeb.FormatTestLive do
     total_points = Enum.sum(Enum.map(section_results, & &1.points))
     max_points = Enum.sum(Enum.map(section_results, & &1.max_points))
 
+    # Load community stats for all questions
+    all_question_ids =
+      section_results
+      |> Enum.flat_map(fn sr -> Enum.map(sr.question_results, & &1.question.id) end)
+
+    question_stats_map = Questions.get_bulk_question_stats(all_question_ids)
+
     results = %{
       section_results: section_results,
       total_correct: total_correct,
@@ -223,7 +262,8 @@ defmodule FunSheepWeb.FormatTestLive do
       max_points: max_points,
       overall_score:
         if(total_questions > 0, do: round(total_correct / total_questions * 100), else: 0),
-      time_taken: time_taken
+      time_taken: time_taken,
+      question_stats: question_stats_map
     }
 
     assign(socket, submitted: true, results: results)
@@ -258,52 +298,61 @@ defmodule FunSheepWeb.FormatTestLive do
 
     ~H"""
     <div class="max-w-3xl mx-auto">
-      <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-4">
-          <.link
-            navigate={~p"/tests"}
-            class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+      <.billing_wall
+        :if={@billing_blocked}
+        course_id={@course_id}
+        course_name={(@schedule.course && @schedule.course.name) || "Course"}
+        stats={@billing_stats}
+      />
+
+      <div :if={!@billing_blocked}>
+        <div class="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+          <div class="flex items-center gap-3 sm:gap-4 min-w-0">
+            <.link
+              navigate={~p"/courses/#{@course_id}/tests"}
+              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors touch-target shrink-0"
+            >
+              <.icon name="hero-arrow-left" class="w-6 h-6" />
+            </.link>
+            <div class="min-w-0">
+              <h1 class="text-xl sm:text-2xl font-bold text-[#1C1C1E] truncate">{@schedule.name}</h1>
+              <p class="text-sm text-[#8E8E93]">Format Practice Test</p>
+            </div>
+          </div>
+
+          <div
+            :if={!@no_template && !@submitted && @remaining_seconds}
+            class={"px-4 py-2 rounded-full font-mono font-bold text-lg #{if @remaining_seconds < 60, do: "bg-red-100 text-[#FF3B30]", else: "bg-[#F5F5F7] text-[#1C1C1E]"}"}
           >
-            <.icon name="hero-arrow-left" class="w-6 h-6" />
-          </.link>
-          <div>
-            <h1 class="text-2xl font-bold text-[#1C1C1E]">{@schedule.name}</h1>
-            <p class="text-sm text-[#8E8E93]">Format Practice Test</p>
+            {format_time(@remaining_seconds)}
           </div>
         </div>
 
-        <div
-          :if={!@no_template && !@submitted && @remaining_seconds}
-          class={"px-4 py-2 rounded-full font-mono font-bold text-lg #{if @remaining_seconds < 60, do: "bg-red-100 text-[#FF3B30]", else: "bg-[#F5F5F7] text-[#1C1C1E]"}"}
-        >
-          {format_time(@remaining_seconds)}
+        <div :if={@no_template} class="bg-white rounded-2xl shadow-md p-8 text-center">
+          <.icon name="hero-document-text" class="w-12 h-12 text-[#8E8E93] mx-auto mb-4" />
+          <p class="text-[#8E8E93] text-lg">No format template defined for this test.</p>
+          <.link
+            navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/format"}
+            class="inline-block mt-4 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+          >
+            Define Test Format
+          </.link>
         </div>
+
+        <%= if @submitted do %>
+          <.render_results results={@results} schedule={@schedule} />
+        <% end %>
+
+        <%= if !@no_template && !@submitted do %>
+          <.render_test_question
+            sections={@sections_with_questions}
+            section_index={@current_section_index}
+            question_index={@current_question_index}
+            selected_answer={@selected_answer}
+            answers={@answers}
+          />
+        <% end %>
       </div>
-
-      <div :if={@no_template} class="bg-white rounded-2xl shadow-md p-8 text-center">
-        <.icon name="hero-document-text" class="w-12 h-12 text-[#8E8E93] mx-auto mb-4" />
-        <p class="text-[#8E8E93] text-lg">No format template defined for this test.</p>
-        <.link
-          navigate={~p"/tests/#{@schedule.id}/format"}
-          class="inline-block mt-4 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
-        >
-          Define Test Format
-        </.link>
-      </div>
-
-      <%= if @submitted do %>
-        <.render_results results={@results} schedule={@schedule} />
-      <% end %>
-
-      <%= if !@no_template && !@submitted do %>
-        <.render_test_question
-          sections={@sections_with_questions}
-          section_index={@current_section_index}
-          question_index={@current_question_index}
-          selected_answer={@selected_answer}
-          answers={@answers}
-        />
-      <% end %>
     </div>
     """
   end
@@ -435,14 +484,14 @@ defmodule FunSheepWeb.FormatTestLive do
 
   defp render_tf(assigns) do
     ~H"""
-    <div class="flex gap-4">
+    <div class="flex gap-2 sm:gap-4">
       <button
         :for={value <- ["True", "False"]}
         type="button"
         phx-click="select_answer"
         phx-value-answer={value}
         class={[
-          "flex-1 p-4 rounded-xl border-2 text-center font-medium transition-colors",
+          "flex-1 p-3 sm:p-4 rounded-xl border-2 text-center font-medium transition-colors touch-target",
           if(@selected_answer == value,
             do: "border-[#4CD964] bg-[#E8F8EB] text-[#4CD964]",
             else: "border-[#E5E5EA] hover:border-[#4CD964] text-[#1C1C1E]"
@@ -477,26 +526,31 @@ defmodule FunSheepWeb.FormatTestLive do
 
   defp render_results(assigns) do
     ~H"""
-    <div class="bg-white rounded-2xl shadow-md p-8">
-      <div class="text-center mb-8">
-        <.icon name="hero-trophy" class="w-16 h-16 text-[#4CD964] mx-auto mb-4" />
-        <h2 class="text-2xl font-bold text-[#1C1C1E]">Test Complete!</h2>
+    <div class="bg-white rounded-2xl shadow-md p-5 sm:p-8">
+      <div class="text-center mb-6 sm:mb-8">
+        <.icon
+          name="hero-trophy"
+          class="w-12 h-12 sm:w-16 sm:h-16 text-[#4CD964] mx-auto mb-3 sm:mb-4"
+        />
+        <h2 class="text-xl sm:text-2xl font-bold text-[#1C1C1E]">Test Complete!</h2>
         <p class="text-[#8E8E93] mt-2">{@schedule.name}</p>
       </div>
 
-      <div class="grid grid-cols-3 gap-4 mb-8">
-        <div class="bg-[#F5F5F7] rounded-xl p-4 text-center">
-          <p class="text-3xl font-bold text-[#4CD964]">{@results.overall_score}%</p>
-          <p class="text-xs text-[#8E8E93] mt-1">Overall Score</p>
+      <div class="grid grid-cols-3 gap-2 sm:gap-4 mb-6 sm:mb-8">
+        <div class="bg-[#F5F5F7] rounded-xl p-3 sm:p-4 text-center">
+          <p class="text-2xl sm:text-3xl font-bold text-[#4CD964]">{@results.overall_score}%</p>
+          <p class="text-[10px] sm:text-xs text-[#8E8E93] mt-1">Overall Score</p>
         </div>
-        <div class="bg-[#F5F5F7] rounded-xl p-4 text-center">
-          <p class="text-3xl font-bold text-[#1C1C1E]">
+        <div class="bg-[#F5F5F7] rounded-xl p-3 sm:p-4 text-center">
+          <p class="text-xl sm:text-3xl font-bold text-[#1C1C1E]">
             {@results.total_points}/{@results.max_points}
           </p>
-          <p class="text-xs text-[#8E8E93] mt-1">Points</p>
+          <p class="text-[10px] sm:text-xs text-[#8E8E93] mt-1">Points</p>
         </div>
-        <div class="bg-[#F5F5F7] rounded-xl p-4 text-center">
-          <p class="text-3xl font-bold text-[#1C1C1E]">{format_elapsed(@results.time_taken)}</p>
+        <div class="bg-[#F5F5F7] rounded-xl p-3 sm:p-4 text-center">
+          <p class="text-xl sm:text-3xl font-bold text-[#1C1C1E]">
+            {format_elapsed(@results.time_taken)}
+          </p>
           <p class="text-xs text-[#8E8E93] mt-1">Time Taken</p>
         </div>
       </div>
@@ -525,15 +579,62 @@ defmodule FunSheepWeb.FormatTestLive do
         </div>
       </div>
 
+      <%!-- Question review with community stats --%>
+      <div class="space-y-4 mb-8">
+        <h3 class="font-semibold text-[#1C1C1E]">Question Review</h3>
+        <div :for={sr <- @results.section_results}>
+          <p class="text-xs font-medium text-[#8E8E93] uppercase tracking-wide mb-2">{sr.name}</p>
+          <div class="space-y-2 mb-4">
+            <div
+              :for={qr <- sr.question_results}
+              class={[
+                "p-3 rounded-xl border",
+                if(qr.is_correct,
+                  do: "border-[#E8F8EB] bg-[#F9FFF9]",
+                  else: "border-red-100 bg-red-50/30"
+                )
+              ]}
+            >
+              <div class="flex items-start justify-between gap-2">
+                <p class="text-sm text-[#1C1C1E] flex-1">{qr.question.content}</p>
+                <.icon
+                  name={if(qr.is_correct, do: "hero-check-circle", else: "hero-x-circle")}
+                  class={[
+                    "w-5 h-5 flex-shrink-0",
+                    if(qr.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")
+                  ]}
+                />
+              </div>
+              <div :if={!qr.is_correct} class="text-xs text-[#8E8E93] mt-1">
+                Correct answer: {qr.question.answer}
+              </div>
+              <% stats = Map.get(@results.question_stats || %{}, qr.question.id) %>
+              <div :if={stats} class="flex items-center gap-2 text-xs text-[#8E8E93] mt-2">
+                <.icon name="hero-users" class="w-3 h-3" />
+                <span>
+                  <span class="font-medium">
+                    {if stats.total_attempts > 0,
+                      do:
+                        "#{trunc(Float.round(stats.correct_attempts / stats.total_attempts * 100, 0))}%",
+                      else: "0%"}
+                  </span>
+                  of students got this right ({stats.total_attempts} attempts)
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="flex justify-center gap-4">
         <.link
-          navigate={~p"/tests"}
+          navigate={~p"/courses/#{@course_id}/tests"}
           class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
         >
           Back to Tests
         </.link>
         <.link
-          navigate={~p"/tests/#{@schedule.id}/format-test"}
+          navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/format-test"}
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
         >
           Retake Test

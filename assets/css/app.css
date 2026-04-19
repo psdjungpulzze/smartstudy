@@ -104,6 +104,21 @@
 
 /* This file is for your main application CSS */
 
+/* ── Global Form Input Fix (dark mode text visibility) ───────────────────── */
+/* Ensure inputs always have visible text regardless of daisyUI theme */
+input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+select,
+textarea {
+  color: #1C1C1E;
+}
+[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  color: #FFFFFF;
+  background-color: #2C2C2E;
+  border-color: #3A3A3C;
+}
+
 /* ── Teen-Friendly Design System ──────────────────────────────────────────── */
 
 /* Global font */
@@ -148,6 +163,8 @@
 .animate-float { animation: float 3s ease-in-out infinite; }
 .animate-slide-up { animation: slide-up 0.4s ease-out; }
 .animate-confetti { animation: confetti-pop 0.5s ease-out; }
+.animate-pulse-subtle { animation: pulse-subtle 2s ease-in-out infinite; }
+@keyframes pulse-subtle { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 
 /* Fun hover effects for cards */
 .card-hover {
@@ -188,3 +205,113 @@
 .stagger-4 { animation-delay: 0.2s; }
 .stagger-5 { animation-delay: 0.25s; }
 .stagger-6 { animation-delay: 0.3s; }
+
+/* ── Mobile-First Responsive Utilities ────────────────────────────────────── */
+
+/* Safe area for notched devices (top) */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Touch target: minimum 44×44px hit area */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Disable hover card-lift on touch devices (prevents sticky hover) */
+@media (hover: none) {
+  .card-hover:hover {
+    transform: none;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* Active press feedback for touch devices */
+@media (hover: none) {
+  .card-hover:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
+  .btn-bounce:active {
+    transform: scale(0.92);
+  }
+}
+
+/* Bottom sheet base (slides up from bottom on mobile) */
+.bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  border-radius: 1.5rem 1.5rem 0 0;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  max-height: 85vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.bottom-sheet.open {
+  transform: translateY(0);
+}
+
+/* Smooth scrolling for iOS momentum */
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+}
+
+/* Hide scrollbar but keep functionality (mobile polish) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Horizontal scroll snap for card carousels */
+.scroll-snap-x {
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.scroll-snap-x::-webkit-scrollbar {
+  display: none;
+}
+.scroll-snap-x > * {
+  scroll-snap-align: start;
+}
+
+/* Responsive text truncation */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Sheep Mascot Animations ─────────────────────────────────────────────── */
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-3deg); }
+  75% { transform: rotate(3deg); }
+}
+
+@keyframes shiver {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+@keyframes glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.6));
+  }
+}

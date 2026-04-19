@@ -90,7 +90,7 @@ defmodule FunSheep.Assessments.EngineTest do
       assert state.schedule_id == schedule.id
       assert state.course_id == schedule.course_id
       assert state.current_topic_index == 0
-      assert state.current_difficulty == :easy
+      assert state.current_difficulty == :medium
       assert state.status == :in_progress
       assert length(state.topics) == 2
 
@@ -135,12 +135,13 @@ defmodule FunSheep.Assessments.EngineTest do
       assert new_state.current_difficulty == :medium
     end
 
-    test "keeps difficulty at easy on incorrect answer", %{schedule: schedule} do
+    test "decreases difficulty on incorrect answer", %{schedule: schedule} do
       state = Engine.start_assessment(schedule)
       {:question, question, state} = Engine.next_question(state)
 
       new_state = Engine.record_answer(state, question.id, "wrong", false)
-      assert new_state.current_difficulty == :easy
+      # Starting at 0.5 (medium), wrong answer drops to 0.35 — still medium
+      assert new_state.target_difficulty < state.target_difficulty
     end
 
     test "tracks attempts per topic", %{schedule: schedule} do

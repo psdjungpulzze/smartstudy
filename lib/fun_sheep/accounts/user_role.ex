@@ -19,15 +19,14 @@ defmodule FunSheep.Accounts.UserRole do
     field :display_name, :string
     field :grade, :string
     field :gender, :string
-    field :nationality, :string
+    field :ethnicity, :string
     field :metadata, :map, default: %{}
 
     belongs_to :school, FunSheep.Geo.School
 
     has_many :student_guardians, FunSheep.Accounts.StudentGuardian, foreign_key: :guardian_id
 
-    has_many :student_guardian_links, FunSheep.Accounts.StudentGuardian,
-      foreign_key: :student_id
+    has_many :student_guardian_links, FunSheep.Accounts.StudentGuardian, foreign_key: :student_id
 
     has_many :question_attempts, FunSheep.Questions.QuestionAttempt
     has_many :test_schedules, FunSheep.Assessments.TestSchedule
@@ -46,7 +45,7 @@ defmodule FunSheep.Accounts.UserRole do
       :display_name,
       :grade,
       :gender,
-      :nationality,
+      :ethnicity,
       :metadata,
       :school_id
     ])

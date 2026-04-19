@@ -95,16 +95,56 @@ IO.puts("Seeded #{Repo.aggregate(Country, :count)} countries")
 # ── US States (all 50 + DC) ──────────────────────────────────────────────────
 
 us_states_data = [
-  "Alabama", "Alaska", "Arizona", "Arkansas", "California",
-  "Colorado", "Connecticut", "Delaware", "District of Columbia", "Florida",
-  "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana",
-  "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine",
-  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
-  "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
-  "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
-  "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
-  "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah",
-  "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin",
+  "Alabama",
+  "Alaska",
+  "Arizona",
+  "Arkansas",
+  "California",
+  "Colorado",
+  "Connecticut",
+  "Delaware",
+  "District of Columbia",
+  "Florida",
+  "Georgia",
+  "Hawaii",
+  "Idaho",
+  "Illinois",
+  "Indiana",
+  "Iowa",
+  "Kansas",
+  "Kentucky",
+  "Louisiana",
+  "Maine",
+  "Maryland",
+  "Massachusetts",
+  "Michigan",
+  "Minnesota",
+  "Mississippi",
+  "Missouri",
+  "Montana",
+  "Nebraska",
+  "Nevada",
+  "New Hampshire",
+  "New Jersey",
+  "New Mexico",
+  "New York",
+  "North Carolina",
+  "North Dakota",
+  "Ohio",
+  "Oklahoma",
+  "Oregon",
+  "Pennsylvania",
+  "Rhode Island",
+  "South Carolina",
+  "South Dakota",
+  "Tennessee",
+  "Texas",
+  "Utah",
+  "Vermont",
+  "Virginia",
+  "Washington",
+  "West Virginia",
+  "Wisconsin",
   "Wyoming"
 ]
 
@@ -117,10 +157,19 @@ us_states =
 # ── Canadian Provinces ────────────────────────────────────────────────────────
 
 ca_provinces_data = [
-  "Alberta", "British Columbia", "Manitoba", "New Brunswick",
-  "Newfoundland and Labrador", "Nova Scotia", "Ontario",
-  "Prince Edward Island", "Quebec", "Saskatchewan",
-  "Northwest Territories", "Nunavut", "Yukon"
+  "Alberta",
+  "British Columbia",
+  "Manitoba",
+  "New Brunswick",
+  "Newfoundland and Labrador",
+  "Nova Scotia",
+  "Ontario",
+  "Prince Edward Island",
+  "Quebec",
+  "Saskatchewan",
+  "Northwest Territories",
+  "Nunavut",
+  "Yukon"
 ]
 
 ca_provinces =
@@ -132,10 +181,22 @@ ca_provinces =
 # ── South Korean Provinces (시/도) ───────────────────────────────────────────
 
 kr_provinces_data = [
-  "Seoul (서울)", "Busan (부산)", "Daegu (대구)", "Incheon (인천)",
-  "Gwangju (광주)", "Daejeon (대전)", "Ulsan (울산)", "Sejong (세종)",
-  "Gyeonggi (경기)", "Gangwon (강원)", "Chungbuk (충북)", "Chungnam (충남)",
-  "Jeonbuk (전북)", "Jeonnam (전남)", "Gyeongbuk (경북)", "Gyeongnam (경남)",
+  "Seoul (서울)",
+  "Busan (부산)",
+  "Daegu (대구)",
+  "Incheon (인천)",
+  "Gwangju (광주)",
+  "Daejeon (대전)",
+  "Ulsan (울산)",
+  "Sejong (세종)",
+  "Gyeonggi (경기)",
+  "Gangwon (강원)",
+  "Chungbuk (충북)",
+  "Chungnam (충남)",
+  "Jeonbuk (전북)",
+  "Jeonnam (전남)",
+  "Gyeongbuk (경북)",
+  "Gyeongnam (경남)",
   "Jeju (제주)"
 ]
 
@@ -148,8 +209,16 @@ kr_provinces =
 # ── Japanese Prefectures (selected major ones) ──────────────────────────────
 
 jp_prefectures_data = [
-  "Tokyo", "Osaka", "Kyoto", "Kanagawa", "Aichi",
-  "Hokkaido", "Fukuoka", "Hyogo", "Saitama", "Chiba"
+  "Tokyo",
+  "Osaka",
+  "Kyoto",
+  "Kanagawa",
+  "Aichi",
+  "Hokkaido",
+  "Fukuoka",
+  "Hyogo",
+  "Saitama",
+  "Chiba"
 ]
 
 for name <- jp_prefectures_data do
@@ -159,7 +228,10 @@ end
 # ── UK Regions ────────────────────────────────────────────────────────────────
 
 gb_regions_data = [
-  "England", "Scotland", "Wales", "Northern Ireland"
+  "England",
+  "Scotland",
+  "Wales",
+  "Northern Ireland"
 ]
 
 for name <- gb_regions_data do
@@ -169,8 +241,13 @@ end
 # ── Australian States ─────────────────────────────────────────────────────────
 
 au_states_data = [
-  "New South Wales", "Victoria", "Queensland", "South Australia",
-  "Western Australia", "Tasmania", "Northern Territory",
+  "New South Wales",
+  "Victoria",
+  "Queensland",
+  "South Australia",
+  "Western Australia",
+  "Tasmania",
+  "Northern Territory",
   "Australian Capital Territory"
 ]
 
@@ -183,48 +260,60 @@ IO.puts("Seeded #{Repo.aggregate(State, :count)} states/provinces")
 # ── US Districts & Schools (California) ──────────────────────────────────────
 
 ca_districts_schools = [
-  {"Saratoga Union School District", [
-    "Saratoga High School",
-    "Redwood Middle School",
-    "Argonaut Elementary School"
-  ]},
-  {"Cupertino Union School District", [
-    "Monta Vista High School",
-    "Lynbrook High School",
-    "Cupertino Middle School",
-    "Kennedy Middle School"
-  ]},
-  {"Fremont Union High School District", [
-    "Fremont High School",
-    "Homestead High School"
-  ]},
-  {"Los Gatos-Saratoga Joint Union High School District", [
-    "Los Gatos High School"
-  ]},
-  {"Palo Alto Unified School District", [
-    "Palo Alto High School",
-    "Gunn High School",
-    "JLS Middle School"
-  ]},
-  {"San Jose Unified School District", [
-    "Abraham Lincoln High School",
-    "Willow Glen High School",
-    "Pioneer High School"
-  ]},
-  {"Los Angeles Unified School District", [
-    "Los Angeles High School",
-    "Hollywood High School",
-    "Fairfax High School"
-  ]},
-  {"San Francisco Unified School District", [
-    "Lowell High School",
-    "Washington High School",
-    "Balboa High School"
-  ]}
+  {"Saratoga Union School District",
+   [
+     "Saratoga High School",
+     "Redwood Middle School",
+     "Argonaut Elementary School"
+   ]},
+  {"Cupertino Union School District",
+   [
+     "Monta Vista High School",
+     "Lynbrook High School",
+     "Cupertino Middle School",
+     "Kennedy Middle School"
+   ]},
+  {"Fremont Union High School District",
+   [
+     "Fremont High School",
+     "Homestead High School"
+   ]},
+  {"Los Gatos-Saratoga Joint Union High School District",
+   [
+     "Los Gatos High School"
+   ]},
+  {"Palo Alto Unified School District",
+   [
+     "Palo Alto High School",
+     "Gunn High School",
+     "JLS Middle School"
+   ]},
+  {"San Jose Unified School District",
+   [
+     "Abraham Lincoln High School",
+     "Willow Glen High School",
+     "Pioneer High School"
+   ]},
+  {"Los Angeles Unified School District",
+   [
+     "Los Angeles High School",
+     "Hollywood High School",
+     "Fairfax High School"
+   ]},
+  {"San Francisco Unified School District",
+   [
+     "Lowell High School",
+     "Washington High School",
+     "Balboa High School"
+   ]}
 ]
 
 for {district_name, school_names} <- ca_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: us_states["California"].id})
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: us_states["California"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -234,20 +323,26 @@ end
 # ── US Districts & Schools (New York) ────────────────────────────────────────
 
 ny_districts_schools = [
-  {"New York City Department of Education", [
-    "Stuyvesant High School",
-    "Bronx Science High School",
-    "Brooklyn Technical High School",
-    "Townsend Harris High School"
-  ]},
-  {"Great Neck Public Schools", [
-    "Great Neck South High School",
-    "Great Neck North High School"
-  ]}
+  {"New York City Department of Education",
+   [
+     "Stuyvesant High School",
+     "Bronx Science High School",
+     "Brooklyn Technical High School",
+     "Townsend Harris High School"
+   ]},
+  {"Great Neck Public Schools",
+   [
+     "Great Neck South High School",
+     "Great Neck North High School"
+   ]}
 ]
 
 for {district_name, school_names} <- ny_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: us_states["New York"].id})
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: us_states["New York"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -257,24 +352,28 @@ end
 # ── US Districts & Schools (Texas) ───────────────────────────────────────────
 
 tx_districts_schools = [
-  {"Houston Independent School District", [
-    "Bellaire High School",
-    "Lamar High School",
-    "Westside High School"
-  ]},
-  {"Dallas Independent School District", [
-    "School for the Talented and Gifted",
-    "Booker T. Washington High School"
-  ]},
-  {"Plano Independent School District", [
-    "Plano Senior High School",
-    "Plano West Senior High School",
-    "Plano East Senior High School"
-  ]}
+  {"Houston Independent School District",
+   [
+     "Bellaire High School",
+     "Lamar High School",
+     "Westside High School"
+   ]},
+  {"Dallas Independent School District",
+   [
+     "School for the Talented and Gifted",
+     "Booker T. Washington High School"
+   ]},
+  {"Plano Independent School District",
+   [
+     "Plano Senior High School",
+     "Plano West Senior High School",
+     "Plano East Senior High School"
+   ]}
 ]
 
 for {district_name, school_names} <- tx_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: us_states["Texas"].id})
+  d =
+    Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: us_states["Texas"].id})
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -284,19 +383,26 @@ end
 # ── US Districts & Schools (New Jersey) ──────────────────────────────────────
 
 nj_districts_schools = [
-  {"Bergen County Academies", [
-    "Bergen County Academies"
-  ]},
-  {"Fort Lee School District", [
-    "Fort Lee High School"
-  ]},
-  {"Palisades Park School District", [
-    "Palisades Park Jr/Sr High School"
-  ]}
+  {"Bergen County Academies",
+   [
+     "Bergen County Academies"
+   ]},
+  {"Fort Lee School District",
+   [
+     "Fort Lee High School"
+   ]},
+  {"Palisades Park School District",
+   [
+     "Palisades Park Jr/Sr High School"
+   ]}
 ]
 
 for {district_name, school_names} <- nj_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: us_states["New Jersey"].id})
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: us_states["New Jersey"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -306,15 +412,20 @@ end
 # ── US Districts & Schools (Virginia) ────────────────────────────────────────
 
 va_districts_schools = [
-  {"Fairfax County Public Schools", [
-    "Thomas Jefferson High School for Science and Technology",
-    "Langley High School",
-    "McLean High School"
-  ]}
+  {"Fairfax County Public Schools",
+   [
+     "Thomas Jefferson High School for Science and Technology",
+     "Langley High School",
+     "McLean High School"
+   ]}
 ]
 
 for {district_name, school_names} <- va_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: us_states["Virginia"].id})
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: us_states["Virginia"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -324,36 +435,42 @@ end
 # ── South Korea Districts & Schools (Seoul) ──────────────────────────────────
 
 seoul_districts_schools = [
-  {"강남구 (Gangnam)", [
-    "대치고등학교 (Daechi High School)",
-    "휘문고등학교 (Hwimun High School)",
-    "경기고등학교 (Kyunggi High School)",
-    "숙명여자고등학교 (Sookmyung Girls' High School)"
-  ]},
-  {"서초구 (Seocho)", [
-    "서초고등학교 (Seocho High School)",
-    "세화고등학교 (Sehwa High School)",
-    "반포고등학교 (Banpo High School)"
-  ]},
-  {"송파구 (Songpa)", [
-    "보인고등학교 (Boin High School)",
-    "잠실고등학교 (Jamsil High School)"
-  ]},
-  {"종로구 (Jongno)", [
-    "경복고등학교 (Gyeongbok High School)",
-    "용산국제학교 (Yongsan International School)"
-  ]},
-  {"마포구 (Mapo)", [
-    "서울국제학교 (Seoul Foreign School)",
-    "마포고등학교 (Mapo High School)"
-  ]}
+  {"강남구 (Gangnam)",
+   [
+     "대치고등학교 (Daechi High School)",
+     "휘문고등학교 (Hwimun High School)",
+     "경기고등학교 (Kyunggi High School)",
+     "숙명여자고등학교 (Sookmyung Girls' High School)"
+   ]},
+  {"서초구 (Seocho)",
+   [
+     "서초고등학교 (Seocho High School)",
+     "세화고등학교 (Sehwa High School)",
+     "반포고등학교 (Banpo High School)"
+   ]},
+  {"송파구 (Songpa)",
+   [
+     "보인고등학교 (Boin High School)",
+     "잠실고등학교 (Jamsil High School)"
+   ]},
+  {"종로구 (Jongno)",
+   [
+     "경복고등학교 (Gyeongbok High School)",
+     "용산국제학교 (Yongsan International School)"
+   ]},
+  {"마포구 (Mapo)",
+   [
+     "서울국제학교 (Seoul Foreign School)",
+     "마포고등학교 (Mapo High School)"
+   ]}
 ]
 
 for {district_name, school_names} <- seoul_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{
-    name: district_name,
-    state_id: kr_provinces["Seoul (서울)"].id
-  })
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: kr_provinces["Seoul (서울)"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -363,23 +480,27 @@ end
 # ── South Korea Districts & Schools (Gyeonggi) ──────────────────────────────
 
 gyeonggi_districts_schools = [
-  {"분당구 (Bundang)", [
-    "분당고등학교 (Bundang High School)",
-    "낙생고등학교 (Naksaeng High School)"
-  ]},
-  {"수지구 (Suji)", [
-    "수지고등학교 (Suji High School)"
-  ]},
-  {"일산 (Ilsan)", [
-    "백석고등학교 (Baekseok High School)"
-  ]}
+  {"분당구 (Bundang)",
+   [
+     "분당고등학교 (Bundang High School)",
+     "낙생고등학교 (Naksaeng High School)"
+   ]},
+  {"수지구 (Suji)",
+   [
+     "수지고등학교 (Suji High School)"
+   ]},
+  {"일산 (Ilsan)",
+   [
+     "백석고등학교 (Baekseok High School)"
+   ]}
 ]
 
 for {district_name, school_names} <- gyeonggi_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{
-    name: district_name,
-    state_id: kr_provinces["Gyeonggi (경기)"].id
-  })
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: kr_provinces["Gyeonggi (경기)"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})
@@ -389,14 +510,19 @@ end
 # ── Canadian Districts & Schools (Ontario) ───────────────────────────────────
 
 on_districts_schools = [
-  {"Toronto District School Board", [
-    "University of Toronto Schools",
-    "Marc Garneau Collegiate Institute"
-  ]}
+  {"Toronto District School Board",
+   [
+     "University of Toronto Schools",
+     "Marc Garneau Collegiate Institute"
+   ]}
 ]
 
 for {district_name, school_names} <- on_districts_schools do
-  d = Seeds.find_or_create!(Repo, District, %{name: district_name, state_id: ca_provinces["Ontario"].id})
+  d =
+    Seeds.find_or_create!(Repo, District, %{
+      name: district_name,
+      state_id: ca_provinces["Ontario"].id
+    })
 
   for school_name <- school_names do
     Seeds.find_or_create!(Repo, School, %{name: school_name, district_id: d.id})

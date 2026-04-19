@@ -23,6 +23,9 @@ defmodule FunSheepWeb.WebhookController do
       %{"type" => "credential." <> _rest} ->
         handle_credential_event(conn, params)
 
+      %{"type" => "subscription." <> _rest} ->
+        handle_billing_event(conn, params)
+
       _ ->
         Logger.debug("Received unhandled webhook event: #{inspect(params["type"])}")
         json(conn, %{status: "received"})
@@ -66,6 +69,81 @@ defmodule FunSheepWeb.WebhookController do
   defp handle_credential_event(conn, _params) do
     # TODO: Notify about credential status changes
     json(conn, %{status: "received"})
+  end
+
+  defp handle_billing_event(conn, %{"type" => type, "data" => data}) do
+    case type do
+      "subscription.activated" ->
+        handle_subscription_activated(conn, data)
+
+      "subscription.cancelled" ->
+        handle_subscription_cancelled(conn, data)
+
+      "subscription.expired" ->
+        handle_subscription_expired(conn, data)
+
+      _ ->
+        Logger.debug("Received unhandled billing event: #{type}")
+        json(conn, %{status: "received"})
+    end
+  end
+
+  defp handle_billing_event(conn, _params) do
+    json(conn, %{status: "received"})
+  end
+
+  defp handle_subscription_activated(conn, data) do
+    with subscriber_id when not is_nil(subscriber_id) <- data["subscriber_id"],
+         %{id: user_role_id} <-
+           FunSheep.Accounts.get_user_role_by_interactor_id(subscriber_id) do
+      FunSheep.Billing.activate_subscription(user_role_id, %{
+        plan: data["plan_name"] || "monthly",
+        billing_subscription_id: data["subscription_id"],
+        stripe_customer_id: data["stripe_customer_id"],
+        current_period_start: parse_datetime(data["current_period_start"]),
+        current_period_end: parse_datetime(data["current_period_end"])
+      })
+
+      json(conn, %{status: "activated"})
+    else
+      _ ->
+        Logger.warning("Could not find user for billing event: #{inspect(data["subscriber_id"])}")
+        conn |> put_status(404) |> json(%{error: "User not found"})
+    end
+  end
+
+  defp handle_subscription_cancelled(conn, data) do
+    with subscriber_id when not is_nil(subscriber_id) <- data["subscriber_id"],
+         %{id: user_role_id} <-
+           FunSheep.Accounts.get_user_role_by_interactor_id(subscriber_id) do
+      FunSheep.Billing.cancel_subscription(user_role_id)
+      json(conn, %{status: "cancelled"})
+    else
+      _ ->
+        conn |> put_status(404) |> json(%{error: "User not found"})
+    end
+  end
+
+  defp handle_subscription_expired(conn, data) do
+    with subscriber_id when not is_nil(subscriber_id) <- data["subscriber_id"],
+         %{id: user_role_id} <-
+           FunSheep.Accounts.get_user_role_by_interactor_id(subscriber_id),
+         sub when not is_nil(sub) <- FunSheep.Billing.get_subscription(user_role_id) do
+      FunSheep.Billing.update_subscription(sub, %{plan: "free", status: "expired"})
+      json(conn, %{status: "expired"})
+    else
+      _ ->
+        conn |> put_status(404) |> json(%{error: "User not found"})
+    end
+  end
+
+  defp parse_datetime(nil), do: nil
+
+  defp parse_datetime(str) when is_binary(str) do
+    case DateTime.from_iso8601(str) do
+      {:ok, dt, _} -> dt
+      _ -> nil
+    end
   end
 
   # --- Tool Callback Handlers ---

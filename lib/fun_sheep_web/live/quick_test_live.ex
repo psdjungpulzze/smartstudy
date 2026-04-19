@@ -1,75 +1,88 @@
 defmodule FunSheepWeb.QuickTestLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Courses, Questions}
+  import FunSheepWeb.BillingComponents
+
+  alias FunSheep.{Billing, Courses, Questions, Tutor}
   alias FunSheep.Assessments.QuickTestEngine
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(%{"course_id" => course_id}, _session, socket) do
     user_role_id = socket.assigns.current_user["user_role_id"]
-    courses = Courses.list_courses_for_user(user_role_id)
+    role = socket.assigns.current_user["role"]
+    course = Courses.get_course!(course_id)
 
-    state = QuickTestEngine.start_session(user_role_id)
-    total_questions = length(state.questions)
+    case Billing.check_test_allowance(user_role_id, role) do
+      :ok ->
+        Billing.record_test_usage(user_role_id, "quick_test", course_id)
 
-    socket =
-      socket
-      |> assign(
-        page_title: "Quick Test",
-        courses: courses,
-        selected_course_id: nil,
-        engine_state: state,
-        current_question: nil,
-        selected_answer: nil,
-        show_explanation: false,
-        show_answer_input: false,
-        feedback: nil,
-        question_number: 0,
-        total_questions: total_questions,
-        test_complete: false,
-        summary: nil,
-        stats: %{correct: 0, incorrect: 0, skipped: 0}
-      )
-      |> advance_to_next_card()
+        state = QuickTestEngine.start_session(user_role_id, %{course_id: course_id})
+        total_questions = length(state.questions)
 
-    {:ok, socket}
+        socket =
+          socket
+          |> assign(
+            page_title: "Quick Test - #{course.name}",
+            course: course,
+            course_id: course_id,
+            billing_blocked: false,
+            billing_stats: nil,
+            engine_state: state,
+            current_question: nil,
+            selected_answer: nil,
+            show_explanation: false,
+            show_answer_input: false,
+            feedback: nil,
+            question_number: 0,
+            total_questions: total_questions,
+            test_complete: false,
+            summary: nil,
+            stats: %{correct: 0, incorrect: 0, skipped: 0},
+            # Tutor state
+            tutor_open: false,
+            tutor_session_id: nil,
+            tutor_messages: [],
+            tutor_loading: false,
+            tutor_input: ""
+          )
+          |> advance_to_next_card()
+
+        {:ok, socket}
+
+      {:error, :limit_reached, _info} ->
+        billing_stats = Billing.usage_stats(user_role_id)
+
+        socket =
+          socket
+          |> assign(
+            page_title: "Quick Test - #{course.name}",
+            course: course,
+            course_id: course_id,
+            billing_blocked: true,
+            billing_stats: billing_stats,
+            engine_state: nil,
+            current_question: nil,
+            selected_answer: nil,
+            show_explanation: false,
+            show_answer_input: false,
+            feedback: nil,
+            question_number: 0,
+            total_questions: 0,
+            test_complete: false,
+            summary: nil,
+            stats: %{correct: 0, incorrect: 0, skipped: 0},
+            tutor_open: false,
+            tutor_session_id: nil,
+            tutor_messages: [],
+            tutor_loading: false,
+            tutor_input: ""
+          )
+
+        {:ok, socket}
+    end
   end
 
   @impl true
-  def handle_event("filter_course", %{"course_id" => course_id}, socket) do
-    user_role_id = socket.assigns.current_user["user_role_id"]
-
-    opts =
-      if course_id == "" do
-        %{}
-      else
-        %{course_id: course_id}
-      end
-
-    state = QuickTestEngine.start_session(user_role_id, opts)
-    total_questions = length(state.questions)
-
-    socket =
-      socket
-      |> assign(
-        selected_course_id: if(course_id == "", do: nil, else: course_id),
-        engine_state: state,
-        current_question: nil,
-        selected_answer: nil,
-        show_explanation: false,
-        show_answer_input: false,
-        feedback: nil,
-        question_number: 0,
-        total_questions: total_questions,
-        test_complete: false,
-        summary: nil,
-        stats: %{correct: 0, incorrect: 0, skipped: 0}
-      )
-      |> advance_to_next_card()
-
-    {:noreply, socket}
-  end
-
   def handle_event("mark_known", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
@@ -124,6 +137,7 @@ defmodule FunSheepWeb.QuickTestLive do
         feedback: nil,
         selected_answer: nil
       )
+      |> reset_tutor()
       |> advance_to_next_card()
 
     {:noreply, socket}
@@ -182,6 +196,7 @@ defmodule FunSheepWeb.QuickTestLive do
         selected_answer: nil,
         show_explanation: false
       )
+      |> reset_tutor()
       |> advance_to_next_card()
 
     {:noreply, socket}
@@ -214,13 +229,7 @@ defmodule FunSheepWeb.QuickTestLive do
   def handle_event("restart", _params, socket) do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
-    opts =
-      case socket.assigns.selected_course_id do
-        nil -> %{}
-        course_id -> %{course_id: course_id}
-      end
-
-    state = QuickTestEngine.start_session(user_role_id, opts)
+    state = QuickTestEngine.start_session(user_role_id, %{course_id: socket.assigns.course_id})
     total_questions = length(state.questions)
 
     socket =
@@ -243,14 +252,170 @@ defmodule FunSheepWeb.QuickTestLive do
     {:noreply, socket}
   end
 
+  # --- Tutor events ---
+
+  def handle_event("open_tutor", _params, socket) do
+    socket = ensure_tutor_session(socket)
+    {:noreply, assign(socket, tutor_open: true)}
+  end
+
+  def handle_event("close_tutor", _params, socket) do
+    {:noreply, assign(socket, tutor_open: false)}
+  end
+
+  def handle_event("tutor_quick_action", %{"action" => action}, socket) do
+    socket = ensure_tutor_session(socket)
+    question = socket.assigns.current_question
+
+    if question && socket.assigns.tutor_session_id do
+      user_label = tutor_action_label(action)
+
+      socket =
+        socket
+        |> assign(tutor_loading: true, tutor_open: true)
+        |> append_tutor_message("user", user_label)
+
+      send(self(), {:tutor_quick_action, action, question})
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("tutor_send", %{"message" => message}, socket) when byte_size(message) > 0 do
+    socket = ensure_tutor_session(socket)
+
+    if socket.assigns.tutor_session_id do
+      socket =
+        socket
+        |> assign(tutor_loading: true, tutor_input: "")
+        |> append_tutor_message("user", message)
+
+      send(self(), {:tutor_send, message})
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("tutor_send", _params, socket), do: {:noreply, socket}
+
+  def handle_event("tutor_input", %{"message" => value}, socket) do
+    {:noreply, assign(socket, tutor_input: value)}
+  end
+
+  @impl true
+  def handle_info({:tutor_quick_action, action, question}, socket) do
+    session_id = socket.assigns.tutor_session_id
+
+    case Tutor.quick_action(session_id, action, question) do
+      {:ok, response} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message("assistant", response)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message(
+           "assistant",
+           "Sorry, I had trouble responding. Please try again."
+         )}
+    end
+  end
+
+  def handle_info({:tutor_send, message}, socket) do
+    session_id = socket.assigns.tutor_session_id
+
+    case Tutor.ask(session_id, message) do
+      {:ok, response} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message("assistant", response)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message(
+           "assistant",
+           "Sorry, I had trouble responding. Please try again."
+         )}
+    end
+  end
+
+  def handle_info({:tutor_response, _response}, socket) do
+    {:noreply, socket}
+  end
+
+  defp ensure_tutor_session(socket) do
+    if socket.assigns.tutor_session_id do
+      socket
+    else
+      question = socket.assigns.current_question
+      user_role_id = socket.assigns.current_user["user_role_id"]
+      course_id = socket.assigns.course_id
+
+      if question && user_role_id do
+        case Tutor.start_session(user_role_id, question.id, course_id) do
+          {:ok, session_id} ->
+            Phoenix.PubSub.subscribe(FunSheep.PubSub, Tutor.topic(session_id))
+            assign(socket, tutor_session_id: session_id)
+
+          {:error, _reason} ->
+            socket
+        end
+      else
+        socket
+      end
+    end
+  end
+
+  defp append_tutor_message(socket, role, content) do
+    msg = %{role: role, content: content, id: System.unique_integer([:positive])}
+    assign(socket, tutor_messages: socket.assigns.tutor_messages ++ [msg])
+  end
+
+  defp tutor_action_label(action) do
+    case action do
+      "hint" -> "Give me a hint"
+      "explain" -> "Explain this concept"
+      "why_wrong" -> "Why was I wrong?"
+      "step_by_step" -> "Walk me through it step by step"
+      "similar" -> "Give me a similar question"
+      _ -> action
+    end
+  end
+
+  defp reset_tutor(socket) do
+    if session_id = socket.assigns.tutor_session_id do
+      Phoenix.PubSub.unsubscribe(FunSheep.PubSub, Tutor.topic(session_id))
+      Tutor.stop_session(session_id)
+    end
+
+    assign(socket,
+      tutor_session_id: nil,
+      tutor_messages: [],
+      tutor_loading: false,
+      tutor_open: false,
+      tutor_input: ""
+    )
+  end
+
   defp advance_to_next_card(socket) do
     state = socket.assigns.engine_state
 
     case QuickTestEngine.current_card(state) do
       {:card, question, new_state} ->
+        question_stats = Questions.get_question_stats(question.id)
+
         assign(socket,
           engine_state: new_state,
           current_question: question,
+          current_question_stats: question_stats,
           question_number: socket.assigns.question_number + 1
         )
 
@@ -274,7 +439,7 @@ defmodule FunSheepWeb.QuickTestLive do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
-      Questions.create_question_attempt(%{
+      Questions.record_attempt_with_stats(%{
         user_role_id: user_role_id,
         question_id: question.id,
         answer_given: answer_given,
@@ -297,272 +462,448 @@ defmodule FunSheepWeb.QuickTestLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-lg mx-auto">
-      <%!-- Header with stats --%>
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-4">
+    <div class="max-w-lg mx-auto pb-20">
+      <%!-- Billing limit reached --%>
+      <.billing_wall
+        :if={@billing_blocked}
+        course_id={@course_id}
+        course_name={@course.name}
+        stats={@billing_stats}
+      />
+
+      <div :if={!@billing_blocked}>
+        <%!-- Header with stats --%>
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-4">
+            <.link
+              navigate={~p"/courses/#{@course_id}"}
+              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+            >
+              <.icon name="hero-arrow-left" class="w-6 h-6" />
+            </.link>
+            <div>
+              <h1 class="text-2xl font-bold text-[#1C1C1E]">Quick Test</h1>
+              <p class="text-sm text-[#8E8E93]">{@course.name}</p>
+            </div>
+          </div>
+
+          <div :if={!@test_complete} class="text-sm text-[#8E8E93]">
+            {@question_number} / {@total_questions}
+          </div>
+        </div>
+
+        <%!-- Stats bar --%>
+        <div :if={!@test_complete} class="flex items-center gap-4 mb-4 text-sm">
+          <span class="text-[#4CD964] font-medium">
+            <.icon name="hero-check" class="w-4 h-4 inline" /> {@stats.correct}
+          </span>
+          <span class="text-[#FF3B30] font-medium">
+            <.icon name="hero-x-mark" class="w-4 h-4 inline" /> {@stats.incorrect}
+          </span>
+          <span class="text-[#8E8E93] font-medium">
+            <.icon name="hero-arrow-right" class="w-4 h-4 inline" /> {@stats.skipped}
+          </span>
+        </div>
+
+        <%!-- No questions state --%>
+        <div
+          :if={@total_questions == 0 and !@test_complete}
+          class="bg-white rounded-2xl shadow-md p-8 text-center"
+        >
+          <.icon name="hero-academic-cap" class="w-16 h-16 text-[#4CD964] mx-auto mb-4" />
+          <h2 class="text-xl font-bold text-[#1C1C1E] mb-2">No Questions Available</h2>
+          <p class="text-[#8E8E93] mb-6">
+            Add some courses and questions to start your quick test session.
+          </p>
           <.link
-            navigate={~p"/dashboard"}
-            class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+            navigate={~p"/courses/#{@course_id}"}
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
-            <.icon name="hero-arrow-left" class="w-6 h-6" />
+            Back to Course
           </.link>
-          <h1 class="text-2xl font-bold text-[#1C1C1E]">Quick Test</h1>
         </div>
 
-        <div :if={!@test_complete} class="text-sm text-[#8E8E93]">
-          {@question_number} / {@total_questions}
-        </div>
-      </div>
-
-      <%!-- Stats bar --%>
-      <div :if={!@test_complete} class="flex items-center gap-4 mb-4 text-sm">
-        <span class="text-[#4CD964] font-medium">
-          <.icon name="hero-check" class="w-4 h-4 inline" /> {@stats.correct}
-        </span>
-        <span class="text-[#FF3B30] font-medium">
-          <.icon name="hero-x-mark" class="w-4 h-4 inline" /> {@stats.incorrect}
-        </span>
-        <span class="text-[#8E8E93] font-medium">
-          <.icon name="hero-arrow-right" class="w-4 h-4 inline" /> {@stats.skipped}
-        </span>
-      </div>
-
-      <%!-- Course filter --%>
-      <div :if={!@test_complete and length(@courses) > 0} class="mb-6">
-        <form phx-change="filter_course">
-          <select
-            name="course_id"
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors text-sm"
+        <%!-- Card --%>
+        <div :if={@current_question && !@test_complete} class="relative">
+          <%!-- Skip button --%>
+          <button
+            phx-click="skip"
+            class="absolute top-4 right-4 text-[#8E8E93] hover:text-[#1C1C1E] transition-colors z-10"
+            title="Skip"
           >
-            <option value="">All Courses</option>
-            <option
-              :for={c <- @courses}
-              value={c.id}
-              selected={@selected_course_id == c.id}
-            >
-              {c.name}
-            </option>
-          </select>
-        </form>
-      </div>
+            <.icon name="hero-forward" class="w-5 h-5" />
+          </button>
 
-      <%!-- No questions state --%>
-      <div
-        :if={@total_questions == 0 and !@test_complete}
-        class="bg-white rounded-2xl shadow-md p-8 text-center"
-      >
-        <.icon name="hero-academic-cap" class="w-16 h-16 text-[#4CD964] mx-auto mb-4" />
-        <h2 class="text-xl font-bold text-[#1C1C1E] mb-2">No Questions Available</h2>
-        <p class="text-[#8E8E93] mb-6">
-          Add some courses and questions to start your quick test session.
-        </p>
-        <.link
-          navigate={~p"/dashboard"}
-          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
-        >
-          Back to Dashboard
-        </.link>
-      </div>
-
-      <%!-- Card --%>
-      <div :if={@current_question && !@test_complete} class="relative">
-        <%!-- Skip button --%>
-        <button
-          phx-click="skip"
-          class="absolute top-4 right-4 text-[#8E8E93] hover:text-[#1C1C1E] transition-colors z-10"
-          title="Skip"
-        >
-          <.icon name="hero-forward" class="w-5 h-5" />
-        </button>
-
-        <div class="bg-white rounded-2xl shadow-lg p-8 min-h-[300px] flex flex-col">
-          <%!-- Tags --%>
-          <div class="flex items-center gap-2 mb-6">
-            <span
-              :if={@current_question.chapter}
-              class="px-3 py-1 rounded-full text-xs font-medium bg-[#F5F5F7] text-[#8E8E93]"
-            >
-              {@current_question.chapter.name}
-            </span>
-            <span class="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-[#007AFF]">
-              {question_type_label(@current_question.question_type)}
-            </span>
-          </div>
-
-          <%!-- Question content --%>
-          <div class="flex-1 flex items-center justify-center mb-6">
-            <p class="text-lg text-[#1C1C1E] font-medium leading-relaxed text-center">
-              {@current_question.content}
-            </p>
-          </div>
-
-          <%!-- MCQ options (shown when answering) --%>
-          <div :if={@show_answer_input} class="mb-6">
-            <%= case @current_question.question_type do %>
-              <% :multiple_choice -> %>
-                <.render_mcq_options
-                  question={@current_question}
-                  selected_answer={@selected_answer}
-                  feedback={@feedback}
-                />
-              <% :true_false -> %>
-                <.render_true_false
-                  selected_answer={@selected_answer}
-                  feedback={@feedback}
-                />
-              <% _other -> %>
-                <.render_text_input
-                  selected_answer={@selected_answer}
-                  feedback={@feedback}
-                />
-            <% end %>
-
-            <%!-- Submit / Next after answer --%>
-            <div :if={@feedback == nil} class="flex justify-center mt-4">
-              <button
-                phx-click="submit_answer"
-                disabled={@selected_answer == nil}
-                class={[
-                  "font-medium px-6 py-2 rounded-full shadow-md transition-colors",
-                  if(@selected_answer,
-                    do: "bg-[#4CD964] hover:bg-[#3DBF55] text-white",
-                    else: "bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed"
-                  )
-                ]}
+          <div class="bg-white rounded-2xl shadow-lg p-5 sm:p-8 min-h-[220px] sm:min-h-[300px] flex flex-col">
+            <%!-- Tags --%>
+            <div class="flex items-center gap-2 mb-6">
+              <span
+                :if={@current_question.chapter}
+                class="px-3 py-1 rounded-full text-xs font-medium bg-[#F5F5F7] text-[#8E8E93]"
               >
-                Submit
-              </button>
+                {@current_question.chapter.name}
+              </span>
+              <span class="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-[#007AFF]">
+                {question_type_label(@current_question.question_type)}
+              </span>
             </div>
 
-            <div :if={@feedback} class="mt-4">
-              <div class={[
-                "p-3 rounded-xl flex items-center gap-3 mb-4",
-                if(@feedback.is_correct, do: "bg-[#E8F8EB]", else: "bg-red-50")
-              ]}>
-                <.icon
-                  name={if(@feedback.is_correct, do: "hero-check-circle", else: "hero-x-circle")}
+            <%!-- Question content --%>
+            <div class="flex-1 flex items-center justify-center mb-6">
+              <p class="text-lg text-[#1C1C1E] font-medium leading-relaxed text-center">
+                {@current_question.content}
+              </p>
+            </div>
+
+            <%!-- MCQ options (shown when answering) --%>
+            <div :if={@show_answer_input} class="mb-6">
+              <%= case @current_question.question_type do %>
+                <% :multiple_choice -> %>
+                  <.render_mcq_options
+                    question={@current_question}
+                    selected_answer={@selected_answer}
+                    feedback={@feedback}
+                  />
+                <% :true_false -> %>
+                  <.render_true_false
+                    selected_answer={@selected_answer}
+                    feedback={@feedback}
+                  />
+                <% _other -> %>
+                  <.render_text_input
+                    selected_answer={@selected_answer}
+                    feedback={@feedback}
+                  />
+              <% end %>
+
+              <%!-- Submit / Next after answer --%>
+              <div :if={@feedback == nil} class="flex justify-center mt-4">
+                <button
+                  phx-click="submit_answer"
+                  disabled={@selected_answer == nil}
                   class={[
-                    "w-5 h-5",
-                    if(@feedback.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")
+                    "font-medium px-6 py-2 rounded-full shadow-md transition-colors",
+                    if(@selected_answer,
+                      do: "bg-[#4CD964] hover:bg-[#3DBF55] text-white",
+                      else: "bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed"
+                    )
                   ]}
-                />
-                <p class={[
-                  "font-medium text-sm",
-                  if(@feedback.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")
+                >
+                  Submit
+                </button>
+              </div>
+
+              <div :if={@feedback} class="mt-4">
+                <div class={[
+                  "p-3 rounded-xl flex items-center gap-3 mb-4",
+                  if(@feedback.is_correct, do: "bg-[#E8F8EB]", else: "bg-red-50")
                 ]}>
-                  {if @feedback.is_correct,
-                    do: "Correct!",
-                    else: "Incorrect - Answer: #{@feedback.correct_answer}"}
-                </p>
+                  <.icon
+                    name={if(@feedback.is_correct, do: "hero-check-circle", else: "hero-x-circle")}
+                    class={[
+                      "w-5 h-5",
+                      if(@feedback.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")
+                    ]}
+                  />
+                  <p class={[
+                    "font-medium text-sm",
+                    if(@feedback.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")
+                  ]}>
+                    {if @feedback.is_correct,
+                      do: "Correct!",
+                      else: "Incorrect - Answer: #{@feedback.correct_answer}"}
+                  </p>
+                </div>
+                <.render_community_stats
+                  :if={assigns[:current_question_stats]}
+                  stats={assigns[:current_question_stats]}
+                />
+                <%!-- Tutor actions after answering --%>
+                <div class="flex items-center gap-2 flex-wrap mb-3">
+                  <button
+                    :if={!@feedback.is_correct}
+                    phx-click="tutor_quick_action"
+                    phx-value-action="why_wrong"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:border-[#FF3B30] text-xs text-[#1C1C1E] rounded-full transition-colors"
+                  >
+                    <.icon name="hero-question-mark-circle" class="w-3.5 h-3.5 text-[#FF3B30]" />
+                    Why wrong?
+                  </button>
+                  <button
+                    phx-click="tutor_quick_action"
+                    phx-value-action="explain"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:border-[#4CD964] text-xs text-[#1C1C1E] rounded-full transition-colors"
+                  >
+                    <.icon name="hero-academic-cap" class="w-3.5 h-3.5 text-[#007AFF]" /> Explain
+                  </button>
+                  <button
+                    phx-click="open_tutor"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#4CD964] hover:bg-[#3DBF55] text-xs text-white font-medium rounded-full shadow-sm transition-colors"
+                  >
+                    <.icon name="hero-chat-bubble-left-right" class="w-3.5 h-3.5" /> Ask Tutor
+                  </button>
+                </div>
+                <div class="flex justify-center">
+                  <button
+                    phx-click="next_after_answer"
+                    class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+                  >
+                    Next Card
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <%!-- Explanation overlay (for "I Don't Know") --%>
+            <div :if={@show_explanation} class="mb-6">
+              <div class="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
+                <p class="text-sm font-medium text-yellow-800 mb-2">Correct Answer:</p>
+                <p class="text-[#1C1C1E] font-medium">{@current_question.answer}</p>
+              </div>
+              <.render_community_stats
+                :if={assigns[:current_question_stats]}
+                stats={assigns[:current_question_stats]}
+              />
+              <%!-- Tutor actions after "I Don't Know" --%>
+              <div class="flex items-center gap-2 flex-wrap mt-3 mb-3">
+                <button
+                  phx-click="tutor_quick_action"
+                  phx-value-action="explain"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:border-[#4CD964] text-xs text-[#1C1C1E] rounded-full transition-colors"
+                >
+                  <.icon name="hero-academic-cap" class="w-3.5 h-3.5 text-[#007AFF]" /> Explain
+                </button>
+                <button
+                  phx-click="tutor_quick_action"
+                  phx-value-action="step_by_step"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E5E5EA] hover:border-[#4CD964] text-xs text-[#1C1C1E] rounded-full transition-colors"
+                >
+                  <.icon name="hero-list-bullet" class="w-3.5 h-3.5 text-[#8E8E93]" /> Step by step
+                </button>
+                <button
+                  phx-click="open_tutor"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#4CD964] hover:bg-[#3DBF55] text-xs text-white font-medium rounded-full shadow-sm transition-colors"
+                >
+                  <.icon name="hero-chat-bubble-left-right" class="w-3.5 h-3.5" /> Ask Tutor
+                </button>
               </div>
               <div class="flex justify-center">
                 <button
-                  phx-click="next_after_answer"
+                  phx-click="dismiss_explanation"
                   class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
                 >
-                  Next Card
+                  Got It
                 </button>
+              </div>
+            </div>
+
+            <%!-- Action buttons (hidden during answer/explanation) --%>
+            <div
+              :if={!@show_answer_input and !@show_explanation}
+              class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 mt-auto"
+            >
+              <button
+                phx-click="mark_known"
+                class="flex-1 bg-[#E8F8EB] hover:bg-[#D0F0D8] text-[#4CD964] font-medium py-3 rounded-full transition-colors text-sm touch-target"
+              >
+                I Know This
+              </button>
+              <button
+                phx-click="show_answer_input"
+                class="flex-1 bg-[#007AFF] hover:bg-[#0066DD] text-white font-medium py-3 rounded-full transition-colors text-sm touch-target"
+              >
+                Answer
+              </button>
+              <button
+                phx-click="mark_unknown"
+                class="flex-1 bg-red-50 hover:bg-red-100 text-[#FF3B30] font-medium py-3 rounded-full transition-colors text-sm touch-target"
+              >
+                I Don't Know
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Completion summary --%>
+        <div :if={@test_complete && @summary} class="bg-white rounded-2xl shadow-md p-5 sm:p-8">
+          <div class="text-center mb-6 sm:mb-8">
+            <.icon
+              name="hero-sparkles"
+              class="w-12 h-12 sm:w-16 sm:h-16 text-[#4CD964] mx-auto mb-3 sm:mb-4"
+            />
+            <h2 class="text-xl sm:text-2xl font-bold text-[#1C1C1E]">Session Complete!</h2>
+          </div>
+
+          <div class="bg-[#F5F5F7] rounded-xl p-4 sm:p-6 mb-5 sm:mb-6">
+            <div class="text-center">
+              <p class="text-3xl sm:text-4xl font-bold text-[#4CD964]">{@summary.score}%</p>
+              <p class="text-sm text-[#8E8E93] mt-1">
+                {@summary.total} questions reviewed
+              </p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 sm:gap-3 mb-6 sm:mb-8">
+            <div class="bg-[#E8F8EB] rounded-xl p-3 text-center">
+              <p class="text-xl font-bold text-[#4CD964]">{@summary.known}</p>
+              <p class="text-xs text-[#8E8E93]">Already Knew</p>
+            </div>
+            <div class="bg-green-50 rounded-xl p-3 text-center">
+              <p class="text-xl font-bold text-[#4CD964]">{@summary.answered_correct}</p>
+              <p class="text-xs text-[#8E8E93]">Answered Correctly</p>
+            </div>
+            <div class="bg-red-50 rounded-xl p-3 text-center">
+              <p class="text-xl font-bold text-[#FF3B30]">
+                {@summary.unknown + @summary.answered_wrong}
+              </p>
+              <p class="text-xs text-[#8E8E93]">Need Review</p>
+            </div>
+            <div class="bg-[#F5F5F7] rounded-xl p-3 text-center">
+              <p class="text-xl font-bold text-[#8E8E93]">{@summary.skipped}</p>
+              <p class="text-xs text-[#8E8E93]">Skipped</p>
+            </div>
+          </div>
+
+          <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
+            <.link
+              navigate={~p"/dashboard"}
+              class="px-6 py-3 sm:py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors text-center touch-target"
+            >
+              Back to Dashboard
+            </.link>
+            <button
+              phx-click="restart"
+              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+            >
+              Practice Again
+            </button>
+          </div>
+        </div>
+
+        <%!-- Tutor Chat Panel --%>
+        <div
+          :if={@tutor_open}
+          class="fixed inset-x-0 bottom-0 z-40 bg-white border-t border-[#E5E5EA] shadow-xl rounded-t-2xl max-h-[60vh] flex flex-col"
+          id="tutor-panel"
+          phx-hook="ScrollBottom"
+        >
+          <div class="flex items-center justify-between px-6 py-3 border-b border-[#E5E5EA] shrink-0">
+            <div class="flex items-center gap-2">
+              <.icon name="hero-academic-cap" class="w-5 h-5 text-[#4CD964]" />
+              <span class="font-medium text-[#1C1C1E]">AI Tutor</span>
+              <span class="text-xs text-[#8E8E93]">
+                — {if @current_question && @current_question.chapter,
+                  do: @current_question.chapter.name,
+                  else: @course.name}
+              </span>
+            </div>
+            <button
+              phx-click="close_tutor"
+              class="p-1 text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+              aria-label="Close tutor"
+            >
+              <.icon name="hero-x-mark" class="w-5 h-5" />
+            </button>
+          </div>
+
+          <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" id="tutor-messages">
+            <div
+              :if={@tutor_messages == []}
+              class="text-center text-sm text-[#8E8E93] py-8"
+            >
+              Ask me anything about this question! I'm here to help you understand.
+            </div>
+
+            <div
+              :for={msg <- @tutor_messages}
+              class={[
+                "flex",
+                if(msg.role == "user", do: "justify-end", else: "justify-start")
+              ]}
+            >
+              <div class={[
+                "max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed",
+                if(msg.role == "user",
+                  do: "bg-[#4CD964] text-white",
+                  else: "bg-[#F5F5F7] text-[#1C1C1E]"
+                )
+              ]}>
+                <.render_tutor_markdown content={msg.content} />
+              </div>
+            </div>
+
+            <div :if={@tutor_loading} class="flex justify-start">
+              <div class="bg-[#F5F5F7] px-4 py-3 rounded-2xl">
+                <div class="flex gap-1">
+                  <div
+                    class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                    style="animation-delay: 0ms"
+                  >
+                  </div>
+                  <div
+                    class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                    style="animation-delay: 150ms"
+                  >
+                  </div>
+                  <div
+                    class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                    style="animation-delay: 300ms"
+                  >
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <%!-- Explanation overlay (for "I Don't Know") --%>
-          <div :if={@show_explanation} class="mb-6">
-            <div class="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
-              <p class="text-sm font-medium text-yellow-800 mb-2">Correct Answer:</p>
-              <p class="text-[#1C1C1E] font-medium">{@current_question.answer}</p>
-            </div>
-            <div class="flex justify-center mt-4">
+          <div class="px-6 py-3 border-t border-[#E5E5EA] shrink-0">
+            <form phx-submit="tutor_send" class="flex gap-2">
+              <input
+                type="text"
+                name="message"
+                value={@tutor_input}
+                phx-change="tutor_input"
+                placeholder="Ask about this question..."
+                autocomplete="off"
+                class="flex-1 px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none text-sm transition-colors"
+              />
               <button
-                phx-click="dismiss_explanation"
-                class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+                type="submit"
+                disabled={@tutor_loading || @tutor_input == ""}
+                class={[
+                  "p-2 rounded-full transition-colors",
+                  if(@tutor_loading || @tutor_input == "",
+                    do: "bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed",
+                    else: "bg-[#4CD964] hover:bg-[#3DBF55] text-white shadow-md"
+                  )
+                ]}
+                aria-label="Send message"
               >
-                Got It
+                <.icon name="hero-paper-airplane" class="w-5 h-5" />
               </button>
-            </div>
+            </form>
           </div>
-
-          <%!-- Action buttons (hidden during answer/explanation) --%>
-          <div
-            :if={!@show_answer_input and !@show_explanation}
-            class="flex items-center justify-between gap-3 mt-auto"
-          >
-            <button
-              phx-click="mark_known"
-              class="flex-1 bg-[#E8F8EB] hover:bg-[#D0F0D8] text-[#4CD964] font-medium py-3 rounded-full transition-colors text-sm"
-            >
-              I Know This
-            </button>
-            <button
-              phx-click="show_answer_input"
-              class="flex-1 bg-[#007AFF] hover:bg-[#0066DD] text-white font-medium py-3 rounded-full transition-colors text-sm"
-            >
-              Answer
-            </button>
-            <button
-              phx-click="mark_unknown"
-              class="flex-1 bg-red-50 hover:bg-red-100 text-[#FF3B30] font-medium py-3 rounded-full transition-colors text-sm"
-            >
-              I Don't Know
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <%!-- Completion summary --%>
-      <div :if={@test_complete && @summary} class="bg-white rounded-2xl shadow-md p-8">
-        <div class="text-center mb-8">
-          <.icon name="hero-sparkles" class="w-16 h-16 text-[#4CD964] mx-auto mb-4" />
-          <h2 class="text-2xl font-bold text-[#1C1C1E]">Session Complete!</h2>
-        </div>
-
-        <div class="bg-[#F5F5F7] rounded-xl p-6 mb-6">
-          <div class="text-center">
-            <p class="text-4xl font-bold text-[#4CD964]">{@summary.score}%</p>
-            <p class="text-sm text-[#8E8E93] mt-1">
-              {@summary.total} questions reviewed
-            </p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3 mb-8">
-          <div class="bg-[#E8F8EB] rounded-xl p-3 text-center">
-            <p class="text-xl font-bold text-[#4CD964]">{@summary.known}</p>
-            <p class="text-xs text-[#8E8E93]">Already Knew</p>
-          </div>
-          <div class="bg-green-50 rounded-xl p-3 text-center">
-            <p class="text-xl font-bold text-[#4CD964]">{@summary.answered_correct}</p>
-            <p class="text-xs text-[#8E8E93]">Answered Correctly</p>
-          </div>
-          <div class="bg-red-50 rounded-xl p-3 text-center">
-            <p class="text-xl font-bold text-[#FF3B30]">
-              {@summary.unknown + @summary.answered_wrong}
-            </p>
-            <p class="text-xs text-[#8E8E93]">Need Review</p>
-          </div>
-          <div class="bg-[#F5F5F7] rounded-xl p-3 text-center">
-            <p class="text-xl font-bold text-[#8E8E93]">{@summary.skipped}</p>
-            <p class="text-xs text-[#8E8E93]">Skipped</p>
-          </div>
-        </div>
-
-        <div class="flex justify-center gap-4">
-          <.link
-            navigate={~p"/dashboard"}
-            class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
-          >
-            Back to Dashboard
-          </.link>
-          <button
-            phx-click="restart"
-            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
-          >
-            Practice Again
-          </button>
         </div>
       </div>
     </div>
+    """
+  end
+
+  # --- Tutor markdown renderer ---
+
+  attr :content, :string, required: true
+
+  defp render_tutor_markdown(assigns) do
+    html =
+      assigns.content
+      |> Phoenix.HTML.html_escape()
+      |> Phoenix.HTML.safe_to_string()
+      |> String.replace(~r/\*\*(.+?)\*\*/, "<strong>\\1</strong>")
+      |> String.replace("\n", "<br/>")
+
+    assigns = assign(assigns, :html, html)
+
+    ~H"""
+    <span>{Phoenix.HTML.raw(@html)}</span>
     """
   end
 
@@ -664,6 +1005,30 @@ defmodule FunSheepWeb.QuickTestLive do
           class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-xl outline-none transition-colors resize-none text-sm"
         >{@selected_answer}</textarea>
       </form>
+    </div>
+    """
+  end
+
+  attr :stats, :map, required: true
+
+  defp render_community_stats(assigns) do
+    correct_pct =
+      if assigns.stats.total_attempts > 0 do
+        Float.round(assigns.stats.correct_attempts / assigns.stats.total_attempts * 100, 0)
+      else
+        0
+      end
+
+    assigns = assign(assigns, correct_pct: correct_pct)
+
+    ~H"""
+    <div class="mt-3 flex items-center gap-2 text-xs text-[#8E8E93]">
+      <.icon name="hero-users" class="w-4 h-4" />
+      <span>
+        <span class="font-medium">{trunc(@correct_pct)}%</span>
+        of students got this right
+        <span class="text-[#C7C7CC]">({@stats.total_attempts} attempts)</span>
+      </span>
     </div>
     """
   end

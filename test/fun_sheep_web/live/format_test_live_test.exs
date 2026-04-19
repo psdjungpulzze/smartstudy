@@ -77,7 +77,9 @@ defmodule FunSheepWeb.FormatTestLiveTest do
   describe "format test page" do
     test "renders with questions", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/format-test")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/format-test")
 
       assert html =~ "Format Quiz"
       assert html =~ "Format Practice Test"
@@ -87,7 +89,9 @@ defmodule FunSheepWeb.FormatTestLiveTest do
 
     test "shows timer when time limit is set", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/format-test")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/format-test")
 
       # Timer should show 10:00 initially
       assert html =~ "10:00" or html =~ "09:5"
@@ -112,7 +116,12 @@ defmodule FunSheepWeb.FormatTestLiveTest do
         })
 
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule_no_template.id}/format-test")
+
+      {:ok, _view, html} =
+        live(
+          conn,
+          ~p"/courses/#{schedule_no_template.course_id}/tests/#{schedule_no_template.id}/format-test"
+        )
 
       assert html =~ "No format template defined"
       assert html =~ "Define Test Format"

@@ -2,7 +2,7 @@ defmodule FunSheep.Interactor.Profiles do
   @moduledoc """
   Interface to the Interactor User Profiles API.
 
-  Stores and retrieves student preferences (grade, school, nationality,
+  Stores and retrieves student preferences (grade, school, ethnicity,
   hobbies, learning preferences) keyed by `external_user_id`.
   """
 

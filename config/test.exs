@@ -39,6 +39,9 @@ config :fun_sheep, :storage_backend, FunSheep.Storage.Local
 # OCR configuration - always mock in tests
 config :fun_sheep, :ocr_mock, true
 
+# Disable Oban in tests
+config :fun_sheep, Oban, testing: :inline
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 

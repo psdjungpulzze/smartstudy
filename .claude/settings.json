@@ -48,6 +48,60 @@
   "hooks": {
     "PostToolUse": [
       {
+        "matcher": "Edit(**/live/**/*.ex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛑 STOP: UI file modified. You MUST run the visual-tester Playwright agent BEFORE reporting this change to the user.'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit(**/*.heex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛑 STOP: UI file modified. You MUST run the visual-tester Playwright agent BEFORE reporting this change to the user.'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit(**/components/**/*.ex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛑 STOP: UI file modified. You MUST run the visual-tester Playwright agent BEFORE reporting this change to the user.'"
+          }
+        ]
+      },
+      {
+        "matcher": "Write(**/live/**/*.ex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛑 STOP: UI file modified. You MUST run the visual-tester Playwright agent BEFORE reporting this change to the user.'"
+          }
+        ]
+      },
+      {
+        "matcher": "Write(**/*.heex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛑 STOP: UI file modified. You MUST run the visual-tester Playwright agent BEFORE reporting this change to the user.'"
+          }
+        ]
+      },
+      {
+        "matcher": "Write(**/components/**/*.ex)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛑 STOP: UI file modified. You MUST run the visual-tester Playwright agent BEFORE reporting this change to the user.'"
+          }
+        ]
+      },
+      {
         "matcher": "Write(*.ts)",
         "hooks": [
           {

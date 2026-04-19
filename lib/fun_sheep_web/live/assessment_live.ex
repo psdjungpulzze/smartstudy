@@ -1,32 +1,133 @@
 defmodule FunSheepWeb.AssessmentLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Questions}
+  import FunSheepWeb.BillingComponents
+
+  alias FunSheep.{Assessments, Billing, Questions}
   alias FunSheep.Assessments.Engine
 
   @impl true
-  def mount(%{"schedule_id" => schedule_id}, _session, socket) do
+  def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    role = socket.assigns.current_user["role"]
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
-    state = Engine.start_assessment(schedule)
+
+    case Billing.check_test_allowance(user_role_id, role) do
+      :ok ->
+        Billing.record_test_usage(user_role_id, "assessment", course_id)
+        mount_assessment(socket, course_id, schedule)
+
+      {:error, :limit_reached, _info} ->
+        billing_stats = Billing.usage_stats(user_role_id)
+
+        socket =
+          socket
+          |> assign(
+            page_title: "Assessment: #{schedule.name}",
+            course_id: course_id,
+            schedule: schedule,
+            billing_blocked: true,
+            billing_stats: billing_stats,
+            engine_state: nil,
+            current_question: nil,
+            selected_answer: nil,
+            feedback: nil,
+            question_number: 0,
+            start_time: 0,
+            question_sources: [],
+            enabled_sources: MapSet.new(),
+            phase: :blocked
+          )
+
+        {:ok, socket}
+    end
+  end
+
+  defp mount_assessment(socket, course_id, schedule) do
+    # Load available question sources for filtering
+    question_sources = Questions.list_question_sources(course_id)
+
+    # By default, all sources are enabled
+    enabled_sources =
+      question_sources
+      |> Enum.map(& &1.material_id)
+      |> MapSet.new()
 
     socket =
       socket
       |> assign(
         page_title: "Assessment: #{schedule.name}",
+        course_id: course_id,
         schedule: schedule,
-        engine_state: state,
+        billing_blocked: false,
+        billing_stats: nil,
+        engine_state: nil,
         current_question: nil,
         selected_answer: nil,
         feedback: nil,
         question_number: 0,
-        start_time: System.monotonic_time(:second)
+        start_time: System.monotonic_time(:second),
+        question_sources: question_sources,
+        enabled_sources: enabled_sources,
+        phase: if(question_sources != [], do: :setup, else: :testing)
       )
-      |> advance_to_next_question()
+
+    # If no sources to filter, start immediately
+    socket =
+      if socket.assigns.phase == :testing do
+        state = Engine.start_assessment(schedule)
+        socket |> assign(engine_state: state) |> advance_to_next_question()
+      else
+        socket
+      end
 
     {:ok, socket}
   end
 
   @impl true
+  def handle_event("toggle_source", %{"material-id" => material_id}, socket) do
+    enabled = socket.assigns.enabled_sources
+
+    enabled =
+      if MapSet.member?(enabled, material_id) do
+        MapSet.delete(enabled, material_id)
+      else
+        MapSet.put(enabled, material_id)
+      end
+
+    {:noreply, assign(socket, enabled_sources: enabled)}
+  end
+
+  def handle_event("toggle_all_sources", _params, socket) do
+    all_ids = socket.assigns.question_sources |> Enum.map(& &1.material_id) |> MapSet.new()
+    currently_all = MapSet.equal?(socket.assigns.enabled_sources, all_ids)
+
+    enabled = if currently_all, do: MapSet.new(), else: all_ids
+    {:noreply, assign(socket, enabled_sources: enabled)}
+  end
+
+  def handle_event("start_assessment", _params, socket) do
+    schedule = socket.assigns.schedule
+    enabled = socket.assigns.enabled_sources
+
+    # Pass source material filter to the engine if any sources are selected
+    source_ids =
+      if MapSet.size(enabled) > 0 do
+        MapSet.to_list(enabled)
+      else
+        nil
+      end
+
+    state = Engine.start_assessment(schedule, source_material_ids: source_ids)
+
+    socket =
+      socket
+      |> assign(engine_state: state, phase: :testing)
+      |> advance_to_next_question()
+
+    {:noreply, socket}
+  end
+
   def handle_event("select_answer", %{"answer" => answer}, socket) do
     {:noreply, assign(socket, selected_answer: answer)}
   end
@@ -53,7 +154,7 @@ defmodule FunSheepWeb.AssessmentLive do
       user_role_id = socket.assigns.current_user["user_role_id"]
 
       if user_role_id do
-        Questions.create_question_attempt(%{
+        Questions.record_attempt_with_stats(%{
           user_role_id: user_role_id,
           question_id: question.id,
           answer_given: answer,
@@ -90,9 +191,13 @@ defmodule FunSheepWeb.AssessmentLive do
 
     case Engine.next_question(state) do
       {:question, question, new_state} ->
+        # Load community stats for this question
+        question_stats = Questions.get_question_stats(question.id)
+
         assign(socket,
           engine_state: new_state,
           current_question: question,
+          current_question_stats: question_stats,
           question_number: socket.assigns.question_number + 1,
           start_time: System.monotonic_time(:second)
         )
@@ -157,38 +262,153 @@ defmodule FunSheepWeb.AssessmentLive do
 
     ~H"""
     <div class="max-w-3xl mx-auto">
-      <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-4">
-          <.link
-            navigate={~p"/tests"}
-            class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+      <.billing_wall
+        :if={@billing_blocked}
+        course_id={@course_id}
+        course_name={@schedule.course.name}
+        stats={@billing_stats}
+      />
+
+      <div :if={!@billing_blocked}>
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center gap-4">
+            <.link
+              navigate={~p"/courses/#{@course_id}/tests"}
+              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+            >
+              <.icon name="hero-arrow-left" class="w-6 h-6" />
+            </.link>
+            <div>
+              <h1 class="text-2xl font-bold text-[#1C1C1E]">{@schedule.name}</h1>
+              <p class="text-sm text-[#8E8E93]">{@schedule.course.name}</p>
+            </div>
+          </div>
+
+          <div
+            :if={@phase == :testing && !@assessment_complete && @engine_state}
+            class="flex items-center gap-4"
           >
-            <.icon name="hero-arrow-left" class="w-6 h-6" />
-          </.link>
-          <div>
-            <h1 class="text-2xl font-bold text-[#1C1C1E]">{@schedule.name}</h1>
-            <p class="text-sm text-[#8E8E93]">{@schedule.course.name}</p>
+            <span class={"px-3 py-1 rounded-full text-xs font-medium #{difficulty_badge_class(@engine_state.current_difficulty)}"}>
+              {difficulty_label(@engine_state.current_difficulty)}
+            </span>
           </div>
         </div>
 
-        <div :if={!@assessment_complete} class="flex items-center gap-4">
-          <span class={"px-3 py-1 rounded-full text-xs font-medium #{difficulty_badge_class(@engine_state.current_difficulty)}"}>
-            {difficulty_label(@engine_state.current_difficulty)}
-          </span>
-        </div>
+        <%= if @phase == :setup do %>
+          <.render_source_setup
+            question_sources={@question_sources}
+            enabled_sources={@enabled_sources}
+            schedule={@schedule}
+          />
+        <% else %>
+          <%= if @assessment_complete do %>
+            <.render_summary summary={@summary} schedule={@schedule} />
+          <% else %>
+            <.render_question
+              question={@current_question}
+              selected_answer={@selected_answer}
+              feedback={@feedback}
+              question_number={@question_number}
+              engine_state={@engine_state}
+              question_stats={assigns[:current_question_stats]}
+            />
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  attr :question_sources, :list, required: true
+  attr :enabled_sources, :any, required: true
+  attr :schedule, :map, required: true
+
+  defp render_source_setup(assigns) do
+    all_enabled =
+      MapSet.size(assigns.enabled_sources) == length(assigns.question_sources)
+
+    total_questions =
+      assigns.question_sources
+      |> Enum.filter(&MapSet.member?(assigns.enabled_sources, &1.material_id))
+      |> Enum.map(& &1.question_count)
+      |> Enum.sum()
+
+    assigns = assign(assigns, all_enabled: all_enabled, total_questions: total_questions)
+
+    ~H"""
+    <div class="bg-white rounded-2xl shadow-md p-8">
+      <div class="mb-6">
+        <h2 class="text-xl font-bold text-[#1C1C1E] mb-2">Question Sources</h2>
+        <p class="text-sm text-[#8E8E93]">
+          Select which question sets to include in this assessment.
+          Toggle off any sources you want to exclude.
+        </p>
       </div>
 
-      <%= if @assessment_complete do %>
-        <.render_summary summary={@summary} schedule={@schedule} />
-      <% else %>
-        <.render_question
-          question={@current_question}
-          selected_answer={@selected_answer}
-          feedback={@feedback}
-          question_number={@question_number}
-          engine_state={@engine_state}
-        />
-      <% end %>
+      <div class="mb-4">
+        <button
+          phx-click="toggle_all_sources"
+          class="text-sm font-medium text-[#007AFF] hover:text-[#0066DD] transition-colors"
+        >
+          {if @all_enabled, do: "Deselect All", else: "Select All"}
+        </button>
+      </div>
+
+      <div class="space-y-3 mb-6">
+        <button
+          :for={source <- @question_sources}
+          phx-click="toggle_source"
+          phx-value-material-id={source.material_id}
+          class={[
+            "w-full flex items-center justify-between p-4 rounded-xl border-2 transition-colors text-left",
+            if(MapSet.member?(@enabled_sources, source.material_id),
+              do: "border-[#4CD964] bg-[#E8F8EB]",
+              else: "border-[#E5E5EA] bg-white hover:border-[#8E8E93]"
+            )
+          ]}
+        >
+          <div class="flex items-center gap-3">
+            <div class={[
+              "w-5 h-5 rounded-md flex items-center justify-center",
+              if(MapSet.member?(@enabled_sources, source.material_id),
+                do: "bg-[#4CD964]",
+                else: "border-2 border-[#E5E5EA]"
+              )
+            ]}>
+              <.icon
+                :if={MapSet.member?(@enabled_sources, source.material_id)}
+                name="hero-check"
+                class="w-3 h-3 text-white"
+              />
+            </div>
+            <div>
+              <p class="font-medium text-[#1C1C1E] text-sm">{source.file_name}</p>
+            </div>
+          </div>
+          <span class="text-xs text-[#8E8E93] px-2 py-1 bg-[#F5F5F7] rounded-full">
+            {source.question_count} questions
+          </span>
+        </button>
+      </div>
+
+      <div class="flex items-center justify-between pt-4 border-t border-[#E5E5EA]">
+        <p class="text-sm text-[#8E8E93]">
+          {@total_questions} questions selected
+        </p>
+        <button
+          phx-click="start_assessment"
+          disabled={@total_questions == 0}
+          class={[
+            "font-medium px-6 py-2 rounded-full shadow-md transition-colors",
+            if(@total_questions > 0,
+              do: "bg-[#4CD964] hover:bg-[#3DBF55] text-white",
+              else: "bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed"
+            )
+          ]}
+        >
+          Start Assessment
+        </button>
+      </div>
     </div>
     """
   end
@@ -198,6 +418,7 @@ defmodule FunSheepWeb.AssessmentLive do
   attr :feedback, :map, default: nil
   attr :question_number, :integer, required: true
   attr :engine_state, :map, required: true
+  attr :question_stats, :map, default: nil
 
   defp render_question(assigns) do
     assigns =
@@ -264,6 +485,9 @@ defmodule FunSheepWeb.AssessmentLive do
             </p>
           </div>
         </div>
+
+        <%!-- Community stats - shown after answering --%>
+        <.render_community_stats :if={@question_stats} stats={@question_stats} />
 
         <div class="flex justify-end mt-4">
           <button
@@ -442,18 +666,42 @@ defmodule FunSheepWeb.AssessmentLive do
 
       <div class="flex justify-center gap-4">
         <.link
-          navigate={~p"/tests"}
+          navigate={~p"/courses/#{@course_id}/tests"}
           class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
         >
           Back to Tests
         </.link>
         <.link
-          navigate={~p"/tests/#{@schedule.id}/assess"}
+          navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
         >
           Retake Assessment
         </.link>
       </div>
+    </div>
+    """
+  end
+
+  attr :stats, :map, required: true
+
+  defp render_community_stats(assigns) do
+    correct_pct =
+      if assigns.stats.total_attempts > 0 do
+        Float.round(assigns.stats.correct_attempts / assigns.stats.total_attempts * 100, 0)
+      else
+        0
+      end
+
+    assigns = assign(assigns, correct_pct: correct_pct)
+
+    ~H"""
+    <div class="mt-3 flex items-center gap-2 text-xs text-[#8E8E93]">
+      <.icon name="hero-users" class="w-4 h-4" />
+      <span>
+        <span class="font-medium">{trunc(@correct_pct)}%</span>
+        of students got this right
+        <span class="text-[#C7C7CC]">({@stats.total_attempts} attempts)</span>
+      </span>
     </div>
     """
   end

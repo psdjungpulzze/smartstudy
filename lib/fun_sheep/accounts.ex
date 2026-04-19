@@ -18,6 +18,8 @@ defmodule FunSheep.Accounts do
 
   def get_user_role!(id), do: Repo.get!(UserRole, id)
 
+  def get_user_role(id), do: Repo.get(UserRole, id)
+
   def get_user_role_by_interactor_id(interactor_user_id) do
     Repo.get_by(UserRole, interactor_user_id: interactor_user_id)
   end

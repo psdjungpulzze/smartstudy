@@ -48,22 +48,14 @@ defmodule FunSheepWeb.ProfileSetupLive do
         selected_state_id: nil,
         selected_district_id: nil,
         selected_school_id: nil,
-        subject_class: "",
         selected_grade: nil,
         selected_gender: nil,
-        nationality: "",
+        ethnicity: "",
         step1_errors: %{},
         # Step 2 fields
         hobbies: [],
         selected_hobby_ids: MapSet.new(),
-        hobby_interests: %{},
-        # Step 3 fields
-        uploaded_files: []
-      )
-      |> allow_upload(:materials,
-        accept: ~w(.pdf .jpg .jpeg .png),
-        max_entries: 5,
-        max_file_size: 50_000_000
+        hobby_interests: %{}
       )
 
     {:ok, socket}
@@ -75,8 +67,13 @@ defmodule FunSheepWeb.ProfileSetupLive do
   end
 
   @impl true
-  # Fallback handler for the step1 form wrapper - individual inputs have their own phx-change
-  def handle_event("step1_change", _params, socket) do
+  def handle_event("step1_change", params, socket) do
+    socket =
+      socket
+      |> maybe_assign(params, "selected_grade", :selected_grade)
+      |> maybe_assign(params, "selected_gender", :selected_gender)
+      |> maybe_assign(params, "ethnicity", :ethnicity)
+
     {:noreply, socket}
   end
 
@@ -143,10 +140,19 @@ defmodule FunSheepWeb.ProfileSetupLive do
     {:noreply, assign(socket, [{key, value}])}
   end
 
-  def handle_event("next_step", _params, %{assigns: %{step: 1}} = socket) do
+  def handle_event("next_step", params, %{assigns: %{step: 1}} = socket) do
+    # Ensure form params are captured in assigns (fallback if step1_change didn't fire)
+    socket =
+      socket
+      |> maybe_assign(params, "selected_grade", :selected_grade)
+      |> maybe_assign(params, "selected_gender", :selected_gender)
+      |> maybe_assign(params, "ethnicity", :ethnicity)
+
     errors = validate_step1(socket.assigns)
 
     if map_size(errors) == 0 do
+      # Save profile immediately so data persists even if user abandons flow
+      save_profile_now(socket.assigns)
       hobbies = Learning.list_hobbies()
       {:noreply, assign(socket, step: 2, hobbies: hobbies, step1_errors: %{})}
     else
@@ -154,8 +160,30 @@ defmodule FunSheepWeb.ProfileSetupLive do
     end
   end
 
-  def handle_event("next_step", _params, %{assigns: %{step: 2}} = socket) do
-    {:noreply, assign(socket, step: 3)}
+  def handle_event("complete_hobbies", _params, socket) do
+    assigns = socket.assigns
+    user = assigns.current_user
+    interactor_id = user["interactor_user_id"]
+
+    # Save hobbies
+    if interactor_id do
+      case FunSheep.Accounts.get_user_role_by_interactor_id(interactor_id) do
+        %FunSheep.Accounts.UserRole{} = user_role ->
+          save_hobbies(
+            user_role.id,
+            assigns.selected_hobby_ids,
+            assigns.hobby_interests
+          )
+
+        _ ->
+          :ok
+      end
+    end
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Profile setup complete!")
+     |> redirect(to: "/dashboard")}
   end
 
   def handle_event("prev_step", _params, %{assigns: %{step: step}} = socket) when step > 1 do
@@ -184,34 +212,6 @@ defmodule FunSheepWeb.ProfileSetupLive do
     {:noreply, assign(socket, hobby_interests: interests)}
   end
 
-  def handle_event("validate_upload", _params, socket) do
-    {:noreply, socket}
-  end
-
-  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
-    {:noreply, cancel_upload(socket, :materials, ref)}
-  end
-
-  def handle_event("complete_setup", _params, socket) do
-    # Consume uploaded files (move to storage)
-    _uploaded =
-      consume_uploaded_entries(socket, :materials, fn %{path: path}, entry ->
-        dest =
-          Path.join([
-            Application.app_dir(:fun_sheep, "priv/static/uploads"),
-            entry.client_name
-          ])
-
-        File.mkdir_p!(Path.dirname(dest))
-        File.cp!(path, dest)
-        {:ok, "/uploads/#{entry.client_name}"}
-      end)
-
-    {:noreply,
-     socket
-     |> put_flash(:info, "Profile setup complete!")
-     |> redirect(to: "/dashboard")}
-  end
 
   defp validate_step1(assigns) do
     errors = %{}
@@ -248,7 +248,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
       <.step_indicator step={@step} />
 
       <%!-- Step Content --%>
-      <div class="bg-white rounded-2xl shadow-md p-8 mt-8">
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-8 mt-6 sm:mt-8">
         <%= case @step do %>
           <% 1 -> %>
             <.step1_demographics
@@ -263,10 +263,9 @@ defmodule FunSheepWeb.ProfileSetupLive do
               selected_state_id={@selected_state_id}
               selected_district_id={@selected_district_id}
               selected_school_id={@selected_school_id}
-              subject_class={@subject_class}
               selected_grade={@selected_grade}
               selected_gender={@selected_gender}
-              nationality={@nationality}
+              ethnicity={@ethnicity}
               errors={@step1_errors}
             />
           <% 2 -> %>
@@ -275,8 +274,6 @@ defmodule FunSheepWeb.ProfileSetupLive do
               selected_hobby_ids={@selected_hobby_ids}
               hobby_interests={@hobby_interests}
             />
-          <% 3 -> %>
-            <.step3_upload uploads={@uploads} />
         <% end %>
       </div>
     </div>
@@ -291,10 +288,8 @@ defmodule FunSheepWeb.ProfileSetupLive do
     ~H"""
     <div class="flex items-center justify-center gap-0">
       <.step_dot number={1} label="Demographics" active={@step >= 1} current={@step == 1} />
-      <div class={"w-16 h-0.5 #{if @step > 1, do: "bg-[#4CD964]", else: "bg-[#E5E5EA]"}"} />
+      <div class={"w-8 sm:w-16 h-0.5 #{if @step > 1, do: "bg-[#4CD964]", else: "bg-[#E5E5EA]"}"} />
       <.step_dot number={2} label="Hobbies" active={@step >= 2} current={@step == 2} />
-      <div class={"w-16 h-0.5 #{if @step > 2, do: "bg-[#4CD964]", else: "bg-[#E5E5EA]"}"} />
-      <.step_dot number={3} label="Materials" active={@step >= 3} current={@step == 3} />
     </div>
     """
   end
@@ -348,10 +343,9 @@ defmodule FunSheepWeb.ProfileSetupLive do
   attr :selected_state_id, :string, default: nil
   attr :selected_district_id, :string, default: nil
   attr :selected_school_id, :string, default: nil
-  attr :subject_class, :string, default: ""
   attr :selected_grade, :string, default: nil
   attr :selected_gender, :string, default: nil
-  attr :nationality, :string, default: ""
+  attr :ethnicity, :string, default: ""
   attr :errors, :map, default: %{}
 
   defp step1_demographics(assigns) do
@@ -374,7 +368,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
           <select
             phx-change="select_country"
             name="country_id"
-            class={"w-full px-4 py-3 bg-[#F5F5F7] border rounded-lg outline-none transition-colors appearance-none #{if @errors[:country], do: "border-[#FF3B30]", else: "border-transparent focus:border-[#4CD964]"}"}
+            class={"w-full px-4 py-3 bg-[#F5F5F7] border rounded-lg outline-none transition-colors appearance-none #{if @errors[:country], do: "border-[#FF3B30]", else: "border-[#D1D1D6] focus:border-[#4CD964]"}"}
           >
             <option value="">Select a country</option>
             <option
@@ -395,7 +389,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
             phx-change="select_state"
             name="state_id"
             disabled={@states == []}
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
+            class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
           >
             <option value="">Select a state</option>
             <option
@@ -415,7 +409,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
             phx-change="select_district"
             name="district_id"
             disabled={@districts == []}
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
+            class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
           >
             <option value="">Select a district</option>
             <option
@@ -435,7 +429,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
             phx-change="select_school"
             name="school_id"
             disabled={@schools == []}
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
+            class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
           >
             <option value="">Select a school</option>
             <option
@@ -448,25 +442,13 @@ defmodule FunSheepWeb.ProfileSetupLive do
           </select>
         </div>
 
-        <%!-- Subject/Class --%>
-        <div>
-          <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Subject / Class</label>
-          <input
-            type="text"
-            value={@subject_class}
-            name="subject_class"
-            placeholder="e.g., AP Biology, Math 101"
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors"
-          />
-        </div>
-
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <%!-- Grade Level --%>
           <div>
             <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Grade Level *</label>
             <select
               name="selected_grade"
-              class={"w-full px-4 py-3 bg-[#F5F5F7] border rounded-lg outline-none transition-colors appearance-none #{if @errors[:grade], do: "border-[#FF3B30]", else: "border-transparent focus:border-[#4CD964]"}"}
+              class={"w-full px-4 py-3 bg-[#F5F5F7] border rounded-lg outline-none transition-colors appearance-none #{if @errors[:grade], do: "border-[#FF3B30]", else: "border-[#D1D1D6] focus:border-[#4CD964]"}"}
             >
               <option value="">Select grade</option>
               <option :for={grade <- @grade_options} value={grade} selected={grade == @selected_grade}>
@@ -481,7 +463,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
             <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Gender</label>
             <select
               name="selected_gender"
-              class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none"
+              class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none"
             >
               <option value="">Select gender</option>
               <option
@@ -495,15 +477,15 @@ defmodule FunSheepWeb.ProfileSetupLive do
           </div>
         </div>
 
-        <%!-- Nationality --%>
+        <%!-- Ethnicity --%>
         <div>
-          <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Nationality</label>
+          <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Ethnicity</label>
           <input
             type="text"
-            value={@nationality}
-            name="nationality"
-            placeholder="e.g., American, Korean"
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors"
+            value={@ethnicity}
+            name="ethnicity"
+            placeholder="e.g., Korean, Hispanic, Asian"
+            class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors"
           />
         </div>
       </div>
@@ -535,7 +517,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
         Select hobbies to help us personalize your study experience.
       </p>
 
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
         <div :for={hobby <- @hobbies}>
           <button
             type="button"
@@ -561,7 +543,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
               phx-change="update_hobby_interest"
               phx-value-hobby-id={hobby.id}
               name="value"
-              class="w-full px-3 py-2 text-sm bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-lg outline-none transition-colors"
+              class="w-full px-3 py-2 text-sm bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors"
             />
           </div>
         </div>
@@ -576,10 +558,10 @@ defmodule FunSheepWeb.ProfileSetupLive do
           Back
         </button>
         <button
-          phx-click="next_step"
+          phx-click="complete_hobbies"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors"
         >
-          Next
+          Complete Setup
         </button>
       </div>
     </div>
@@ -598,126 +580,53 @@ defmodule FunSheepWeb.ProfileSetupLive do
   defp example_interests("Cooking"), do: "Korean BBQ, Baking"
   defp example_interests(_), do: "your favorites"
 
-  # ── Step 3: Material Upload ──────────────────────────────────────────────
-
-  attr :uploads, :any, required: true
-
-  defp step3_upload(assigns) do
-    ~H"""
-    <div>
-      <h2 class="text-xl font-semibold text-[#1C1C1E] mb-2">Upload Materials</h2>
-      <p class="text-sm text-[#8E8E93] mb-6">
-        Upload your course materials (PDFs, images) for AI-powered study assistance.
-      </p>
-
-      <form id="upload-form" phx-change="validate_upload" phx-submit="complete_setup">
-        <%!-- Drop zone --%>
-        <div
-          class="border-2 border-dashed border-[#E5E5EA] rounded-2xl p-8 text-center hover:border-[#4CD964] transition-colors"
-          phx-drop-target={@uploads.materials.ref}
-        >
-          <svg
-            class="w-12 h-12 mx-auto text-[#8E8E93] mb-4"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke-width="1.5"
-            stroke="currentColor"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-            />
-          </svg>
-          <p class="text-[#1C1C1E] font-medium mb-1">Drag and drop files here</p>
-          <p class="text-sm text-[#8E8E93] mb-4">or</p>
-          <label class="inline-block bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md cursor-pointer transition-colors">
-            Browse Files <.live_file_input upload={@uploads.materials} class="hidden" />
-          </label>
-          <p class="text-xs text-[#8E8E93] mt-4">
-            PDF, JPG, PNG up to 50MB each (max 5 files)
-          </p>
-        </div>
-
-        <%!-- Upload entries --%>
-        <div :if={@uploads.materials.entries != []} class="mt-4 space-y-3">
-          <div
-            :for={entry <- @uploads.materials.entries}
-            class="flex items-center gap-3 p-3 bg-[#F5F5F7] rounded-xl"
-          >
-            <svg
-              class="w-5 h-5 text-[#8E8E93] shrink-0"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
-              />
-            </svg>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-[#1C1C1E] truncate">{entry.client_name}</p>
-              <div class="w-full bg-[#E5E5EA] rounded-full h-1.5 mt-1">
-                <div
-                  class="bg-[#4CD964] h-1.5 rounded-full transition-all"
-                  style={"width: #{entry.progress}%"}
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              phx-click="cancel_upload"
-              phx-value-ref={entry.ref}
-              class="text-[#FF3B30] hover:text-red-700 shrink-0"
-              aria-label="Remove file"
-            >
-              <svg
-                class="w-5 h-5"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.5"
-                stroke="currentColor"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <%!-- Upload errors --%>
-        <div :for={err <- upload_errors(@uploads.materials)} class="mt-2">
-          <p class="text-sm text-[#FF3B30]">{upload_error_to_string(err)}</p>
-        </div>
-
-        <%!-- Navigation buttons --%>
-        <div class="flex justify-between mt-8">
-          <button
-            type="button"
-            phx-click="prev_step"
-            class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-8 py-3 rounded-full shadow-sm border border-gray-200 transition-colors"
-          >
-            Back
-          </button>
-          <button
-            type="submit"
-            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors"
-          >
-            Complete Setup
-          </button>
-        </div>
-      </form>
-    </div>
-    """
+  defp maybe_assign(socket, params, param_key, assign_key) do
+    case Map.get(params, param_key) do
+      nil -> socket
+      value -> assign(socket, [{assign_key, value}])
+    end
   end
 
-  defp upload_error_to_string(:too_large), do: "File is too large (max 50MB)"
-  defp upload_error_to_string(:not_accepted), do: "File type not accepted (PDF, JPG, PNG only)"
-  defp upload_error_to_string(:too_many_files), do: "Maximum 5 files allowed"
-  defp upload_error_to_string(err), do: "Upload error: #{inspect(err)}"
+  defp non_empty(""), do: nil
+  defp non_empty(nil), do: nil
+  defp non_empty(val), do: val
+
+  defp save_profile_now(assigns) do
+    user = assigns.current_user
+    interactor_id = user["interactor_user_id"]
+
+    if interactor_id do
+      FunSheep.Accounts.upsert_user_profile(interactor_id, %{
+        role: user["role"] || "student",
+        email: user["email"] || "unknown@example.com",
+        display_name: user["display_name"],
+        grade: assigns.selected_grade,
+        gender: assigns.selected_gender,
+        ethnicity: assigns.ethnicity,
+        school_id: non_empty(assigns.selected_school_id)
+      })
+    end
+  end
+
+  defp save_hobbies(user_role_id, selected_ids, interests) do
+    existing = FunSheep.Learning.list_hobbies_for_user(user_role_id)
+
+    for sh <- existing do
+      unless MapSet.member?(selected_ids, sh.hobby_id) do
+        FunSheep.Learning.delete_student_hobby(sh)
+      end
+    end
+
+    existing_hobby_ids = MapSet.new(existing, & &1.hobby_id)
+
+    for hobby_id <- selected_ids do
+      unless MapSet.member?(existing_hobby_ids, hobby_id) do
+        FunSheep.Learning.create_student_hobby(%{
+          user_role_id: user_role_id,
+          hobby_id: hobby_id,
+          specific_interests: %{"text" => Map.get(interests, hobby_id, "")}
+        })
+      end
+    end
+  end
 end

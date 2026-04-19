@@ -8,12 +8,18 @@ defmodule FunSheep.Questions do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Questions.{Question, QuestionAttempt}
+  alias FunSheep.Questions.{Question, QuestionAttempt, QuestionStats}
 
   ## Questions
 
   def list_questions do
     Repo.all(Question)
+  end
+
+  def count_questions_by_course(course_id) do
+    Question
+    |> where([q], q.course_id == ^course_id)
+    |> Repo.aggregate(:count)
   end
 
   def list_questions_by_course(course_id, filters \\ %{}) do
@@ -70,6 +76,22 @@ defmodule FunSheep.Questions do
   end
 
   def get_question!(id), do: Repo.get!(Question, id)
+
+  @doc "Gets a question with chapter and stats preloaded (for tutor context)."
+  def get_question_with_context!(id) do
+    Question
+    |> Repo.get!(id)
+    |> Repo.preload([:chapter, :stats])
+  end
+
+  @doc "Lists a student's attempts for a specific question, ordered chronologically."
+  def list_attempts_for_question(user_role_id, question_id) do
+    from(qa in QuestionAttempt,
+      where: qa.user_role_id == ^user_role_id and qa.question_id == ^question_id,
+      order_by: [asc: qa.inserted_at]
+    )
+    |> Repo.all()
+  end
 
   def create_question(attrs \\ %{}) do
     %Question{}
@@ -289,5 +311,147 @@ defmodule FunSheep.Questions do
       select: count(qa.id)
     )
     |> Repo.one()
+  end
+
+  ## Question Stats (Aggregate / Crowd-Sourced Difficulty)
+
+  @doc """
+  Updates aggregate stats for a question after an attempt is recorded.
+  Creates the stats row if it doesn't exist yet.
+
+  This is the core of crowd-sourced difficulty: every student attempt
+  feeds into the difficulty score that drives adaptive testing.
+  """
+  def update_question_stats(question_id, is_correct, time_taken_seconds \\ nil) do
+    case Repo.get_by(QuestionStats, question_id: question_id) do
+      nil ->
+        %QuestionStats{}
+        |> QuestionStats.changeset(%{
+          question_id: question_id,
+          total_attempts: 1,
+          correct_attempts: if(is_correct, do: 1, else: 0),
+          difficulty_score: QuestionStats.compute_difficulty(if(is_correct, do: 1, else: 0), 1),
+          avg_time_seconds: (time_taken_seconds || 0) / 1.0
+        })
+        |> Repo.insert()
+
+      stats ->
+        new_total = stats.total_attempts + 1
+        new_correct = stats.correct_attempts + if(is_correct, do: 1, else: 0)
+        new_difficulty = QuestionStats.compute_difficulty(new_correct, new_total)
+
+        new_avg_time =
+          if time_taken_seconds do
+            # Running average
+            (stats.avg_time_seconds * stats.total_attempts + time_taken_seconds) / new_total
+          else
+            stats.avg_time_seconds
+          end
+
+        stats
+        |> QuestionStats.changeset(%{
+          total_attempts: new_total,
+          correct_attempts: new_correct,
+          difficulty_score: new_difficulty,
+          avg_time_seconds: Float.round(new_avg_time, 1)
+        })
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  Creates a question attempt AND updates aggregate stats in one call.
+  This ensures stats are always in sync with attempts.
+  """
+  def record_attempt_with_stats(attrs) do
+    case create_question_attempt(attrs) do
+      {:ok, attempt} ->
+        update_question_stats(
+          attempt.question_id,
+          attempt.is_correct,
+          attempt.time_taken_seconds
+        )
+
+        {:ok, attempt}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Gets stats for a question. Returns nil if no attempts yet.
+  """
+  def get_question_stats(question_id) do
+    Repo.get_by(QuestionStats, question_id: question_id)
+  end
+
+  @doc """
+  Gets stats for multiple questions at once (batch lookup).
+  Returns a map of question_id => %QuestionStats{}.
+  """
+  def get_bulk_question_stats(question_ids) when is_list(question_ids) do
+    from(qs in QuestionStats,
+      where: qs.question_id in ^question_ids
+    )
+    |> Repo.all()
+    |> Map.new(&{&1.question_id, &1})
+  end
+
+  @doc """
+  Returns the crowd-sourced difficulty for a question.
+  Falls back to 0.5 (medium) if no stats exist.
+  """
+  def crowd_difficulty(question_id) do
+    case get_question_stats(question_id) do
+      nil -> 0.5
+      stats -> stats.difficulty_score
+    end
+  end
+
+  @doc """
+  Lists questions for a course with their stats preloaded.
+  """
+  def list_questions_with_stats(course_id, filters \\ %{}) do
+    Question
+    |> where([q], q.course_id == ^course_id)
+    |> maybe_filter_chapter(filters)
+    |> maybe_filter_difficulty(filters)
+    |> maybe_filter_question_type(filters)
+    |> maybe_filter_source_material(filters)
+    |> order_by([q], desc: q.inserted_at)
+    |> preload([:chapter, :section, :stats])
+    |> Repo.all()
+  end
+
+  defp maybe_filter_source_material(query, %{source_material_ids: ids})
+       when is_list(ids) and ids != [] do
+    where(query, [q], q.source_material_id in ^ids)
+  end
+
+  defp maybe_filter_source_material(query, %{"source_material_ids" => ids})
+       when is_list(ids) and ids != [] do
+    where(query, [q], q.source_material_id in ^ids)
+  end
+
+  defp maybe_filter_source_material(query, _), do: query
+
+  @doc """
+  Returns distinct source materials that have questions for a course.
+  Used for the question set toggle UI.
+  """
+  def list_question_sources(course_id) do
+    from(q in Question,
+      where: q.course_id == ^course_id and not is_nil(q.source_material_id),
+      join: m in FunSheep.Content.UploadedMaterial,
+      on: m.id == q.source_material_id,
+      select: %{
+        material_id: m.id,
+        file_name: m.file_name,
+        question_count: count(q.id)
+      },
+      group_by: [m.id, m.file_name]
+    )
+    |> Repo.all()
   end
 end

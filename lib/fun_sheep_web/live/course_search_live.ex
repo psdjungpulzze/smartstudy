@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.CourseSearchLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.Courses
+  alias FunSheep.{Accounts, Courses, Assessments}
   alias FunSheep.Geo
 
   @impl true
@@ -9,10 +9,15 @@ defmodule FunSheepWeb.CourseSearchLive do
     schools = Geo.list_schools()
     user_role_id = socket.assigns.current_user["id"]
 
-    my_courses =
-      case Ecto.UUID.cast(user_role_id) do
-        {:ok, _} -> Courses.list_courses_for_user(user_role_id)
-        :error -> []
+    {my_courses, nearby_courses, user_grade, user_school_id, tests_by_course} =
+      with {:ok, _} <- Ecto.UUID.cast(user_role_id),
+           %{} = user_role <- Accounts.get_user_role(user_role_id) do
+        mine = Courses.list_user_courses(user_role_id)
+        nearby = Courses.list_nearby_courses(user_role.school_id, user_role.grade, user_role_id)
+        tests = Assessments.list_upcoming_grouped_by_course(user_role_id)
+        {mine, nearby, user_role.grade, user_role.school_id, tests}
+      else
+        _ -> {[], [], nil, nil, %{}}
       end
 
     {:ok,
@@ -23,13 +28,32 @@ defmodule FunSheepWeb.CourseSearchLive do
        search_school_id: "",
        schools: schools,
        my_courses: my_courses,
+       nearby_courses: nearby_courses,
+       user_grade: user_grade,
+       user_school_id: user_school_id,
+       tests_by_course: tests_by_course,
+       expanded_courses: MapSet.new(),
        results: [],
        searched: false,
+       show_search: false,
        confirm_delete: nil
      )}
   end
 
   @impl true
+  def handle_event("toggle_course", %{"id" => course_id}, socket) do
+    expanded = socket.assigns.expanded_courses
+
+    expanded =
+      if MapSet.member?(expanded, course_id) do
+        MapSet.delete(expanded, course_id)
+      else
+        MapSet.put(expanded, course_id)
+      end
+
+    {:noreply, assign(socket, expanded_courses: expanded)}
+  end
+
   def handle_event("search", params, socket) do
     filters = %{
       "subject" => params["subject"] || "",
@@ -49,12 +73,16 @@ defmodule FunSheepWeb.CourseSearchLive do
      )}
   end
 
-  @impl true
+  def handle_event("toggle_search", _params, socket) do
+    {:noreply, assign(socket, show_search: !socket.assigns.show_search)}
+  end
+
   def handle_event("clear_search", _params, socket) do
     {:noreply,
      assign(socket,
        results: [],
        searched: false,
+       show_search: false,
        search_subject: "",
        search_grade: "",
        search_school_id: ""
@@ -94,22 +122,25 @@ defmodule FunSheepWeb.CourseSearchLive do
   def render(assigns) do
     ~H"""
     <div class="animate-slide-up">
-      <div class="flex items-center justify-between mb-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
         <div>
-          <h1 class="text-2xl font-extrabold text-gray-900">My Courses 📚</h1>
-          <p class="text-gray-500 text-sm mt-1">Your courses and search for new ones</p>
+          <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900">My Courses 📚</h1>
+          <p class="text-gray-500 text-sm mt-0.5 sm:mt-1">Your courses and upcoming tests</p>
         </div>
         <.link
           navigate={~p"/courses/new"}
-          class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-full shadow-md btn-bounce text-sm"
+          class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-3 sm:py-2.5 rounded-full shadow-md btn-bounce text-sm touch-target inline-flex items-center justify-center self-stretch sm:self-auto"
         >
           + Add New Course
         </.link>
       </div>
 
-      <%!-- My Courses Section --%>
+      <%!-- My Courses with Expandable Tests --%>
       <div class="mb-8">
-        <div :if={@my_courses == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+        <div
+          :if={@my_courses == []}
+          class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+        >
           <div class="text-5xl mb-3 animate-float">📖</div>
           <h3 class="font-bold text-gray-900 text-lg">No courses yet!</h3>
           <p class="text-gray-500 text-sm mt-1 mb-4">
@@ -124,93 +155,36 @@ defmodule FunSheepWeb.CourseSearchLive do
         </div>
 
         <div :if={@my_courses != []} class="space-y-3">
-          <div
+          <.expandable_course_row
             :for={{course, idx} <- Enum.with_index(@my_courses)}
-            class={"bg-white rounded-2xl border border-gray-100 p-4 card-hover animate-slide-up stagger-#{rem(idx, 6) + 1}"}
-          >
-            <%!-- Delete confirmation overlay --%>
-            <div
-              :if={@confirm_delete == course.id}
-              class="flex items-center justify-between gap-3 p-3 bg-red-50 rounded-xl mb-3 border border-red-100"
-            >
-              <p class="text-sm text-red-700 font-medium">
-                Delete <strong>{course.name}</strong>? This cannot be undone.
-              </p>
-              <div class="flex gap-2 shrink-0">
-                <button
-                  phx-click="delete_course"
-                  phx-value-id={course.id}
-                  class="bg-red-500 hover:bg-red-600 text-white font-bold px-4 py-1.5 rounded-full text-xs"
-                >
-                  Delete
-                </button>
-                <button
-                  phx-click="cancel_delete"
-                  class="bg-white hover:bg-gray-50 text-gray-600 font-bold px-4 py-1.5 rounded-full text-xs border border-gray-200"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-4">
-              <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center text-2xl shrink-0">
-                {subject_emoji(course.subject)}
-              </div>
-              <div class="flex-1 min-w-0">
-                <h3 class="font-bold text-gray-900 text-sm">{course.name}</h3>
-                <div class="flex flex-wrap gap-2 mt-1.5">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600">
-                    {course.subject}
-                  </span>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-cyan-50 text-cyan-600">
-                    Grade {course.grade}
-                  </span>
-                  <span
-                    :if={course.school}
-                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-gray-50 text-gray-500"
-                  >
-                    🏫 {course.school.name}
-                  </span>
-                </div>
-                <p :if={course.description} class="text-xs text-gray-400 mt-1.5 line-clamp-1">
-                  {course.description}
-                </p>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <.link
-                  navigate={~p"/courses/#{course.id}"}
-                  class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-full shadow-md btn-bounce text-sm"
-                >
-                  Open
-                </.link>
-                <.link
-                  navigate={~p"/courses/#{course.id}/edit"}
-                  class="p-2 rounded-full hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-colors"
-                  aria-label="Edit course"
-                >
-                  <.icon name="hero-pencil-square" class="w-4 h-4" />
-                </.link>
-                <button
-                  phx-click="confirm_delete"
-                  phx-value-id={course.id}
-                  class="p-2 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
-                  aria-label="Delete course"
-                >
-                  <.icon name="hero-trash" class="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
+            course={course}
+            idx={idx}
+            expanded={MapSet.member?(@expanded_courses, course.id)}
+            tests={Map.get(@tests_by_course, course.id, [])}
+            confirm_delete={@confirm_delete}
+          />
         </div>
       </div>
 
-      <%!-- Search Section --%>
+      <%!-- Find More Courses Section --%>
       <div class="border-t border-gray-100 pt-6">
-        <h2 class="text-lg font-extrabold text-gray-900 mb-4">Find More Courses 🔍</h2>
-        <div class="bg-white rounded-2xl border border-gray-100 p-5 mb-6">
-          <form phx-submit="search" class="space-y-4">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-extrabold text-gray-900">Find More Courses 🔍</h2>
+          <button
+            phx-click="toggle_search"
+            class="text-sm font-bold text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+          >
+            <.icon name="hero-magnifying-glass" class="w-4 h-4" /> Search
+          </button>
+        </div>
+
+        <%!-- Search Panel (collapsible) --%>
+        <div
+          :if={@show_search}
+          class="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5 mb-5 sm:mb-6 animate-slide-up"
+        >
+          <form phx-submit="search" class="space-y-3 sm:space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               <div>
                 <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                   Subject
@@ -220,7 +194,7 @@ defmodule FunSheepWeb.CourseSearchLive do
                   name="subject"
                   value={@search_subject}
                   placeholder="Math, Science..."
-                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-sm"
+                  class="w-full px-4 py-3 sm:py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-base sm:text-sm"
                 />
               </div>
               <div>
@@ -229,7 +203,7 @@ defmodule FunSheepWeb.CourseSearchLive do
                 </label>
                 <select
                   name="grade"
-                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-sm"
+                  class="w-full px-4 py-3 sm:py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-base sm:text-sm"
                 >
                   <option value="">All Grades</option>
                   <%= for g <- ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College) do %>
@@ -237,13 +211,13 @@ defmodule FunSheepWeb.CourseSearchLive do
                   <% end %>
                 </select>
               </div>
-              <div>
+              <div class="sm:col-span-2 md:col-span-1">
                 <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                   School
                 </label>
                 <select
                   name="school_id"
-                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-sm"
+                  class="w-full px-4 py-3 sm:py-2.5 bg-gray-50 border border-gray-100 focus:border-purple-300 focus:bg-white rounded-xl outline-none transition-all text-base sm:text-sm"
                 >
                   <option value="">All Schools</option>
                   <%= for school <- @schools do %>
@@ -257,14 +231,14 @@ defmodule FunSheepWeb.CourseSearchLive do
             <div class="flex gap-2">
               <button
                 type="submit"
-                class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2 rounded-full shadow-md btn-bounce text-sm"
+                class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-3 sm:py-2 rounded-full shadow-md btn-bounce text-sm flex-1 sm:flex-none touch-target"
               >
                 Search
               </button>
               <button
                 type="button"
                 phx-click="clear_search"
-                class="bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold px-5 py-2 rounded-full border border-gray-200 text-sm transition-colors"
+                class="bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold px-5 py-3 sm:py-2 rounded-full border border-gray-200 text-sm transition-colors flex-1 sm:flex-none touch-target"
               >
                 Clear
               </button>
@@ -287,43 +261,276 @@ defmodule FunSheepWeb.CourseSearchLive do
             <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">
               {length(@results)} course(s) found
             </p>
-            <div
-              :for={{course, idx} <- Enum.with_index(@results)}
-              class={"bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 card-hover animate-slide-up stagger-#{rem(idx, 6) + 1}"}
-            >
-              <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center text-2xl shrink-0">
-                {subject_emoji(course.subject)}
-              </div>
-              <div class="flex-1 min-w-0">
-                <h3 class="font-bold text-gray-900 text-sm">{course.name}</h3>
-                <div class="flex flex-wrap gap-2 mt-1.5">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-600">
-                    {course.subject}
-                  </span>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-cyan-50 text-cyan-600">
-                    Grade {course.grade}
-                  </span>
-                  <span
-                    :if={course.school}
-                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-gray-50 text-gray-500"
-                  >
-                    🏫 {course.school.name}
-                  </span>
-                </div>
-              </div>
-              <.link
-                navigate={~p"/courses/#{course.id}"}
-                class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-full shadow-md btn-bounce text-sm whitespace-nowrap shrink-0"
-              >
-                Open
-              </.link>
-            </div>
+            <.course_card :for={{course, idx} <- Enum.with_index(@results)} course={course} idx={idx} />
+          </div>
+        </div>
+
+        <%!-- Nearby Courses (auto-loaded) --%>
+        <div :if={!@searched}>
+          <div
+            :if={@nearby_courses == []}
+            class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+          >
+            <div class="text-4xl mb-3">📚</div>
+            <h3 class="font-bold text-gray-900">No nearby courses yet</h3>
+            <p class="text-gray-500 text-sm mt-1">
+              No courses found for your school and grade level. Try searching with different criteria.
+            </p>
+          </div>
+
+          <div :if={@nearby_courses != []} class="space-y-3">
+            <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              {length(@nearby_courses)} course(s) near your grade level
+            </p>
+            <.course_card
+              :for={{course, idx} <- Enum.with_index(@nearby_courses)}
+              course={course}
+              idx={idx}
+            />
           </div>
         </div>
       </div>
     </div>
     """
   end
+
+  # ── Expandable Course Row ────────────────────────────────────────────────
+
+  attr :course, :any, required: true
+  attr :idx, :integer, required: true
+  attr :expanded, :boolean, required: true
+  attr :tests, :list, default: []
+  attr :confirm_delete, :string, default: nil
+
+  defp expandable_course_row(assigns) do
+    test_count = length(assigns.tests)
+    assigns = assign(assigns, test_count: test_count)
+
+    ~H"""
+    <div class={"bg-white rounded-2xl border border-gray-100 overflow-hidden animate-slide-up stagger-#{rem(@idx, 6) + 1}"}>
+      <%!-- Delete confirmation overlay --%>
+      <div
+        :if={@confirm_delete == @course.id}
+        class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 p-3 bg-red-50 border-b border-red-100"
+      >
+        <p class="text-sm text-red-700 font-medium">
+          Delete <strong class="truncate">{@course.name}</strong>? This cannot be undone.
+        </p>
+        <div class="flex gap-2 shrink-0">
+          <button
+            phx-click="delete_course"
+            phx-value-id={@course.id}
+            class="bg-red-500 hover:bg-red-600 text-white font-bold px-4 py-2 sm:py-1.5 rounded-full text-xs flex-1 sm:flex-none touch-target"
+          >
+            Delete
+          </button>
+          <button
+            phx-click="cancel_delete"
+            class="bg-white hover:bg-gray-50 text-gray-600 font-bold px-4 py-2 sm:py-1.5 rounded-full text-xs border border-gray-200 flex-1 sm:flex-none touch-target"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <%!-- Course header row (clickable to expand) --%>
+      <button
+        type="button"
+        phx-click="toggle_course"
+        phx-value-id={@course.id}
+        class="w-full p-3 sm:p-4 flex items-center gap-3 sm:gap-4 hover:bg-gray-50 transition-colors text-left touch-target"
+      >
+        <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-50 flex items-center justify-center text-xl sm:text-2xl shrink-0">
+          {subject_emoji(@course.subject)}
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="font-bold text-gray-900 text-sm truncate">{@course.name}</h3>
+          <div class="flex flex-wrap gap-1.5 sm:gap-2 mt-1">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-purple-50 text-purple-600">
+              {@course.subject}
+            </span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-cyan-50 text-cyan-600">
+              Grade {@course.grade}
+            </span>
+            <span
+              :if={@course.school}
+              class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-gray-50 text-gray-500"
+            >
+              🏫 {@course.school.name}
+            </span>
+            <span
+              :if={@test_count > 0}
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-50 text-amber-600"
+            >
+              {@test_count} test{if @test_count != 1, do: "s"}
+            </span>
+          </div>
+        </div>
+        <div class="flex items-center shrink-0">
+          <.icon
+            name={if @expanded, do: "hero-chevron-down", else: "hero-chevron-right"}
+            class="w-5 h-5 text-gray-400 transition-transform"
+          />
+        </div>
+      </button>
+
+      <%!-- Expanded: tests + actions --%>
+      <div
+        :if={@expanded}
+        class="border-t border-gray-100 bg-gray-50 px-3 sm:px-4 py-3 animate-slide-up"
+      >
+        <%!-- Upcoming tests --%>
+        <div :if={@tests != []} class="space-y-2 mb-3">
+          <.test_row :for={entry <- @tests} entry={entry} course_id={@course.id} />
+        </div>
+
+        <div :if={@tests == []} class="text-sm text-gray-500 py-2 text-center">
+          No upcoming tests scheduled
+        </div>
+
+        <%!-- Action buttons - stack on mobile --%>
+        <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200">
+          <.link
+            navigate={~p"/courses/#{@course.id}/tests/new"}
+            class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-full shadow-md text-xs touch-target flex-1 sm:flex-none text-center"
+          >
+            + Schedule Test
+          </.link>
+          <.link
+            navigate={~p"/courses/#{@course.id}"}
+            class="bg-white hover:bg-gray-100 text-gray-700 font-bold px-4 py-2.5 sm:py-2 rounded-full border border-gray-200 text-xs touch-target flex-1 sm:flex-none text-center"
+          >
+            Open Course
+          </.link>
+          <div class="flex items-center gap-1 ml-auto">
+            <.link
+              navigate={~p"/courses/#{@course.id}/edit"}
+              class="p-2.5 rounded-full hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-colors touch-target"
+              aria-label="Edit course"
+            >
+              <.icon name="hero-pencil-square" class="w-4 h-4" />
+            </.link>
+            <button
+              phx-click="confirm_delete"
+              phx-value-id={@course.id}
+              class="p-2.5 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors touch-target"
+              aria-label="Delete course"
+            >
+              <.icon name="hero-trash" class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # ── Test Row within expanded course ─────────────────────────────────────
+
+  attr :entry, :map, required: true
+  attr :course_id, :string, required: true
+
+  defp test_row(assigns) do
+    schedule = assigns.entry.schedule
+    readiness = assigns.entry.readiness
+    days_left = Date.diff(schedule.test_date, Date.utc_today())
+
+    readiness_pct =
+      if readiness, do: round(readiness.aggregate_score), else: nil
+
+    assigns =
+      assign(assigns,
+        schedule: schedule,
+        days_left: days_left,
+        readiness_pct: readiness_pct,
+        urgency_color: urgency_color(days_left),
+        readiness_color: readiness_color(readiness_pct)
+      )
+
+    ~H"""
+    <.link
+      navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/readiness"}
+      class="flex items-center gap-2.5 sm:gap-3 p-3 bg-white rounded-xl border border-gray-100 hover:border-purple-200 transition-colors touch-target"
+    >
+      <%!-- Urgency indicator --%>
+      <div class={"w-1 h-10 rounded-full shrink-0 #{@urgency_color}"} />
+
+      <%!-- Test info --%>
+      <div class="flex-1 min-w-0">
+        <p class="font-bold text-gray-900 text-sm truncate">{@schedule.name}</p>
+        <p class="text-xs text-gray-500">
+          {Calendar.strftime(@schedule.test_date, "%b %d, %Y")}
+        </p>
+      </div>
+
+      <%!-- Days left --%>
+      <div class="text-right shrink-0">
+        <p class={"text-lg font-extrabold #{@urgency_color |> String.replace("bg-", "text-")}"}>
+          {@days_left}d
+        </p>
+      </div>
+
+      <%!-- Readiness --%>
+      <div :if={@readiness_pct} class="text-right shrink-0 w-14">
+        <p class={"text-sm font-bold #{@readiness_color}"}>{@readiness_pct}%</p>
+        <p class="text-xs text-gray-400">ready</p>
+      </div>
+      <div :if={!@readiness_pct} class="text-right shrink-0 w-14">
+        <p class="text-xs text-gray-400">Not assessed</p>
+      </div>
+    </.link>
+    """
+  end
+
+  # ── Course Card (for search results / nearby) ───────────────────────────
+
+  attr :course, :any, required: true
+  attr :idx, :integer, required: true
+
+  defp course_card(assigns) do
+    ~H"""
+    <div class={"bg-white rounded-2xl border border-gray-100 p-3 sm:p-4 flex items-center gap-3 sm:gap-4 card-hover animate-slide-up stagger-#{rem(@idx, 6) + 1}"}>
+      <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-50 flex items-center justify-center text-xl sm:text-2xl shrink-0">
+        {subject_emoji(@course.subject)}
+      </div>
+      <div class="flex-1 min-w-0">
+        <h3 class="font-bold text-gray-900 text-sm truncate">{@course.name}</h3>
+        <div class="flex flex-wrap gap-1.5 sm:gap-2 mt-1">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-purple-50 text-purple-600">
+            {@course.subject}
+          </span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-cyan-50 text-cyan-600">
+            Grade {@course.grade}
+          </span>
+          <span
+            :if={@course.school}
+            class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-gray-50 text-gray-500"
+          >
+            🏫 {@course.school.name}
+          </span>
+        </div>
+      </div>
+      <.link
+        navigate={~p"/courses/#{@course.id}"}
+        class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-full shadow-md btn-bounce text-sm whitespace-nowrap shrink-0 touch-target"
+      >
+        Open
+      </.link>
+    </div>
+    """
+  end
+
+  # ── Helpers ─────────────────────────────────────────────────────────────
+
+  defp urgency_color(days) when days <= 2, do: "bg-red-500"
+  defp urgency_color(days) when days <= 7, do: "bg-orange-400"
+  defp urgency_color(days) when days <= 14, do: "bg-amber-400"
+  defp urgency_color(_), do: "bg-green-400"
+
+  defp readiness_color(nil), do: "text-gray-400"
+  defp readiness_color(pct) when pct >= 70, do: "text-green-600"
+  defp readiness_color(pct) when pct >= 40, do: "text-amber-600"
+  defp readiness_color(_), do: "text-red-500"
 
   defp subject_emoji(subject) when is_binary(subject) do
     subject_lower = String.downcase(subject)

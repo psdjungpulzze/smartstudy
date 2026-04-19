@@ -5,7 +5,7 @@ config :fun_sheep, FunSheep.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  port: 5448,
+  port: 5434,
   database: "fun_sheep_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
@@ -20,7 +20,7 @@ config :fun_sheep, FunSheep.Repo,
 config :fun_sheep, FunSheepWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4040")],
+  http: [ip: {0, 0, 0, 0}, port: String.to_integer(System.get_env("PORT") || "4040")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
@@ -111,5 +111,5 @@ config :fun_sheep,
 config :fun_sheep, :storage_backend, FunSheep.Storage.Local
 
 # OCR configuration
-config :fun_sheep, :ocr_mock, true
-config :fun_sheep, :google_vision_api_key, System.get_env("GOOGLE_VISION_API_KEY")
+config :fun_sheep, :ocr_mock, false
+# Google Vision API key is loaded at runtime from .env.credentials (see runtime.exs)

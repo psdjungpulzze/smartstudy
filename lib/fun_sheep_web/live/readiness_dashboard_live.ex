@@ -1,11 +1,13 @@
 defmodule FunSheepWeb.ReadinessDashboardLive do
   use FunSheepWeb, :live_view
 
+  import FunSheepWeb.ShareButton
+
   alias FunSheep.{Assessments, Courses}
   alias FunSheep.Learning.StudyGuideGenerator
 
   @impl true
-  def mount(%{"schedule_id" => schedule_id}, _session, socket) do
+  def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
     user_role_id = socket.assigns.current_user["user_role_id"]
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
     readiness = Assessments.latest_readiness(user_role_id, schedule_id)
@@ -31,6 +33,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     {:ok,
      assign(socket,
        page_title: "Readiness: #{schedule.name}",
+       course_id: course_id,
        schedule: schedule,
        readiness: readiness,
        history: history,
@@ -79,12 +82,22 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         {:noreply,
          socket
          |> put_flash(:info, "Study guide generated.")
-         |> push_navigate(to: ~p"/study-guides/#{guide.id}")}
+         |> push_navigate(to: ~p"/courses/#{socket.assigns.course_id}/study-guides/#{guide.id}")}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to generate study guide.")}
     end
   end
+
+  def handle_event("share_completed", %{"method" => method}, socket) do
+    message = if method == "clipboard", do: "Link copied to clipboard!", else: "Shared!"
+    {:noreply, put_flash(socket, :info, message)}
+  end
+
+  defp readiness_share_message(score) when score >= 80, do: "Almost there!"
+  defp readiness_share_message(score) when score >= 60, do: "Getting closer every day."
+  defp readiness_share_message(score) when score >= 40, do: "Making progress!"
+  defp readiness_share_message(_), do: "Just getting started."
 
   defp days_remaining(test_date) do
     Date.diff(test_date, Date.utc_today())
@@ -110,10 +123,10 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     ~H"""
     <div class="max-w-4xl mx-auto">
       <%!-- Header Section --%>
-      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
-        <div class="flex items-center justify-between">
-          <div>
-            <h1 class="text-3xl font-bold text-[#1C1C1E]">{@schedule.name}</h1>
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div class="min-w-0">
+            <h1 class="text-2xl sm:text-3xl font-bold text-[#1C1C1E] truncate">{@schedule.name}</h1>
             <p class="text-sm text-[#8E8E93] mt-1">
               {if @schedule.course, do: @schedule.course.name, else: "Unknown Course"}
             </p>
@@ -122,18 +135,18 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
             </p>
           </div>
 
-          <div class="flex items-center gap-8">
+          <div class="flex items-center gap-4 sm:gap-8">
             <%!-- Days Remaining --%>
             <div class="text-center">
-              <p class={"text-3xl font-bold #{days_color(days_remaining(@schedule.test_date))}"}>
+              <p class={"text-2xl sm:text-3xl font-bold #{days_color(days_remaining(@schedule.test_date))}"}>
                 {days_remaining(@schedule.test_date)}
               </p>
-              <p class="text-xs text-[#8E8E93]">days left</p>
+              <p class="text-[10px] sm:text-xs text-[#8E8E93]">days left</p>
             </div>
 
             <%!-- Circular Progress Indicator --%>
-            <div class="relative w-24 h-24">
-              <svg class="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
+            <div class="relative w-20 h-20 sm:w-24 sm:h-24">
+              <svg class="w-20 h-20 sm:w-24 sm:h-24 transform -rotate-90" viewBox="0 0 100 100">
                 <circle
                   cx="50"
                   cy="50"
@@ -158,7 +171,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
                 />
               </svg>
               <div class="absolute inset-0 flex items-center justify-center">
-                <span class={"text-xl font-bold #{score_text_color(aggregate_score(@readiness))}"}>
+                <span class={"text-lg sm:text-xl font-bold #{score_text_color(aggregate_score(@readiness))}"}>
                   {round(aggregate_score(@readiness))}%
                 </span>
               </div>
@@ -166,7 +179,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
           </div>
         </div>
 
-        <p class="mt-4 text-sm text-[#8E8E93]">
+        <p class="mt-3 sm:mt-4 text-sm text-[#8E8E93]">
           {days_remaining(@schedule.test_date)} days left, readiness: {round(
             aggregate_score(@readiness)
           )}%
@@ -174,29 +187,29 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
       </div>
 
       <%!-- Chapter Breakdown Section --%>
-      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
-        <h2 class="text-xl font-semibold text-[#1C1C1E] mb-4">Chapter Breakdown</h2>
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
+        <h2 class="text-lg sm:text-xl font-semibold text-[#1C1C1E] mb-4">Chapter Breakdown</h2>
 
         <div :if={@chapter_breakdown == []} class="text-center py-4">
           <p class="text-[#8E8E93]">No chapters in test scope.</p>
         </div>
 
-        <div class="space-y-4">
-          <div :for={chapter <- @chapter_breakdown} class="flex items-center gap-4">
-            <div class="w-40 truncate">
-              <p class="font-medium text-[#1C1C1E] text-sm">{chapter.name}</p>
+        <div class="space-y-3 sm:space-y-4">
+          <div :for={chapter <- @chapter_breakdown} class="flex items-center gap-2 sm:gap-4">
+            <div class="w-24 sm:w-40 shrink-0 truncate">
+              <p class="font-medium text-[#1C1C1E] text-xs sm:text-sm truncate">{chapter.name}</p>
             </div>
             <div class="flex-1">
-              <div class="w-full bg-[#E5E5EA] rounded-full h-3">
+              <div class="w-full bg-[#E5E5EA] rounded-full h-2.5 sm:h-3">
                 <div
-                  class={"h-3 rounded-full #{score_color(chapter.score)} transition-all"}
+                  class={"h-2.5 sm:h-3 rounded-full #{score_color(chapter.score)} transition-all"}
                   style={"width: #{chapter.score}%"}
                 >
                 </div>
               </div>
             </div>
-            <div class="w-16 text-right">
-              <span class={"font-semibold text-sm #{score_text_color(chapter.score)}"}>
+            <div class="w-12 sm:w-16 text-right shrink-0">
+              <span class={"font-semibold text-xs sm:text-sm #{score_text_color(chapter.score)}"}>
                 {round(chapter.score)}%
               </span>
             </div>
@@ -205,11 +218,11 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
       </div>
 
       <%!-- Actions Section --%>
-      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
-        <h2 class="text-xl font-semibold text-[#1C1C1E] mb-4">Actions</h2>
-        <div class="flex flex-wrap gap-3">
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
+        <h2 class="text-lg sm:text-xl font-semibold text-[#1C1C1E] mb-4">Actions</h2>
+        <div class="flex flex-wrap gap-2 sm:gap-3">
           <.link
-            navigate={~p"/tests/#{@schedule.id}/assess"}
+            navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
             class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
             Start Assessment
@@ -232,12 +245,18 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
           >
             Recalculate Readiness
           </button>
+          <.share_button
+            title={"#{@schedule.name} - Readiness #{round(aggregate_score(@readiness))}%"}
+            text={"I'm #{round(aggregate_score(@readiness))}% ready for #{@schedule.name} on Fun Sheep! #{readiness_share_message(aggregate_score(@readiness))}"}
+            url={share_url(~p"/courses/#{@course_id}/tests/#{@schedule.id}/readiness")}
+            label="Share Progress"
+          />
         </div>
       </div>
 
       <%!-- Score Trend Section --%>
-      <div class="bg-white rounded-2xl shadow-md p-6">
-        <h2 class="text-xl font-semibold text-[#1C1C1E] mb-4">Score History</h2>
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+        <h2 class="text-lg sm:text-xl font-semibold text-[#1C1C1E] mb-4">Score History</h2>
 
         <div :if={@history == []} class="text-center py-4">
           <p class="text-[#8E8E93]">
@@ -245,21 +264,21 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
           </p>
         </div>
 
-        <div :if={@history != []} class="space-y-3">
-          <div :for={score <- Enum.reverse(@history)} class="flex items-center gap-4">
-            <p class="text-xs text-[#8E8E93] w-28">
+        <div :if={@history != []} class="space-y-2 sm:space-y-3">
+          <div :for={score <- Enum.reverse(@history)} class="flex items-center gap-2 sm:gap-4">
+            <p class="text-[10px] sm:text-xs text-[#8E8E93] w-20 sm:w-28 shrink-0">
               {Calendar.strftime(score.inserted_at, "%b %d, %H:%M")}
             </p>
             <div class="flex-1">
-              <div class="w-full bg-[#E5E5EA] rounded-full h-4">
+              <div class="w-full bg-[#E5E5EA] rounded-full h-3 sm:h-4">
                 <div
-                  class={"h-4 rounded-full #{score_color(score.aggregate_score)} transition-all"}
+                  class={"h-3 sm:h-4 rounded-full #{score_color(score.aggregate_score)} transition-all"}
                   style={"width: #{score.aggregate_score}%"}
                 >
                 </div>
               </div>
             </div>
-            <span class={"font-semibold text-sm w-12 text-right #{score_text_color(score.aggregate_score)}"}>
+            <span class={"font-semibold text-xs sm:text-sm w-10 sm:w-12 text-right shrink-0 #{score_text_color(score.aggregate_score)}"}>
               {round(score.aggregate_score)}%
             </span>
           </div>

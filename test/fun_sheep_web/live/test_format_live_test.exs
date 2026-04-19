@@ -45,7 +45,9 @@ defmodule FunSheepWeb.TestFormatLiveTest do
   describe "format page" do
     test "renders the format page", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/format")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/format")
 
       assert html =~ "Test Format"
       assert html =~ "Midterm"
@@ -54,7 +56,9 @@ defmodule FunSheepWeb.TestFormatLiveTest do
 
     test "can add a section", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/tests/#{schedule.id}/format")
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/format")
 
       # Fill in section form
       render_change(view, "update_section_form", %{

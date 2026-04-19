@@ -60,6 +60,22 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Oban background job processing
+config :fun_sheep, Oban,
+  repo: FunSheep.Repo,
+  queues: [
+    default: 10,
+    ocr: 3,
+    ai: 2
+  ]
+
+# Interactor integration (billing, auth, agents)
+config :fun_sheep,
+  interactor_mock: true,
+  interactor_core_url: "https://core.interactor.com",
+  interactor_billing_url: "https://billing.interactor.com",
+  stripe_publishable_key: "mock"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

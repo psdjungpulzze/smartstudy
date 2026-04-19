@@ -16,6 +16,35 @@ import Config
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
+# Load .env.credentials in dev/test for API keys
+if config_env() in [:dev, :test] do
+  credentials_path = Path.join([__DIR__, "..", ".env.credentials"])
+
+  if File.exists?(credentials_path) do
+    credentials_path
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.each(fn line ->
+      line = String.trim(line)
+
+      if line != "" and not String.starts_with?(line, "#") do
+        case String.split(line, "=", parts: 2) do
+          [key, value] when key != "" ->
+            System.put_env(String.trim(key), String.trim(value))
+
+          _ ->
+            :ok
+        end
+      end
+    end)
+  end
+end
+
+# Google Vision API key (from env or .env.credentials)
+if api_key = System.get_env("GOOGLE_VISION_API_KEY") do
+  config :fun_sheep, :google_vision_api_key, api_key
+end
+
 if System.get_env("PHX_SERVER") do
   config :fun_sheep, FunSheepWeb.Endpoint, server: true
 end

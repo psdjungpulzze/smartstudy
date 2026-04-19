@@ -2,21 +2,33 @@ defmodule FunSheep.Assessments.Engine do
   @moduledoc """
   Adaptive assessment engine.
 
-  - Min 3 questions per topic
-  - Progressive difficulty (easy -> medium -> hard)
-  - Re-test on incorrect answers to verify gaps
+  Uses crowd-sourced difficulty scores (0.0 = easy, 1.0 = hard) to select
+  questions at the student's current performance level.
+
+  - Min 3 questions per topic before mastery can be declared
+  - Progressive difficulty: gets harder on correct answers, easier on wrong
+  - Difficulty is based on how many students across the platform get each question right/wrong
   """
 
   alias FunSheep.{Questions, Courses}
+  alias FunSheep.Workers.AIQuestionGenerationWorker
 
   @min_questions_per_topic 3
   @mastery_threshold 0.7
   @max_attempts_per_topic 6
 
+  # How much to shift the target difficulty on each answer
+  @difficulty_step 0.15
+  # How close a question's difficulty must be to the target to be considered
+  @difficulty_tolerance 0.25
+
   @doc """
   Initializes an assessment state from a test schedule.
+
+  Options:
+  - source_material_ids: list of material IDs to confine questions to (nil = all)
   """
-  def start_assessment(test_schedule) do
+  def start_assessment(test_schedule, opts \\ []) do
     topics = extract_topics(test_schedule)
 
     %{
@@ -25,9 +37,13 @@ defmodule FunSheep.Assessments.Engine do
       scope: test_schedule.scope,
       current_topic_index: 0,
       topics: topics,
-      current_difficulty: :easy,
+      # Start at medium difficulty (0.5 on the crowd-sourced scale)
+      target_difficulty: 0.5,
+      current_difficulty: :medium,
       topic_attempts: %{},
-      status: :in_progress
+      status: :in_progress,
+      # Question set confinement — only use questions from these materials
+      source_material_ids: opts[:source_material_ids]
     }
   end
 
@@ -50,19 +66,26 @@ defmodule FunSheep.Assessments.Engine do
       if topic_mastered?(attempts) or length(attempts) >= @max_attempts_per_topic do
         next_question(%{state | current_topic_index: state.current_topic_index + 1})
       else
-        case select_question(state.course_id, topic.id, state.current_difficulty, attempts) do
+        case select_question_by_difficulty(
+               state.course_id,
+               topic.id,
+               state.target_difficulty,
+               attempts,
+               state.source_material_ids
+             ) do
           {:ok, question} ->
             {:question, question, state}
 
           :no_more ->
-            # No more questions available for this topic/difficulty, try other difficulties
-            case try_other_difficulties(state, topic, attempts) do
-              {:ok, question, new_state} ->
-                {:question, question, new_state}
+            # Trigger AI generation for this topic so more questions appear next time
+            AIQuestionGenerationWorker.enqueue(state.course_id,
+              chapter_id: topic.id,
+              count: 10,
+              mode: "from_material"
+            )
 
-              :exhausted ->
-                next_question(%{state | current_topic_index: state.current_topic_index + 1})
-            end
+            # Move to next topic for now
+            next_question(%{state | current_topic_index: state.current_topic_index + 1})
         end
       end
     end
@@ -70,7 +93,9 @@ defmodule FunSheep.Assessments.Engine do
 
   @doc """
   Records an answer and adjusts difficulty.
-  Returns the updated state.
+
+  - Correct answer → target_difficulty increases (harder questions next)
+  - Wrong answer → target_difficulty decreases or stays (confirm the gap)
   """
   def record_answer(state, question_id, answer, is_correct) do
     topic = Enum.at(state.topics, state.current_topic_index)
@@ -83,12 +108,13 @@ defmodule FunSheep.Assessments.Engine do
     }
 
     new_attempts = attempts ++ [new_attempt]
-    new_difficulty = adjust_difficulty(state.current_difficulty, is_correct)
+    new_target = adjust_target_difficulty(state.target_difficulty, is_correct)
 
     %{
       state
       | topic_attempts: Map.put(state.topic_attempts, topic.id, new_attempts),
-        current_difficulty: new_difficulty
+        target_difficulty: new_target,
+        current_difficulty: score_to_label(new_target)
     }
   end
 
@@ -127,40 +153,71 @@ defmodule FunSheep.Assessments.Engine do
     }
   end
 
-  # Private functions
+  # --- Private ---
 
-  defp select_question(course_id, chapter_id, difficulty, previous_attempts) do
+  # Select a question whose crowd-sourced difficulty is close to the target.
+  # Falls back to any available question if nothing is within tolerance.
+  defp select_question_by_difficulty(
+         course_id,
+         chapter_id,
+         target_difficulty,
+         previous_attempts,
+         source_material_ids
+       ) do
     attempted_ids = Enum.map(previous_attempts, & &1.question_id)
 
-    question =
-      Questions.list_questions_by_course(course_id, %{
-        chapter_id: chapter_id,
-        difficulty: difficulty
-      })
-      |> Enum.reject(&(&1.id in attempted_ids))
-      |> List.first()
+    filters = %{chapter_id: chapter_id}
 
-    case question do
-      nil -> :no_more
-      q -> {:ok, q}
+    filters =
+      if source_material_ids do
+        Map.put(filters, :source_material_ids, source_material_ids)
+      else
+        filters
+      end
+
+    all_questions =
+      Questions.list_questions_with_stats(course_id, filters)
+      |> Enum.reject(&(&1.id in attempted_ids))
+
+    if all_questions == [] do
+      :no_more
+    else
+      # Score each question by how close its difficulty is to the target
+      scored =
+        all_questions
+        |> Enum.map(fn q ->
+          q_difficulty = if q.stats, do: q.stats.difficulty_score, else: 0.5
+          distance = abs(q_difficulty - target_difficulty)
+          {q, distance}
+        end)
+        |> Enum.sort_by(fn {_q, dist} -> dist end)
+
+      # Pick from the closest questions (within tolerance), with some randomness
+      candidates =
+        scored
+        |> Enum.filter(fn {_q, dist} -> dist <= @difficulty_tolerance end)
+
+      # If no candidates within tolerance, take the 3 closest
+      candidates = if candidates == [], do: Enum.take(scored, 3), else: candidates
+
+      {question, _dist} = Enum.random(candidates)
+      {:ok, question}
     end
   end
 
-  defp try_other_difficulties(state, topic, attempts) do
-    other_difficulties =
-      [:easy, :medium, :hard]
-      |> Enum.reject(&(&1 == state.current_difficulty))
-
-    Enum.reduce_while(other_difficulties, :exhausted, fn diff, _acc ->
-      case select_question(state.course_id, topic.id, diff, attempts) do
-        {:ok, question} ->
-          {:halt, {:ok, question, %{state | current_difficulty: diff}}}
-
-        :no_more ->
-          {:cont, :exhausted}
-      end
-    end)
+  defp adjust_target_difficulty(current, _is_correct = true) do
+    # Got it right → make it harder (increase target)
+    min(current + @difficulty_step, 1.0) |> Float.round(4)
   end
+
+  defp adjust_target_difficulty(current, _is_correct = false) do
+    # Got it wrong → make it easier (decrease target)
+    max(current - @difficulty_step, 0.0) |> Float.round(4)
+  end
+
+  defp score_to_label(score) when score < 0.33, do: :easy
+  defp score_to_label(score) when score < 0.66, do: :medium
+  defp score_to_label(_score), do: :hard
 
   defp topic_mastered?(attempts) do
     if length(attempts) < @min_questions_per_topic do
@@ -168,22 +225,6 @@ defmodule FunSheep.Assessments.Engine do
     else
       correct = Enum.count(attempts, & &1.is_correct)
       correct / length(attempts) >= @mastery_threshold
-    end
-  end
-
-  defp adjust_difficulty(current, true) do
-    case current do
-      :easy -> :medium
-      :medium -> :hard
-      :hard -> :hard
-    end
-  end
-
-  defp adjust_difficulty(current, false) do
-    case current do
-      :hard -> :medium
-      :medium -> :easy
-      :easy -> :easy
     end
   end
 

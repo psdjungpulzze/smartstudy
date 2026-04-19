@@ -19,8 +19,7 @@ defmodule FunSheep.Assessments.TestFormatTemplate do
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :created_by, FunSheep.Accounts.UserRole
 
-    has_many :test_schedules, FunSheep.Assessments.TestSchedule,
-      foreign_key: :format_template_id
+    has_many :test_schedules, FunSheep.Assessments.TestSchedule, foreign_key: :format_template_id
 
     timestamps(type: :utc_datetime)
   end

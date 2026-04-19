@@ -7,7 +7,7 @@ defmodule FunSheepWeb.TestFormatLive do
   @question_types ~w(multiple_choice short_answer free_response true_false)
 
   @impl true
-  def mount(%{"schedule_id" => schedule_id}, _session, socket) do
+  def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
     user_role_id = socket.assigns.current_user["user_role_id"]
     course = Courses.get_course_with_chapters!(schedule.course_id)
@@ -15,6 +15,7 @@ defmodule FunSheepWeb.TestFormatLive do
     {:ok,
      assign(socket,
        page_title: "Test Format: #{schedule.name}",
+       course_id: course_id,
        schedule: schedule,
        course: course,
        user_role_id: user_role_id,
@@ -163,7 +164,7 @@ defmodule FunSheepWeb.TestFormatLive do
     <div class="max-w-3xl mx-auto">
       <div class="flex items-center gap-4 mb-8">
         <.link
-          navigate={~p"/tests"}
+          navigate={~p"/courses/#{@course_id}/tests"}
           class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
         >
           <.icon name="hero-arrow-left" class="w-6 h-6" />
@@ -175,14 +176,14 @@ defmodule FunSheepWeb.TestFormatLive do
       </div>
 
       <%!-- Section Builder --%>
-      <div class="bg-white rounded-2xl shadow-md p-8 mb-6">
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-8 mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Define Test Sections</h2>
 
         <%!-- Existing sections --%>
         <div :if={@sections != []} class="space-y-3 mb-6">
           <div
             :for={{section, index} <- Enum.with_index(@sections)}
-            class="flex items-center justify-between p-4 bg-[#F5F5F7] rounded-xl"
+            class="flex items-center justify-between gap-2 p-3 sm:p-4 bg-[#F5F5F7] rounded-xl"
           >
             <div>
               <p class="font-medium text-[#1C1C1E]">{section["name"]}</p>
@@ -204,7 +205,7 @@ defmodule FunSheepWeb.TestFormatLive do
 
         <%!-- Add section form --%>
         <form phx-change="update_section_form" phx-submit="add_section" class="space-y-4">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Section Name</label>
               <input
@@ -212,14 +213,14 @@ defmodule FunSheepWeb.TestFormatLive do
                 name="name"
                 value={@new_section_name}
                 placeholder="e.g., Multiple Choice"
-                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
+                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors text-base sm:text-sm"
               />
             </div>
             <div>
               <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Question Type</label>
               <select
                 name="question_type"
-                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
+                class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors text-base sm:text-sm"
               >
                 <option
                   :for={qt <- @question_types}
@@ -231,7 +232,7 @@ defmodule FunSheepWeb.TestFormatLive do
               </select>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Number of Questions</label>
               <input
@@ -263,17 +264,18 @@ defmodule FunSheepWeb.TestFormatLive do
       </div>
 
       <%!-- Time Limit --%>
-      <div class="bg-white rounded-2xl shadow-md p-8 mb-6">
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-8 mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Time Limit</h2>
         <form phx-change="update_time_limit">
-          <div class="flex items-center gap-4">
+          <div class="flex items-center gap-3 sm:gap-4">
             <input
               type="number"
               name="time_limit"
+              inputmode="numeric"
               value={@time_limit}
               placeholder="No limit"
               min="1"
-              class="w-48 px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
+              class="w-32 sm:w-48 px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors text-base sm:text-sm"
             />
             <span class="text-[#8E8E93]">minutes</span>
           </div>
@@ -281,7 +283,7 @@ defmodule FunSheepWeb.TestFormatLive do
       </div>
 
       <%!-- Actions --%>
-      <div class="flex items-center gap-4 mb-6">
+      <div class="flex flex-wrap items-center gap-3 sm:gap-4 mb-6">
         <button
           :if={@sections != []}
           phx-click="save_template"
@@ -298,7 +300,7 @@ defmodule FunSheepWeb.TestFormatLive do
         </button>
         <.link
           :if={@saved_template != nil}
-          navigate={~p"/tests/#{@schedule.id}/format-test"}
+          navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/format-test"}
           class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
         >
           Take Practice Test
@@ -306,11 +308,11 @@ defmodule FunSheepWeb.TestFormatLive do
       </div>
 
       <%!-- Practice Test Preview --%>
-      <div :if={@practice_test} class="bg-white rounded-2xl shadow-md p-8">
+      <div :if={@practice_test} class="bg-white rounded-2xl shadow-md p-4 sm:p-8">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Practice Test Preview</h2>
 
-        <div class="bg-[#F5F5F7] rounded-xl p-4 mb-4">
-          <div class="grid grid-cols-3 gap-4 text-center">
+        <div class="bg-[#F5F5F7] rounded-xl p-3 sm:p-4 mb-4">
+          <div class="grid grid-cols-3 gap-2 sm:gap-4 text-center">
             <div>
               <p class="text-2xl font-bold text-[#1C1C1E]">{@practice_test.total_questions}</p>
               <p class="text-xs text-[#8E8E93]">Questions</p>
@@ -331,7 +333,7 @@ defmodule FunSheepWeb.TestFormatLive do
         <div class="space-y-3">
           <div
             :for={section <- @practice_test.sections}
-            class="flex items-center justify-between p-3 bg-[#F5F5F7] rounded-xl"
+            class="flex items-center justify-between gap-2 p-3 bg-[#F5F5F7] rounded-xl"
           >
             <div>
               <p class="font-medium text-[#1C1C1E]">{section["name"]}</p>

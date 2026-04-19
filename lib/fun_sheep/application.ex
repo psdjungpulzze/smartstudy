@@ -14,6 +14,10 @@ defmodule FunSheep.Application do
       {Phoenix.PubSub, name: FunSheep.PubSub},
       # Interactor Auth token cache (caches App JWT for M2M calls)
       FunSheep.Interactor.Auth,
+      # Registry for AI tutor sessions (one GenServer per active student+question)
+      {Registry, keys: :unique, name: FunSheep.Tutor.SessionRegistry},
+      # Background job processing
+      {Oban, Application.fetch_env!(:fun_sheep, Oban)},
       # Start to serve requests, typically the last entry
       FunSheepWeb.Endpoint
     ]

@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.PracticeLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Courses, Questions}
+  alias FunSheep.{Courses, Questions, Tutor}
   alias FunSheep.Assessments.PracticeEngine
 
   @impl true
@@ -27,7 +27,13 @@ defmodule FunSheepWeb.PracticeLive do
         total_questions: total_questions,
         practice_complete: false,
         summary: nil,
-        start_time: System.monotonic_time(:second)
+        start_time: System.monotonic_time(:second),
+        # Tutor state
+        tutor_open: false,
+        tutor_session_id: nil,
+        tutor_messages: [],
+        tutor_loading: false,
+        tutor_input: ""
       )
       |> maybe_advance_to_next()
 
@@ -94,7 +100,7 @@ defmodule FunSheepWeb.PracticeLive do
       user_role_id = socket.assigns.current_user["user_role_id"]
 
       if user_role_id do
-        Questions.create_question_attempt(%{
+        Questions.record_attempt_with_stats(%{
           user_role_id: user_role_id,
           question_id: question.id,
           answer_given: answer,
@@ -121,6 +127,7 @@ defmodule FunSheepWeb.PracticeLive do
     socket =
       socket
       |> assign(feedback: nil, selected_answer: nil)
+      |> reset_tutor()
       |> advance_to_next()
 
     {:noreply, socket}
@@ -155,6 +162,161 @@ defmodule FunSheepWeb.PracticeLive do
       |> maybe_advance_to_next()
 
     {:noreply, socket}
+  end
+
+  # --- Tutor events ---
+
+  def handle_event("open_tutor", _params, socket) do
+    socket = ensure_tutor_session(socket)
+    {:noreply, assign(socket, tutor_open: true)}
+  end
+
+  def handle_event("close_tutor", _params, socket) do
+    {:noreply, assign(socket, tutor_open: false)}
+  end
+
+  def handle_event("tutor_quick_action", %{"action" => action}, socket) do
+    socket = ensure_tutor_session(socket)
+    question = socket.assigns.current_question
+
+    if question && socket.assigns.tutor_session_id do
+      user_label = tutor_action_label(action)
+
+      socket =
+        socket
+        |> assign(tutor_loading: true, tutor_open: true)
+        |> append_tutor_message("user", user_label)
+
+      send(self(), {:tutor_quick_action, action, question})
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("tutor_send", %{"message" => message}, socket) when byte_size(message) > 0 do
+    socket = ensure_tutor_session(socket)
+
+    if socket.assigns.tutor_session_id do
+      socket =
+        socket
+        |> assign(tutor_loading: true, tutor_input: "")
+        |> append_tutor_message("user", message)
+
+      send(self(), {:tutor_send, message})
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("tutor_send", _params, socket), do: {:noreply, socket}
+
+  def handle_event("tutor_input", %{"message" => value}, socket) do
+    {:noreply, assign(socket, tutor_input: value)}
+  end
+
+  @impl true
+  def handle_info({:tutor_quick_action, action, question}, socket) do
+    session_id = socket.assigns.tutor_session_id
+
+    case Tutor.quick_action(session_id, action, question) do
+      {:ok, response} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message("assistant", response)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message(
+           "assistant",
+           "Sorry, I had trouble responding. Please try again."
+         )}
+    end
+  end
+
+  def handle_info({:tutor_send, message}, socket) do
+    session_id = socket.assigns.tutor_session_id
+
+    case Tutor.ask(session_id, message) do
+      {:ok, response} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message("assistant", response)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(tutor_loading: false)
+         |> append_tutor_message(
+           "assistant",
+           "Sorry, I had trouble responding. Please try again."
+         )}
+    end
+  end
+
+  def handle_info({:tutor_response, _response}, socket) do
+    # PubSub broadcast — already handled inline above in mock/poll mode
+    {:noreply, socket}
+  end
+
+  defp ensure_tutor_session(socket) do
+    if socket.assigns.tutor_session_id do
+      socket
+    else
+      question = socket.assigns.current_question
+      user_role_id = socket.assigns.current_user["user_role_id"]
+      course_id = socket.assigns.course.id
+
+      if question && user_role_id do
+        case Tutor.start_session(user_role_id, question.id, course_id) do
+          {:ok, session_id} ->
+            Phoenix.PubSub.subscribe(FunSheep.PubSub, Tutor.topic(session_id))
+            assign(socket, tutor_session_id: session_id)
+
+          {:error, _reason} ->
+            socket
+        end
+      else
+        socket
+      end
+    end
+  end
+
+  defp append_tutor_message(socket, role, content) do
+    msg = %{role: role, content: content, id: System.unique_integer([:positive])}
+    assign(socket, tutor_messages: socket.assigns.tutor_messages ++ [msg])
+  end
+
+  defp tutor_action_label(action) do
+    case action do
+      "hint" -> "Give me a hint"
+      "explain" -> "Explain this concept"
+      "why_wrong" -> "Why was I wrong?"
+      "step_by_step" -> "Walk me through it step by step"
+      "similar" -> "Give me a similar question"
+      _ -> action
+    end
+  end
+
+  # Reset tutor when advancing to a new question
+  defp reset_tutor(socket) do
+    if session_id = socket.assigns.tutor_session_id do
+      Phoenix.PubSub.unsubscribe(FunSheep.PubSub, Tutor.topic(session_id))
+      Tutor.stop_session(session_id)
+    end
+
+    assign(socket,
+      tutor_session_id: nil,
+      tutor_messages: [],
+      tutor_loading: false,
+      tutor_open: false,
+      tutor_input: ""
+    )
   end
 
   # Only advance if there are questions; otherwise leave socket as-is
@@ -220,7 +382,7 @@ defmodule FunSheepWeb.PracticeLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-3xl mx-auto">
+    <div class="max-w-3xl mx-auto pb-20">
       <%!-- Header --%>
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-4">
@@ -236,7 +398,7 @@ defmodule FunSheepWeb.PracticeLive do
           </div>
         </div>
 
-        <div :if={!@practice_complete} class="flex items-center gap-2">
+        <div :if={!@practice_complete} class="flex items-center gap-3">
           <span class="text-sm text-[#8E8E93]">
             {@question_number} / {@total_questions}
           </span>
@@ -386,6 +548,147 @@ defmodule FunSheepWeb.PracticeLive do
         </div>
       </div>
 
+      <%!-- Ask Tutor (only after submitting an answer) --%>
+      <div :if={@current_question && @feedback && !@practice_complete} class="mt-4">
+        <div class="flex items-center gap-2 flex-wrap">
+          <button
+            :if={!@feedback.is_correct}
+            phx-click="tutor_quick_action"
+            phx-value-action="why_wrong"
+            class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E5E5EA] hover:border-[#FF3B30] text-sm text-[#1C1C1E] rounded-full transition-colors"
+          >
+            <.icon name="hero-question-mark-circle" class="w-4 h-4 text-[#FF3B30]" /> Why wrong?
+          </button>
+          <button
+            phx-click="tutor_quick_action"
+            phx-value-action="explain"
+            class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E5E5EA] hover:border-[#4CD964] text-sm text-[#1C1C1E] rounded-full transition-colors"
+          >
+            <.icon name="hero-academic-cap" class="w-4 h-4 text-[#007AFF]" /> Explain
+          </button>
+          <button
+            phx-click="tutor_quick_action"
+            phx-value-action="step_by_step"
+            class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E5E5EA] hover:border-[#4CD964] text-sm text-[#1C1C1E] rounded-full transition-colors"
+          >
+            <.icon name="hero-list-bullet" class="w-4 h-4 text-[#8E8E93]" /> Step by step
+          </button>
+          <button
+            phx-click="open_tutor"
+            class="inline-flex items-center gap-1.5 px-4 py-2 bg-[#4CD964] hover:bg-[#3DBF55] text-sm text-white font-medium rounded-full shadow-md transition-colors"
+          >
+            <.icon name="hero-chat-bubble-left-right" class="w-4 h-4" /> Ask Tutor
+          </button>
+        </div>
+      </div>
+
+      <%!-- Tutor Chat Panel --%>
+      <div
+        :if={@tutor_open}
+        class="fixed inset-x-0 bottom-0 z-40 bg-white border-t border-[#E5E5EA] shadow-xl rounded-t-2xl max-h-[60vh] flex flex-col"
+        id="tutor-panel"
+        phx-hook="ScrollBottom"
+      >
+        <%!-- Panel header --%>
+        <div class="flex items-center justify-between px-6 py-3 border-b border-[#E5E5EA] shrink-0">
+          <div class="flex items-center gap-2">
+            <.icon name="hero-academic-cap" class="w-5 h-5 text-[#4CD964]" />
+            <span class="font-medium text-[#1C1C1E]">AI Tutor</span>
+            <span class="text-xs text-[#8E8E93]">
+              — {if @current_question && @current_question.chapter,
+                do: @current_question.chapter.name,
+                else: @course.name}
+            </span>
+          </div>
+          <button
+            phx-click="close_tutor"
+            class="p-1 text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+            aria-label="Close tutor"
+          >
+            <.icon name="hero-x-mark" class="w-5 h-5" />
+          </button>
+        </div>
+
+        <%!-- Messages --%>
+        <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" id="tutor-messages">
+          <div
+            :if={@tutor_messages == []}
+            class="text-center text-sm text-[#8E8E93] py-8"
+          >
+            Ask me anything about this question! I'm here to help you understand.
+          </div>
+
+          <div
+            :for={msg <- @tutor_messages}
+            class={[
+              "flex",
+              if(msg.role == "user", do: "justify-end", else: "justify-start")
+            ]}
+          >
+            <div class={[
+              "max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed",
+              if(msg.role == "user",
+                do: "bg-[#4CD964] text-white",
+                else: "bg-[#F5F5F7] text-[#1C1C1E]"
+              )
+            ]}>
+              <.render_tutor_markdown content={msg.content} />
+            </div>
+          </div>
+
+          <div :if={@tutor_loading} class="flex justify-start">
+            <div class="bg-[#F5F5F7] px-4 py-3 rounded-2xl">
+              <div class="flex gap-1">
+                <div
+                  class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                  style="animation-delay: 0ms"
+                >
+                </div>
+                <div
+                  class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                  style="animation-delay: 150ms"
+                >
+                </div>
+                <div
+                  class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                  style="animation-delay: 300ms"
+                >
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Input --%>
+        <div class="px-6 py-3 border-t border-[#E5E5EA] shrink-0">
+          <form phx-submit="tutor_send" class="flex gap-2">
+            <input
+              type="text"
+              name="message"
+              value={@tutor_input}
+              phx-change="tutor_input"
+              placeholder="Ask about this question..."
+              autocomplete="off"
+              class="flex-1 px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none text-sm transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={@tutor_loading || @tutor_input == ""}
+              class={[
+                "p-2 rounded-full transition-colors",
+                if(@tutor_loading || @tutor_input == "",
+                  do: "bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed",
+                  else: "bg-[#4CD964] hover:bg-[#3DBF55] text-white shadow-md"
+                )
+              ]}
+              aria-label="Send message"
+            >
+              <.icon name="hero-paper-airplane" class="w-5 h-5" />
+            </button>
+          </form>
+        </div>
+      </div>
+
       <%!-- Summary --%>
       <div :if={@practice_complete && @summary} class="bg-white rounded-2xl shadow-md p-8">
         <div class="text-center mb-8">
@@ -434,6 +737,26 @@ defmodule FunSheepWeb.PracticeLive do
         </div>
       </div>
     </div>
+    """
+  end
+
+  # --- Tutor markdown renderer (simple bold/newline support) ---
+
+  attr :content, :string, required: true
+
+  defp render_tutor_markdown(assigns) do
+    # Simple markdown: **bold**, \n newlines, numbered lists
+    html =
+      assigns.content
+      |> Phoenix.HTML.html_escape()
+      |> Phoenix.HTML.safe_to_string()
+      |> String.replace(~r/\*\*(.+?)\*\*/, "<strong>\\1</strong>")
+      |> String.replace("\n", "<br/>")
+
+    assigns = assign(assigns, :html, html)
+
+    ~H"""
+    <span>{Phoenix.HTML.raw(@html)}</span>
     """
   end
 

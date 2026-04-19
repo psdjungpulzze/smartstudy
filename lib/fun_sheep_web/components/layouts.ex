@@ -105,6 +105,8 @@ defmodule FunSheepWeb.Layouts do
   def nav_emoji("hero-user-group"), do: "👨‍🎓"
   def nav_emoji("hero-building-library"), do: "🏫"
   def nav_emoji("hero-cog-6-tooth"), do: "⚙️"
+  def nav_emoji("hero-trophy"), do: "🏆"
+  def nav_emoji("hero-user"), do: "👤"
   def nav_emoji(_), do: "✨"
 
   @doc """
@@ -114,12 +116,9 @@ defmodule FunSheepWeb.Layouts do
     case role do
       "student" ->
         [
-          %{label: "Home", path: "/dashboard", icon: "hero-home"},
-          %{label: "My Courses", path: "/courses", icon: "hero-book-open"},
-          %{label: "Assessments", path: "/tests", icon: "hero-clipboard-document-check"},
-          %{label: "Quick Test", path: "/quick-test", icon: "hero-bolt"},
-          %{label: "Study Guides", path: "/study-guides", icon: "hero-document-text"},
-          %{label: "Profile", path: "/profile/setup", icon: "hero-user"}
+          %{label: "Learn", path: "/dashboard", icon: "hero-bolt"},
+          %{label: "Courses", path: "/courses", icon: "hero-book-open"},
+          %{label: "Flock", path: "/leaderboard", icon: "hero-trophy"}
         ]
 
       "parent" ->
@@ -152,4 +151,37 @@ defmodule FunSheepWeb.Layouts do
         ]
     end
   end
+
+  @total_profile_items 2
+
+  @doc """
+  Returns profile completion percentage based on gaps.
+  """
+  def profile_completion_pct(gaps) when is_list(gaps) do
+    completed = @total_profile_items - length(gaps)
+    round(completed / @total_profile_items * 100)
+  end
+
+  def profile_completion_pct(_), do: 100
+
+  @doc """
+  Returns a contextual nudge message based on what's missing.
+  """
+  def profile_nudge_message(gaps) when is_list(gaps) do
+    cond do
+      :grade in gaps and :hobbies in gaps ->
+        "Tell us your grade level and hobbies so we can personalize your questions and match you with peers."
+
+      :grade in gaps ->
+        "Add your grade level so we can find the right difficulty for you."
+
+      :hobbies in gaps ->
+        "Pick your hobbies and we'll weave them into practice questions to make studying more fun!"
+
+      true ->
+        "A few more details will help us personalize your experience."
+    end
+  end
+
+  def profile_nudge_message(_), do: ""
 end

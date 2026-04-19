@@ -19,6 +19,20 @@ defmodule FunSheep.Export do
       ""
     ]
 
+    plan_lines =
+      case content["study_plan"] do
+        [_ | _] = plan ->
+          ["## Study Plan", ""] ++
+            Enum.flat_map(plan, fn day ->
+              status = if day["completed"], do: "[x]", else: "[ ]"
+              ["#{status} Day #{day["day"]} (#{day["date"]}): #{day["focus"]}", ""]
+            end) ++
+            ["---", ""]
+
+        _ ->
+          []
+      end
+
     section_lines =
       Enum.flat_map(content["sections"] || [], fn section ->
         header_lines = [
@@ -42,7 +56,7 @@ defmodule FunSheep.Export do
         header_lines ++ topic_lines ++ wrong_lines ++ [""]
       end)
 
-    Enum.join(lines ++ section_lines, "\n")
+    Enum.join(lines ++ plan_lines ++ section_lines, "\n")
   end
 
   @doc """

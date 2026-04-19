@@ -88,7 +88,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
   describe "assessment flow" do
     test "starts and shows a question", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/#{schedule.id}/assess")
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/assess")
 
       assert html =~ "Bio Quiz"
       assert html =~ "Question 1"
@@ -98,7 +100,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
 
     test "shows feedback after answering", %{conn: conn, user_role: ur, schedule: schedule} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/tests/#{schedule.id}/assess")
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/assess")
 
       # Select an answer
       render_click(view, "select_answer", %{"answer" => "A"})
@@ -117,7 +121,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       schedule: schedule
     } do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/tests/#{schedule.id}/assess")
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/assess")
 
       # Answer first question
       render_click(view, "select_answer", %{"answer" => "A"})

@@ -8,7 +8,7 @@ defmodule FunSheep.Courses do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Courses.{Course, Chapter, Section}
+  alias FunSheep.Courses.{Course, Chapter, Section, Textbook}
 
   ## Courses
 
@@ -64,6 +64,47 @@ defmodule FunSheep.Courses do
 
   defp maybe_filter_school(query, _params), do: query
 
+  @grade_order ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)
+
+  @doc """
+  Lists courses for nearby grades (+-1) at the given school,
+  excluding courses the user already owns.
+  """
+  def list_nearby_courses(school_id, grade, user_role_id) do
+    grades = nearby_grades(grade)
+
+    query =
+      from(c in Course,
+        where: c.grade in ^grades,
+        where: c.created_by_id != ^user_role_id,
+        order_by: [asc: c.name],
+        preload: [:school]
+      )
+
+    query =
+      if school_id do
+        where(query, [c], c.school_id == ^school_id)
+      else
+        query
+      end
+
+    Repo.all(query)
+  end
+
+  defp nearby_grades(nil), do: @grade_order
+
+  defp nearby_grades(grade) do
+    idx = Enum.find_index(@grade_order, &(&1 == grade))
+
+    if idx do
+      lo = max(idx - 1, 0)
+      hi = min(idx + 1, length(@grade_order) - 1)
+      Enum.slice(@grade_order, lo..hi)
+    else
+      @grade_order
+    end
+  end
+
   @doc """
   Lists courses created by or associated with a user role.
   """
@@ -97,6 +138,24 @@ defmodule FunSheep.Courses do
     |> Repo.all()
   end
 
+  @doc """
+  Lists courses the user is "enrolled in" — either created by them or
+  has test schedules for. Returns courses with school preloaded.
+  """
+  def list_user_courses(nil), do: []
+
+  def list_user_courses(user_role_id) do
+    from(c in Course,
+      left_join: ts in FunSheep.Assessments.TestSchedule,
+      on: ts.course_id == c.id and ts.user_role_id == ^user_role_id,
+      where: c.created_by_id == ^user_role_id or not is_nil(ts.id),
+      distinct: c.id,
+      order_by: [desc: c.inserted_at],
+      preload: [:school]
+    )
+    |> Repo.all()
+  end
+
   def create_course(attrs \\ %{}) do
     %Course{}
     |> Course.changeset(attrs)
@@ -117,6 +176,148 @@ defmodule FunSheep.Courses do
     Course.changeset(course, attrs)
   end
 
+  @doc """
+  Reprocess a course from scratch: delete old chapters, questions, and OCR pages,
+  reset material OCR statuses to pending, and re-enqueue the processing pipeline.
+  """
+  def reprocess_course(course_id) do
+    import Ecto.Query
+
+    course = get_course!(course_id)
+
+    # Delete existing questions for this course
+    from(q in FunSheep.Questions.Question, where: q.course_id == ^course_id)
+    |> Repo.delete_all()
+
+    # Delete existing chapters (sections cascade via DB)
+    from(ch in Chapter, where: ch.course_id == ^course_id)
+    |> Repo.delete_all()
+
+    # Delete OCR pages for all materials in this course
+    material_ids =
+      from(m in FunSheep.Content.UploadedMaterial,
+        where: m.course_id == ^course_id,
+        select: m.id
+      )
+      |> Repo.all()
+
+    if material_ids != [] do
+      from(p in FunSheep.Content.OcrPage, where: p.material_id in ^material_ids)
+      |> Repo.delete_all()
+
+      # Reset all materials to pending
+      from(m in FunSheep.Content.UploadedMaterial, where: m.course_id == ^course_id)
+      |> Repo.update_all(set: [ocr_status: :pending])
+    end
+
+    # Reset course processing state and metadata flags
+    update_course(course, %{
+      processing_status: "processing",
+      processing_step: "Reprocessing...",
+      ocr_completed_count: 0,
+      ocr_total_count: 0,
+      metadata:
+        Map.merge(course.metadata || %{}, %{
+          "discovery_complete" => false,
+          "ocr_complete" => false
+        })
+    })
+
+    # Enqueue the processing pipeline
+    %{course_id: course_id}
+    |> FunSheep.Workers.ProcessCourseWorker.new()
+    |> Oban.insert()
+
+    {:ok, get_course!(course_id)}
+  end
+
+  def cancel_processing(course_id) do
+    course = get_course!(course_id)
+
+    # Cancel pending Oban jobs for this course
+    import Ecto.Query
+
+    from(j in Oban.Job,
+      where: j.state in ["available", "scheduled", "retryable"],
+      where: fragment("?->>'course_id' = ?", j.args, ^course_id)
+    )
+    |> Repo.update_all(set: [state: "cancelled", cancelled_at: DateTime.utc_now()])
+
+    update_course(course, %{
+      processing_status: "cancelled",
+      processing_step: "Processing stopped by user"
+    })
+  end
+
+  @doc "Atomically increment ocr_completed_count and return the new count + total."
+  def increment_ocr_completed(course_id) do
+    {1, [result]} =
+      from(c in Course,
+        where: c.id == ^course_id,
+        select: {c.ocr_completed_count, c.ocr_total_count}
+      )
+      |> Repo.update_all(inc: [ocr_completed_count: 1])
+
+    {elem(result, 0), elem(result, 1)}
+  end
+
+  ## Textbooks
+
+  @doc """
+  Searches textbooks in the local database by subject and optional grade/query.
+  """
+  def search_textbooks(subject, grade \\ nil, query \\ nil) do
+    Textbook
+    |> where([t], ilike(t.subject, ^"%#{subject}%"))
+    |> maybe_filter_textbook_grade(grade)
+    |> maybe_filter_textbook_query(query)
+    |> order_by([t], asc: t.title)
+    |> limit(20)
+    |> Repo.all()
+  end
+
+  defp maybe_filter_textbook_grade(q, nil), do: q
+  defp maybe_filter_textbook_grade(q, ""), do: q
+
+  defp maybe_filter_textbook_grade(q, grade) do
+    where(q, [t], fragment("? = ANY(?)", ^grade, t.grades) or t.grades == ^[])
+  end
+
+  defp maybe_filter_textbook_query(q, nil), do: q
+  defp maybe_filter_textbook_query(q, ""), do: q
+
+  defp maybe_filter_textbook_query(q, query) do
+    pattern = "%#{query}%"
+
+    where(
+      q,
+      [t],
+      ilike(t.title, ^pattern) or
+        ilike(t.author, ^pattern) or
+        ilike(t.publisher, ^pattern)
+    )
+  end
+
+  def get_textbook!(id), do: Repo.get!(Textbook, id)
+
+  @doc """
+  Finds or creates a textbook from OpenLibrary API data.
+  Returns the existing record if the openlibrary_key is already stored.
+  """
+  def find_or_create_textbook(attrs) do
+    case Repo.get_by(Textbook,
+           openlibrary_key: attrs[:openlibrary_key] || attrs["openlibrary_key"]
+         ) do
+      nil ->
+        %Textbook{}
+        |> Textbook.changeset(attrs)
+        |> Repo.insert()
+
+      existing ->
+        {:ok, existing}
+    end
+  end
+
   ## Chapters
 
   def list_chapters do
@@ -124,9 +325,12 @@ defmodule FunSheep.Courses do
   end
 
   def list_chapters_by_course(course_id) do
+    sections_query = from(s in Section, order_by: s.position)
+
     from(c in Chapter,
       where: c.course_id == ^course_id,
-      order_by: c.position
+      order_by: c.position,
+      preload: [sections: ^sections_query]
     )
     |> Repo.all()
   end

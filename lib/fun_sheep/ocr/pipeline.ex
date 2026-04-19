@@ -8,7 +8,7 @@ defmodule FunSheep.OCR.Pipeline do
   5. Update material ocr_status
   """
 
-  alias FunSheep.{Content, Storage}
+  alias FunSheep.Content
   alias FunSheep.OCR.GoogleVision
 
   @doc """
@@ -36,7 +36,7 @@ defmodule FunSheep.OCR.Pipeline do
   defp do_process(material) do
     # For now, treat everything as a single "page"
     # In production, PDFs would be split into individual page images
-    case Storage.get(material.file_path) do
+    case read_material_file(material.file_path) do
       {:ok, content} ->
         case GoogleVision.detect_text(Base.encode64(content)) do
           {:ok, result} ->
@@ -50,6 +50,15 @@ defmodule FunSheep.OCR.Pipeline do
       {:error, reason} ->
         {:error, {:file_read_error, reason}}
     end
+  end
+
+  defp read_material_file(file_path) do
+    # Files are stored under priv/static/ with paths like /uploads/staging/...
+    full_path =
+      Application.app_dir(:fun_sheep, "priv/static")
+      |> Path.join(file_path)
+
+    File.read(full_path)
   end
 
   defp create_ocr_page(material, page_number, ocr_result) do

@@ -44,6 +44,15 @@ defmodule FunSheep.Assessments do
     |> Repo.all()
   end
 
+  def list_test_schedules_for_course(user_role_id, course_id) do
+    from(ts in TestSchedule,
+      where: ts.user_role_id == ^user_role_id and ts.course_id == ^course_id,
+      order_by: ts.test_date,
+      preload: [:course]
+    )
+    |> Repo.all()
+  end
+
   @doc """
   Lists upcoming test schedules (test_date >= today) within `days_ahead` days,
   ordered by test date ascending.
@@ -61,6 +70,32 @@ defmodule FunSheep.Assessments do
       preload: [:course]
     )
     |> Repo.all()
+  end
+
+  @doc """
+  Returns upcoming test schedules grouped by course_id.
+  Each entry includes the schedule and its latest readiness score.
+  Result: %{course_id => [%{schedule: schedule, readiness: score_or_nil}]}
+  """
+  def list_upcoming_grouped_by_course(nil), do: %{}
+
+  def list_upcoming_grouped_by_course(user_role_id) do
+    today = Date.utc_today()
+
+    schedules =
+      from(ts in TestSchedule,
+        where: ts.user_role_id == ^user_role_id and ts.test_date >= ^today,
+        order_by: [asc: ts.test_date],
+        preload: [:course]
+      )
+      |> Repo.all()
+
+    schedules
+    |> Enum.map(fn ts ->
+      readiness = latest_readiness(user_role_id, ts.id)
+      %{schedule: ts, readiness: readiness}
+    end)
+    |> Enum.group_by(fn entry -> entry.schedule.course_id end)
   end
 
   def get_test_schedule!(id), do: Repo.get!(TestSchedule, id)
@@ -205,5 +240,149 @@ defmodule FunSheep.Assessments do
       limit: 1
     )
     |> Repo.one()
+  end
+
+  ## ── Readiness Benchmarking ──────────────────────────────────────────────
+
+  @doc """
+  Calculates the percentile rank of a user's readiness score among all students
+  who have readiness scores for the same course.
+
+  Returns a map with percentile (0-100), rank, total_students, and score_distribution.
+  """
+  def readiness_percentile(user_role_id, test_schedule_id) do
+    schedule = get_test_schedule!(test_schedule_id)
+    my_readiness = latest_readiness(user_role_id, test_schedule_id)
+    my_score = if my_readiness, do: my_readiness.aggregate_score, else: 0.0
+
+    # Get all latest readiness scores for the same course (any test schedule)
+    all_scores =
+      from(rs in ReadinessScore,
+        join: ts in TestSchedule,
+        on: rs.test_schedule_id == ts.id,
+        where: ts.course_id == ^schedule.course_id,
+        distinct: rs.user_role_id,
+        order_by: [desc: rs.inserted_at],
+        select: rs.aggregate_score
+      )
+      |> Repo.all()
+
+    total = length(all_scores)
+
+    if total <= 1 do
+      %{
+        percentile: 100,
+        rank: 1,
+        total_students: max(total, 1),
+        my_score: my_score,
+        average_score: my_score,
+        score_distribution: distribution_buckets(all_scores)
+      }
+    else
+      below_count = Enum.count(all_scores, fn s -> s < my_score end)
+      percentile = round(below_count / total * 100)
+      rank = Enum.count(all_scores, fn s -> s > my_score end) + 1
+      avg = Enum.sum(all_scores) / total
+
+      %{
+        percentile: percentile,
+        rank: rank,
+        total_students: total,
+        my_score: my_score,
+        average_score: Float.round(avg, 1),
+        score_distribution: distribution_buckets(all_scores)
+      }
+    end
+  end
+
+  @doc """
+  Returns predicted score range based on readiness score.
+  Maps readiness % to likely test score range using a simple model.
+  """
+  def predicted_score_range(readiness_score) when is_number(readiness_score) do
+    # Conservative estimate: readiness correlates with ~80% of actual performance
+    base = readiness_score * 0.8
+    low = max(0, round(base - 10))
+    high = min(100, round(base + 15))
+    mid = round((low + high) / 2)
+
+    %{low: low, mid: mid, high: high, confidence: score_confidence(readiness_score)}
+  end
+
+  def predicted_score_range(_), do: %{low: 0, mid: 50, high: 100, confidence: :low}
+
+  @doc """
+  Returns readiness trend for a user over the last N days.
+  Shows the trajectory (improving, declining, stable).
+  """
+  def readiness_trend(user_role_id, test_schedule_id, days \\ 14) do
+    cutoff =
+      Date.utc_today()
+      |> Date.add(-days)
+      |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+
+    scores =
+      from(rs in ReadinessScore,
+        where:
+          rs.user_role_id == ^user_role_id and
+            rs.test_schedule_id == ^test_schedule_id and
+            rs.inserted_at >= ^cutoff,
+        order_by: [asc: rs.inserted_at],
+        select: %{score: rs.aggregate_score, date: rs.inserted_at}
+      )
+      |> Repo.all()
+
+    case scores do
+      [] ->
+        %{direction: :none, change: 0, scores: []}
+
+      [_single] ->
+        %{direction: :stable, change: 0, scores: scores}
+
+      multiple ->
+        first = hd(multiple).score
+        last = List.last(multiple).score
+        change = Float.round(last - first, 1)
+
+        direction =
+          cond do
+            change > 3 -> :improving
+            change < -3 -> :declining
+            true -> :stable
+          end
+
+        %{direction: direction, change: change, scores: multiple}
+    end
+  end
+
+  defp distribution_buckets(scores) do
+    buckets = %{
+      "0-20" => 0,
+      "21-40" => 0,
+      "41-60" => 0,
+      "61-80" => 0,
+      "81-100" => 0
+    }
+
+    Enum.reduce(scores, buckets, fn score, acc ->
+      bucket =
+        cond do
+          score <= 20 -> "0-20"
+          score <= 40 -> "21-40"
+          score <= 60 -> "41-60"
+          score <= 80 -> "61-80"
+          true -> "81-100"
+        end
+
+      Map.update!(acc, bucket, &(&1 + 1))
+    end)
+  end
+
+  defp score_confidence(readiness) do
+    cond do
+      readiness >= 80 -> :high
+      readiness >= 50 -> :medium
+      true -> :low
+    end
   end
 end

@@ -34,11 +34,11 @@ defmodule FunSheepWeb.TestScheduleLiveTest do
   end
 
   describe "index" do
-    test "renders test list page", %{conn: conn, user_role: ur} do
+    test "renders test list page", %{conn: conn, user_role: ur, course: c} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests")
 
-      assert html =~ "My Tests"
+      assert html =~ "Assessments"
       assert html =~ "Schedule New Test"
     end
 
@@ -53,24 +53,24 @@ defmodule FunSheepWeb.TestScheduleLiveTest do
         })
 
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests")
 
       assert html =~ "Biology Midterm"
       assert html =~ c.name
     end
 
-    test "shows empty state when no tests", %{conn: conn, user_role: ur} do
+    test "shows empty state when no tests", %{conn: conn, user_role: ur, course: c} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests")
 
       assert html =~ "No tests scheduled yet"
     end
   end
 
   describe "new test form" do
-    test "renders schedule form", %{conn: conn, user_role: ur} do
+    test "renders schedule form", %{conn: conn, user_role: ur, course: c} do
       conn = auth_conn(conn, ur)
-      {:ok, _view, html} = live(conn, ~p"/tests/new")
+      {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests/new")
 
       assert html =~ "Schedule New Test"
       assert html =~ "Test Name"
@@ -78,11 +78,9 @@ defmodule FunSheepWeb.TestScheduleLiveTest do
       assert html =~ "Test Date"
     end
 
-    test "shows chapters when course selected", %{conn: conn, user_role: ur, course: c} do
+    test "shows chapters on page load", %{conn: conn, user_role: ur, course: c} do
       conn = auth_conn(conn, ur)
-      {:ok, view, _html} = live(conn, ~p"/tests/new")
-
-      html = render_click(view, "select_course", %{"course_id" => c.id})
+      {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests/new")
 
       assert html =~ "Chapter 1"
       assert html =~ "Test Scope"
