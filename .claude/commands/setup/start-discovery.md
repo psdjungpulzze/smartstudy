@@ -188,6 +188,19 @@ Only proceed to `/start-planning` when validation passes.
 
 Before transitioning to Planning, validate ALL of the following:
 
+### Interactor Capability Overlap Check (MANDATORY)
+
+Review every requirement against the Interactor Capability Map in `.claude/rules/i/interactor-integration.md`. For each requirement, determine:
+
+- [ ] **Auth/User Management**: Does any requirement involve login, signup, user roles, MFA, or session management? → Tag with `[INTERACTOR:AUTH]`
+- [ ] **Credential Storage**: Does any requirement involve storing OAuth tokens, API keys, or third-party credentials? → Tag with `[INTERACTOR:CREDENTIALS]`
+- [ ] **AI/Chat**: Does any requirement involve chatbots, AI assistants, LLM integration, or conversational interfaces? → Tag with `[INTERACTOR:AGENTS]`
+- [ ] **Workflows**: Does any requirement involve multi-step processes, approval flows, or pipeline orchestration? → Tag with `[INTERACTOR:WORKFLOWS]`
+- [ ] **Events/Streaming**: Does any requirement involve real-time events, webhooks, or server-sent events? → Tag with `[INTERACTOR:WEBHOOKS]`
+- [ ] **Org/Tenant Management**: Does any requirement involve organizations, multi-tenancy, or role hierarchies? → Tag with `[INTERACTOR:AUTH]`
+
+**Add an "Interactor Overlap" column to the requirements document.** For each tagged requirement, note: "Use Interactor [SERVICE]" or "Custom needed — [reason]". Requirements marked "Custom needed" MUST have the reason documented and will require an ADR in the Planning phase.
+
 ### Requirements Completeness
 - [ ] Every requirement has a unique ID (FR-XXX)
 - [ ] Every requirement has acceptance criteria

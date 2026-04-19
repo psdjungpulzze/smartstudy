@@ -640,8 +640,9 @@ Run the `validator` skill:
 ### Before Starting Each Milestone
 1. List the tasks in this milestone
 2. For each task, identify the requirement(s) it implements
-3. Before coding, read the requirement's acceptance criteria
-4. After coding, verify acceptance criteria are met
+3. **Check the "Interactor Platform Integration" section in `docs/planning/architecture.md`** — if the task's requirement is tagged to use an Interactor service, integrate with Interactor instead of building custom code. Read the relevant Interactor doc before writing any code.
+4. Before coding, read the requirement's acceptance criteria
+5. After coding, verify acceptance criteria are met
 
 ### Before Marking a Milestone Complete
 - [ ] All tasks in the milestone are complete
