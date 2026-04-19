@@ -287,6 +287,8 @@ Every project MUST maintain a Requirements Traceability Matrix. This matrix is:
 - Every "Must" requirement has status "Complete"
 - All acceptance criteria verified
 - UI is functional for all features
+- **Test scripts exist for all new/modified code**
+- **Test coverage is > 50%** (verified via `mix test --cover`)
 
 ---
 
@@ -344,17 +346,21 @@ When writing code:
 1. Use `/start-implementation` to setup the phase **[SETUP command]**
 2. Follow `.claude/rules/i/code-style.md` for formatting
 3. Apply TDD - write tests first when possible
-4. Use meaningful commit messages per `.claude/rules/i/git-workflow.md`
-5. Reference `docs/setup/phases/03-implementation/ai-collaboration-guide.md` for initial setup collaboration **[SETUP]**
-6. Reference `docs/i/phases/03-implementation/` for ongoing development standards
+4. **ALWAYS create test scripts for every new module, function, or feature** - no code is considered complete without corresponding tests
+5. Use meaningful commit messages per `.claude/rules/i/git-workflow.md`
+6. Reference `docs/setup/phases/03-implementation/ai-collaboration-guide.md` for initial setup collaboration **[SETUP]**
+7. Reference `docs/i/phases/03-implementation/` for ongoing development standards
+8. Run `mix test --cover` after implementation to verify coverage stays above 80%
 
 **Best practices**:
 - Commit frequently with atomic changes
 - Write self-documenting code
 - Handle errors appropriately
 - Never hardcode secrets or credentials
+- **Every PR/commit that adds or modifies code MUST include test scripts** — unit tests at minimum, integration/e2e tests where applicable
+- **Test coverage must remain above 80% at all times** — run `mix test --cover` to verify before considering work complete
 
-**Exit criteria**: Feature complete, tests passing, code reviewed.
+**Exit criteria**: Feature complete, tests passing, **test coverage > 80%**, code reviewed.
 
 ---
 
@@ -370,11 +376,33 @@ When testing:
 5. Document test scenarios
 
 **Coverage requirements**:
-- Minimum overall: 80%
+- **Absolute minimum overall: 80%** — code cannot be merged or deployed below this threshold
+- Target overall: 80%
 - Critical paths: 100%
-- New code: Must include tests
+- New code: **MUST always include test scripts** — no exceptions
+- **LiveView: MUST include LiveView tests** — every LiveView module must have corresponding tests using `Phoenix.LiveViewTest` (render, events, navigation, form submissions)
 
-**Exit criteria**: All tests passing, coverage met, quality gates passed.
+**Required test types by layer**:
+
+| Layer | Test Type | Required |
+|-------|-----------|----------|
+| Contexts | Unit tests | Yes |
+| Schemas/Changesets | Unit tests | Yes |
+| Controllers | Integration tests | Yes |
+| **LiveView pages** | **LiveView tests (`Phoenix.LiveViewTest`)** | **Yes — mandatory** |
+| **LiveView components** | **Component tests (`render_component/2`)** | **Yes — mandatory** |
+| Channels | Channel tests | Yes (if used) |
+| E2E flows | Browser tests (Playwright/Wallaby) | Recommended |
+
+**LiveView test expectations**:
+- Test `mount/3` assigns and initial render
+- Test all `handle_event/3` callbacks
+- Test `handle_params/3` for live navigation
+- Test form validation and submission via `form/2` and `submit/2`
+- Test live navigation between routes via `live_navigate/2`
+- Test PubSub-driven updates where applicable
+
+**Exit criteria**: All tests passing, coverage met, **LiveView tests included for all LiveView modules**, quality gates passed.
 
 ---
 
@@ -589,9 +617,10 @@ mix compile --warnings-as-errors  # Must pass
 mix format --check-formatted      # Must pass
 mix credo --strict                # Should pass
 mix test                          # Must pass
+mix test --cover                  # Must pass — coverage must be > 80%
 
 # Before commits
-mix test --cover                  # Check coverage
+mix test --cover                  # Verify coverage > 80% — MANDATORY
 mix sobelow                       # Security check
 ```
 
