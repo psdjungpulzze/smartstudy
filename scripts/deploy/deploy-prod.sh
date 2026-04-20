@@ -61,9 +61,13 @@ if [ "$SKIP_GIT_CHECK" -ne 1 ]; then
     fail "Must deploy from 'main' (currently on: $BRANCH). Use --skip-git-check to override."
   fi
 
-  if [ -n "$(git status --porcelain)" ]; then
+  # --ignore-submodules=dirty: treat nested-submodule working-tree dirt as
+  # clean, since interactor-workspace/ is excluded by .gcloudignore and not
+  # part of the Cloud Build upload. Changes to the submodule pointer itself
+  # are still caught (those show up without the "dirty" marker).
+  if [ -n "$(git status --porcelain --ignore-submodules=dirty)" ]; then
     echo "--- uncommitted changes ---" >&2
-    git status --short >&2
+    git status --short --ignore-submodules=dirty >&2
     fail "Working tree not clean. Commit/stash first, or use --skip-git-check."
   fi
 
