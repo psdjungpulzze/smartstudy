@@ -145,17 +145,14 @@ defmodule FunSheep.Ingest.Sources.Whed do
   end
 
   # Pick the display name ("ror_display" type) or fall back to first "label".
+  # Anonymous fns need a fallback clause — ROR occasionally ships name
+  # entries missing `types` or with `types: null`, which would otherwise
+  # crash Enum.find_value with a FunctionClauseError.
   defp display_name(names) when is_list(names) do
-    Enum.find_value(names, fn
-      %{"types" => types, "value" => v} when is_list(types) ->
-        if "ror_display" in types, do: v
-    end) ||
-      Enum.find_value(names, fn
-        %{"types" => types, "value" => v} when is_list(types) ->
-          if "label" in types, do: v
-      end) ||
+    pick_by_type(names, "ror_display") ||
+      pick_by_type(names, "label") ||
       case names do
-        [%{"value" => v} | _] -> v
+        [%{"value" => v} | _] when is_binary(v) -> v
         _ -> nil
       end
   end
@@ -167,10 +164,23 @@ defmodule FunSheep.Ingest.Sources.Whed do
       %{"types" => types, "value" => v, "lang" => lang}
       when is_list(types) and is_binary(lang) and lang != "en" ->
         if "label" in types, do: v
+
+      _ ->
+        nil
     end)
   end
 
   defp native_name(_), do: nil
+
+  defp pick_by_type(names, target) do
+    Enum.find_value(names, fn
+      %{"types" => types, "value" => v} when is_list(types) and is_binary(v) ->
+        if target in types, do: v
+
+      _ ->
+        nil
+    end)
+  end
 
   defp primary_link(links) when is_list(links) do
     Enum.find_value(links, fn
