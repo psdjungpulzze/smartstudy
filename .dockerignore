@@ -1,0 +1,59 @@
+# Build artifacts
+_build/
+deps/
+node_modules/
+rel/
+
+# User uploads (9+ GB, stored in Cloud Storage in prod)
+priv/static/uploads/
+
+# Dev/test files
+.env*
+.git
+.gitignore
+.formatter.exs
+.credo.exs
+
+# IDE
+.vscode/
+.idea/
+
+# Claude/AI
+.claude/
+CLAUDE.md
+AGENTS.md
+CONTRIBUTING.md
+README*.md
+docs/
+interactor-workspace/
+interactor-workspace-docs/
+
+# Test
+test/
+test-results/
+screenshots/
+test/e2e/screenshots/
+cover/
+coverage/
+
+# Logs
+log/
+logs/
+erl_crash.dump
+npm-debug.log
+*.log
+
+# Secrets (never in image)
+.env.credentials
+
+# Docker
+docker-compose.yml
+Dockerfile
+
+# Scripts (not needed in prod image)
+scripts/
+dev-app.sh
+
+# OS
+.DS_Store
+Thumbs.db

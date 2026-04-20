@@ -1,0 +1,75 @@
+# This file specifies files ignored by `gcloud run deploy --source=.`
+# Syntax is identical to .gitignore / .dockerignore
+# https://cloud.google.com/sdk/gcloud/reference/topic/gcloudignore
+
+# Git
+.git/
+.gitignore
+.gitmodules
+
+# Build artifacts
+_build/
+deps/
+cover/
+coverage/
+node_modules/
+assets/node_modules/
+test/e2e/node_modules/
+rel/
+priv/static/assets/
+priv/static/cache_manifest.json
+
+# User uploads (9+ GB — not needed at build time)
+priv/static/uploads/
+priv/uploads/
+
+# Submodules / vendored
+interactor-workspace/
+interactor-workspace-docs/
+
+# Tests & screenshots
+test/
+test-results/
+screenshots/
+test/e2e/screenshots/
+test/e2e/test-results/
+test/e2e/playwright-report/
+
+# Logs
+log/
+logs/
+*.log
+erl_crash.dump
+npm-debug.log
+
+# Env & secrets
+.env
+.env.*
+.env.local
+.env.production
+.env.credentials
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude / AI
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Docs (not needed in image; Dockerfile doesn't COPY them)
+docs/
+CONTRIBUTING.md
+README*.md
+
+# Mix artifacts
+*.ez
+fun_sheep-*.tar
+
+# Temporary
+tmp/
+/tmp/
+.fetch
