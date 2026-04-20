@@ -171,6 +171,63 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
     end
   end
 
+  describe "view mode for returning users" do
+    test "first-time visit renders the wizard, not the summary", %{conn: conn} do
+      conn = auth_conn(conn)
+      {:ok, _view, html} = live(conn, ~p"/profile/setup")
+
+      assert html =~ "Demographics"
+      refute html =~ "Your Profile"
+    end
+
+    test "returning user with saved data sees the summary with hobbies", %{conn: conn} do
+      conn = auth_conn(conn)
+      user_role_id = get_session(conn, :dev_user)["user_role_id"]
+
+      {:ok, hobby} =
+        FunSheep.Learning.create_hobby(%{name: "Coding", category: "Tech"})
+
+      FunSheep.Accounts.update_user_role(
+        FunSheep.Accounts.get_user_role!(user_role_id),
+        %{grade: "10", gender: "Female"}
+      )
+
+      {:ok, _} =
+        FunSheep.Learning.create_student_hobby(%{
+          user_role_id: user_role_id,
+          hobby_id: hobby.id,
+          specific_interests: %{"text" => "Python, Web Dev"}
+        })
+
+      {:ok, _view, html} = live(conn, ~p"/profile/setup")
+
+      assert html =~ "Your Profile"
+      assert html =~ ~r/phx-click="edit_profile"/
+      assert html =~ "10"
+      assert html =~ "Female"
+      assert html =~ "Coding"
+      assert html =~ "Python, Web Dev"
+      # Wizard is NOT rendered — no country select, no Demographics heading.
+      refute html =~ "Select a country"
+    end
+
+    test "clicking Edit flips to the wizard", %{conn: conn} do
+      conn = auth_conn(conn)
+      user_role_id = get_session(conn, :dev_user)["user_role_id"]
+
+      FunSheep.Accounts.update_user_role(
+        FunSheep.Accounts.get_user_role!(user_role_id),
+        %{grade: "10"}
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/profile/setup")
+      html = render_click(view, "edit_profile")
+
+      assert html =~ "Demographics"
+      assert html =~ ~r/phx-click="cancel_edit"/
+    end
+  end
+
   describe "persistence across full flow" do
     test "demographics persist to user_role after Next", %{conn: conn} do
       {:ok, country} = Geo.create_country(%{name: "United States", code: "US"})

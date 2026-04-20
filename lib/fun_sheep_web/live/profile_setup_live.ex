@@ -35,11 +35,18 @@ defmodule FunSheepWeb.ProfileSetupLive do
   def mount(_params, _session, socket) do
     countries = Geo.list_countries()
     existing = load_existing_profile(socket.assigns.current_user)
+    has_data? = profile_has_data?(existing)
 
     socket =
       socket
       |> assign(
-        page_title: "Profile Setup",
+        page_title: "Profile",
+        # mode :view shows a read-only summary; :edit shows the wizard.
+        # first_time? preserves onboarding redirect-to-dashboard behaviour.
+        mode: if(has_data?, do: :view, else: :edit),
+        first_time?: not has_data?,
+        summary_hobbies: existing.summary_hobbies,
+        summary_school: existing.summary_school,
         step: 1,
         # Step 1 fields
         countries: countries,
@@ -65,6 +72,11 @@ defmodule FunSheepWeb.ProfileSetupLive do
     {:ok, socket}
   end
 
+  defp profile_has_data?(existing) do
+    (is_binary(existing.grade) and existing.grade != "") or
+      MapSet.size(existing.hobby_ids) > 0
+  end
+
   defp load_existing_profile(current_user) do
     empty = %{
       grade: nil,
@@ -78,7 +90,9 @@ defmodule FunSheepWeb.ProfileSetupLive do
       districts: [],
       schools: [],
       hobby_ids: MapSet.new(),
-      hobby_interests: %{}
+      hobby_interests: %{},
+      summary_hobbies: [],
+      summary_school: nil
     }
 
     interactor_id = current_user && current_user["interactor_user_id"]
@@ -99,6 +113,18 @@ defmodule FunSheepWeb.ProfileSetupLive do
             {sh.hobby_id, get_in(sh.specific_interests, ["text"]) || ""}
           end)
 
+        summary_hobbies =
+          Enum.map(student_hobbies, fn sh ->
+            %{
+              id: sh.hobby_id,
+              name: sh.hobby && sh.hobby.name,
+              category: sh.hobby && sh.hobby.category,
+              interest: get_in(sh.specific_interests, ["text"]) || ""
+            }
+          end)
+
+        summary_school = user_role.school_id && Geo.get_school(user_role.school_id)
+
         Map.merge(empty, %{
           grade: user_role.grade,
           gender: user_role.gender,
@@ -111,7 +137,9 @@ defmodule FunSheepWeb.ProfileSetupLive do
           districts: location.districts,
           schools: location.schools,
           hobby_ids: hobby_ids,
-          hobby_interests: hobby_interests
+          hobby_interests: hobby_interests,
+          summary_hobbies: summary_hobbies,
+          summary_school: summary_school
         })
 
       _ ->
@@ -268,10 +296,37 @@ defmodule FunSheepWeb.ProfileSetupLive do
              assigns.selected_hobby_ids,
              assigns.hobby_interests
            ) do
-      {:noreply,
-       socket
-       |> put_flash(:info, "Profile setup complete!")
-       |> redirect(to: "/dashboard")}
+      if assigns.first_time? do
+        {:noreply,
+         socket
+         |> put_flash(:info, "Profile setup complete!")
+         |> redirect(to: "/dashboard")}
+      else
+        # Returning user finished an edit — refresh the summary and flip back to view mode.
+        refreshed = load_existing_profile(assigns.current_user)
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Profile updated.")
+         |> assign(
+           mode: :view,
+           step: 1,
+           summary_hobbies: refreshed.summary_hobbies,
+           summary_school: refreshed.summary_school,
+           selected_grade: refreshed.grade,
+           selected_gender: refreshed.gender,
+           ethnicity: refreshed.ethnicity || "",
+           selected_country_id: refreshed.country_id,
+           selected_state_id: refreshed.state_id,
+           selected_district_id: refreshed.district_id,
+           selected_school_id: refreshed.school_id,
+           states: refreshed.states,
+           districts: refreshed.districts,
+           schools: refreshed.schools,
+           selected_hobby_ids: refreshed.hobby_ids,
+           hobby_interests: refreshed.hobby_interests
+         )}
+      end
     else
       {:error, reason} ->
         Logger.error("ProfileSetupLive complete_hobbies save failed: #{inspect(reason)}")
@@ -283,6 +338,36 @@ defmodule FunSheepWeb.ProfileSetupLive do
 
   def handle_event("prev_step", _params, %{assigns: %{step: step}} = socket) when step > 1 do
     {:noreply, assign(socket, step: step - 1)}
+  end
+
+  def handle_event("edit_profile", _params, socket) do
+    {:noreply, assign(socket, mode: :edit, step: 1, step1_errors: %{})}
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    # Revert any in-flight form changes by re-reading the persisted profile.
+    refreshed = load_existing_profile(socket.assigns.current_user)
+
+    {:noreply,
+     assign(socket,
+       mode: :view,
+       step: 1,
+       step1_errors: %{},
+       summary_hobbies: refreshed.summary_hobbies,
+       summary_school: refreshed.summary_school,
+       selected_grade: refreshed.grade,
+       selected_gender: refreshed.gender,
+       ethnicity: refreshed.ethnicity || "",
+       selected_country_id: refreshed.country_id,
+       selected_state_id: refreshed.state_id,
+       selected_district_id: refreshed.district_id,
+       selected_school_id: refreshed.school_id,
+       states: refreshed.states,
+       districts: refreshed.districts,
+       schools: refreshed.schools,
+       selected_hobby_ids: refreshed.hobby_ids,
+       hobby_interests: refreshed.hobby_interests
+     )}
   end
 
   def handle_event("toggle_hobby", %{"hobby-id" => hobby_id}, socket) do
@@ -333,43 +418,133 @@ defmodule FunSheepWeb.ProfileSetupLive do
   def render(assigns) do
     ~H"""
     <div class="max-w-3xl mx-auto py-8 px-4">
-      <h1 class="text-2xl font-bold text-[#1C1C1E] text-center mb-2">Profile Setup</h1>
-      <p class="text-[#8E8E93] text-center mb-8">
-        Let's set up your profile to personalize your learning experience.
-      </p>
+      <%= case @mode do %>
+        <% :view -> %>
+          <.profile_summary
+            current_user={@current_user}
+            grade={@selected_grade}
+            gender={@selected_gender}
+            ethnicity={@ethnicity}
+            school={@summary_school}
+            hobbies={@summary_hobbies}
+          />
+        <% :edit -> %>
+          <h1 class="text-2xl font-bold text-[#1C1C1E] text-center mb-2">
+            {if @first_time?, do: "Profile Setup", else: "Edit Profile"}
+          </h1>
+          <p class="text-[#8E8E93] text-center mb-8">
+            {if @first_time?,
+              do: "Let's set up your profile to personalize your learning experience.",
+              else: "Update your profile to keep personalization fresh."}
+          </p>
 
-      <%!-- Step Indicator --%>
-      <.step_indicator step={@step} />
+          <.step_indicator step={@step} />
 
-      <%!-- Step Content --%>
-      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-8 mt-6 sm:mt-8">
-        <%= case @step do %>
-          <% 1 -> %>
-            <.step1_demographics
-              current_user={@current_user}
-              countries={@countries}
-              states={@states}
-              districts={@districts}
-              schools={@schools}
-              grade_options={@grade_options}
-              gender_options={@gender_options}
-              selected_country_id={@selected_country_id}
-              selected_state_id={@selected_state_id}
-              selected_district_id={@selected_district_id}
-              selected_school_id={@selected_school_id}
-              selected_grade={@selected_grade}
-              selected_gender={@selected_gender}
-              ethnicity={@ethnicity}
-              errors={@step1_errors}
-            />
-          <% 2 -> %>
-            <.step2_hobbies
-              hobbies={@hobbies}
-              selected_hobby_ids={@selected_hobby_ids}
-              hobby_interests={@hobby_interests}
-            />
-        <% end %>
+          <div class="bg-white rounded-2xl shadow-md p-4 sm:p-8 mt-6 sm:mt-8">
+            <%= case @step do %>
+              <% 1 -> %>
+                <.step1_demographics
+                  current_user={@current_user}
+                  countries={@countries}
+                  states={@states}
+                  districts={@districts}
+                  schools={@schools}
+                  grade_options={@grade_options}
+                  gender_options={@gender_options}
+                  selected_country_id={@selected_country_id}
+                  selected_state_id={@selected_state_id}
+                  selected_district_id={@selected_district_id}
+                  selected_school_id={@selected_school_id}
+                  selected_grade={@selected_grade}
+                  selected_gender={@selected_gender}
+                  ethnicity={@ethnicity}
+                  errors={@step1_errors}
+                  first_time?={@first_time?}
+                />
+              <% 2 -> %>
+                <.step2_hobbies
+                  hobbies={@hobbies}
+                  selected_hobby_ids={@selected_hobby_ids}
+                  hobby_interests={@hobby_interests}
+                  first_time?={@first_time?}
+                />
+            <% end %>
+          </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  # ── Profile Summary (view mode) ───────────────────────────────────────────
+
+  attr :current_user, :map, required: true
+  attr :grade, :string, default: nil
+  attr :gender, :string, default: nil
+  attr :ethnicity, :string, default: ""
+  attr :school, :any, default: nil
+  attr :hobbies, :list, default: []
+
+  defp profile_summary(assigns) do
+    ~H"""
+    <div class="bg-white rounded-2xl shadow-md p-6 sm:p-8">
+      <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-bold text-[#1C1C1E]">Your Profile</h1>
+          <p class="text-sm text-[#8E8E93] mt-1">
+            {@current_user["display_name"] || @current_user["email"]}
+          </p>
+        </div>
+        <button
+          phx-click="edit_profile"
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+        >
+          Edit
+        </button>
       </div>
+
+      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+        <.summary_field label="Role" value={String.capitalize(@current_user["role"] || "student")} />
+        <.summary_field label="Grade Level" value={@grade} />
+        <.summary_field label="Gender" value={@gender} />
+        <.summary_field label="Ethnicity" value={@ethnicity} />
+        <div class="sm:col-span-2">
+          <.summary_field label="School" value={@school && @school.name} />
+        </div>
+      </dl>
+
+      <div class="mt-8">
+        <h2 class="text-lg font-semibold text-[#1C1C1E] mb-3">Hobbies</h2>
+
+        <div :if={@hobbies == []} class="text-sm text-[#8E8E93]">
+          No hobbies selected yet.
+        </div>
+
+        <ul :if={@hobbies != []} class="flex flex-wrap gap-2">
+          <li
+            :for={hobby <- @hobbies}
+            class="rounded-full bg-[#E8F8EB] border border-[#4CD964]/30 px-4 py-2"
+          >
+            <p class="text-sm font-semibold text-[#1C1C1E]">{hobby.name}</p>
+            <p :if={hobby.interest != ""} class="text-xs text-[#3DBF55] mt-0.5">
+              {hobby.interest}
+            </p>
+          </li>
+        </ul>
+      </div>
+    </div>
+    """
+  end
+
+  attr :label, :string, required: true
+  attr :value, :any, default: nil
+
+  defp summary_field(assigns) do
+    ~H"""
+    <div>
+      <dt class="text-xs font-medium uppercase tracking-wide text-[#8E8E93]">{@label}</dt>
+      <dd class="mt-1 text-sm text-[#1C1C1E]">
+        {if is_nil(@value) or @value == "", do: "—", else: @value}
+      </dd>
     </div>
     """
   end
@@ -441,6 +616,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
   attr :selected_gender, :string, default: nil
   attr :ethnicity, :string, default: ""
   attr :errors, :map, default: %{}
+  attr :first_time?, :boolean, default: true
 
   defp step1_demographics(assigns) do
     ~H"""
@@ -584,8 +760,17 @@ defmodule FunSheepWeb.ProfileSetupLive do
         </div>
       </div>
 
-      <%!-- Next button --%>
-      <div class="flex justify-end mt-8">
+      <%!-- Navigation buttons --%>
+      <div class="flex justify-between mt-8 gap-4">
+        <button
+          :if={not @first_time?}
+          type="button"
+          phx-click="cancel_edit"
+          class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-6 py-3 rounded-full shadow-sm border border-gray-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <span :if={@first_time?}></span>
         <button
           type="submit"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors"
@@ -602,6 +787,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
   attr :hobbies, :list, required: true
   attr :selected_hobby_ids, :any, required: true
   attr :hobby_interests, :map, required: true
+  attr :first_time?, :boolean, default: true
 
   defp step2_hobbies(assigns) do
     ~H"""
@@ -644,18 +830,30 @@ defmodule FunSheepWeb.ProfileSetupLive do
       </div>
 
       <%!-- Navigation buttons --%>
-      <div class="flex justify-between mt-8">
+      <div class="flex justify-between mt-8 gap-4 flex-wrap">
+        <div class="flex gap-2">
+          <button
+            type="button"
+            phx-click="prev_step"
+            class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-6 py-3 rounded-full shadow-sm border border-gray-200 transition-colors"
+          >
+            Back
+          </button>
+          <button
+            :if={not @first_time?}
+            type="button"
+            phx-click="cancel_edit"
+            class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-6 py-3 rounded-full shadow-sm border border-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
         <button
-          phx-click="prev_step"
-          class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-8 py-3 rounded-full shadow-sm border border-gray-200 transition-colors"
-        >
-          Back
-        </button>
-        <button
+          type="button"
           phx-click="complete_hobbies"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors"
         >
-          Complete Setup
+          {if @first_time?, do: "Complete Setup", else: "Save Changes"}
         </button>
       </div>
     </div>
