@@ -198,7 +198,12 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     """
 
     case Agents.chat("course_discovery", prompt, %{
-           metadata: %{course_id: course.id, subject: subject, grade: grade, source: "textbook_ocr"}
+           metadata: %{
+             course_id: course.id,
+             subject: subject,
+             grade: grade,
+             source: "textbook_ocr"
+           }
          }) do
       {:ok, response} ->
         case parse_chapters_json(response) do

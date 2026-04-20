@@ -285,6 +285,7 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
       render_click(view, "complete_hobbies")
 
       [reloaded] = FunSheep.Learning.list_hobbies_for_user(user_role_id)
+
       assert reloaded.specific_interests["text"] ==
                "Enhypen, TXT, P1harmony, Stray Kids, ATEEZ"
     end

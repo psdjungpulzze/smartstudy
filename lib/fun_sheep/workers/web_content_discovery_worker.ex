@@ -53,26 +53,50 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     queries = build_search_queries(course)
     total_queries = length(queries)
 
-    # Execute searches and collect results, broadcasting progress for each query
-    {all_results, _} =
+    broadcast(course_id, %{
+      sub_step: "Searching #{total_queries} queries in parallel..."
+    })
+
+    # Run searches concurrently. Total wall-clock becomes ~max(per-query time)
+    # instead of the sum. A single slow/timing-out query no longer blocks the
+    # rest; `on_timeout: :kill_task` plus an outer timeout keeps the batch
+    # bounded even if Interactor's web_search assistant stalls.
+    #
+    # Concurrency is capped to avoid thundering-herd on the Interactor agent
+    # endpoint (which serializes per-OpenAI-account rate limits anyway).
+    done = :atomics.new(1, [])
+
+    all_results =
       queries
-      |> Enum.reduce({[], 1}, fn {query, source_type}, {acc, idx} ->
-        # Broadcast which query we're running
-        short_query = String.slice(query, 0, 60)
-        broadcast(course_id, %{
-          sub_step: "Searching (#{idx}/#{total_queries}): \"#{short_query}\"..."
-        })
+      |> Task.async_stream(
+        fn {query, source_type} ->
+          results =
+            case search_web(query) do
+              {:ok, results} ->
+                Enum.map(results, fn r -> Map.put(r, :source_type, source_type) end)
 
-        results =
-          case search_web(query) do
-            {:ok, results} ->
-              Enum.map(results, fn r -> Map.put(r, :source_type, source_type) end)
+              {:error, _} ->
+                []
+            end
 
-            {:error, _} ->
-              []
-          end
+          completed = :atomics.add_get(done, 1, 1)
+          short_query = String.slice(query, 0, 60)
 
-        {acc ++ results, idx + 1}
+          broadcast(course_id, %{
+            sub_step:
+              "Searched (#{completed}/#{total_queries}): \"#{short_query}\" — #{length(results)} hits"
+          })
+
+          results
+        end,
+        max_concurrency: 3,
+        timeout: 75_000,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+      |> Enum.flat_map(fn
+        {:ok, results} -> results
+        {:exit, _reason} -> []
       end)
 
     broadcast(course_id, %{sub_step: "Deduplicating #{length(all_results)} results..."})
@@ -143,7 +167,9 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
     source_context =
       sources
-      |> Enum.map(fn s -> "- #{s.title} (#{s.source_type}): #{s.description || s.content_preview || ""}" end)
+      |> Enum.map(fn s ->
+        "- #{s.title} (#{s.source_type}): #{s.description || s.content_preview || ""}"
+      end)
       |> Enum.join("\n")
 
     # Now trigger course structure discovery with web search context

@@ -99,7 +99,12 @@ defmodule FunSheepWeb.CourseDetailLive do
         course = Courses.get_course_with_chapters!(socket.assigns.course.id)
         discovered_sources = Content.list_discovered_sources(course.id)
         question_count = Questions.count_questions_by_course(course.id)
-        assign(socket, course: course, discovered_sources: discovered_sources, question_count: question_count)
+
+        assign(socket,
+          course: course,
+          discovered_sources: discovered_sources,
+          question_count: question_count
+        )
       else
         socket
       end
@@ -112,7 +117,13 @@ defmodule FunSheepWeb.CourseDetailLive do
     discovered_sources = Content.list_discovered_sources(course.id)
     question_count = Questions.count_questions_by_course(course.id)
     # Clear sub_step when a major step completes
-    {:noreply, assign(socket, course: course, discovered_sources: discovered_sources, question_count: question_count, processing_sub_step: nil)}
+    {:noreply,
+     assign(socket,
+       course: course,
+       discovered_sources: discovered_sources,
+       question_count: question_count,
+       processing_sub_step: nil
+     )}
   end
 
   def handle_info({:material_relevance_warning, _warning}, socket) do
@@ -177,7 +188,9 @@ defmodule FunSheepWeb.CourseDetailLive do
         batch_materials = Content.list_materials_by_batch(socket.assigns.upload_batch_id)
 
         user_role_id = socket.assigns.current_user["user_role_id"]
-        course_materials = Content.list_materials_by_course_for_user(socket.assigns.course.id, user_role_id)
+
+        course_materials =
+          Content.list_materials_by_course_for_user(socket.assigns.course.id, user_role_id)
 
         # Combine: course-linked materials + new batch materials (deduplicated)
         existing_ids = MapSet.new(course_materials, & &1.id)
@@ -958,7 +971,10 @@ defmodule FunSheepWeb.CourseDetailLive do
             <div class="flex items-center gap-2 min-w-0">
               <.icon name={file_type_icon(mat.file_type)} class="w-4 h-4 text-[#8E8E93] shrink-0" />
               <span class="text-[#1C1C1E] truncate">{mat.file_name}</span>
-              <span :if={mat.folder_name} class="text-[10px] text-[#8E8E93] px-1.5 py-0.5 bg-white rounded-full shrink-0">
+              <span
+                :if={mat.folder_name}
+                class="text-[10px] text-[#8E8E93] px-1.5 py-0.5 bg-white rounded-full shrink-0"
+              >
                 {mat.folder_name}
               </span>
             </div>
@@ -984,7 +1000,10 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- Process button --%>
-      <div :if={@has_pending && !@uploading} class="flex items-center justify-between pt-3 border-t border-[#F5F5F7]">
+      <div
+        :if={@has_pending && !@uploading}
+        class="flex items-center justify-between pt-3 border-t border-[#F5F5F7]"
+      >
         <p class="text-xs text-[#8E8E93]">
           <span class="font-medium text-[#1C1C1E]">{@pending_count} new file(s)</span>
           ready to process — this will update chapters, sections, and questions from your textbook
@@ -1014,11 +1033,20 @@ defmodule FunSheepWeb.CourseDetailLive do
 
   defp file_type_icon(type) when is_binary(type) do
     cond do
-      String.contains?(type, "pdf") -> "hero-document-text"
-      String.contains?(type, "image") -> "hero-photo"
-      String.contains?(type, "word") or String.contains?(type, "doc") -> "hero-document"
-      String.contains?(type, "presentation") or String.contains?(type, "ppt") -> "hero-presentation-chart-bar"
-      true -> "hero-document"
+      String.contains?(type, "pdf") ->
+        "hero-document-text"
+
+      String.contains?(type, "image") ->
+        "hero-photo"
+
+      String.contains?(type, "word") or String.contains?(type, "doc") ->
+        "hero-document"
+
+      String.contains?(type, "presentation") or String.contains?(type, "ppt") ->
+        "hero-presentation-chart-bar"
+
+      true ->
+        "hero-document"
     end
   end
 
@@ -1708,16 +1736,14 @@ defmodule FunSheepWeb.CourseDetailLive do
             phx-click="retry_failed_sources"
             class="inline-flex items-center gap-1.5 text-xs font-medium text-[#FF3B30] hover:text-red-700 px-3 py-1.5 rounded-full border border-red-200 hover:bg-red-50 transition-colors"
           >
-            <.icon name="hero-arrow-path" class="w-3.5 h-3.5" />
-            Retry {@failed_count} failed
+            <.icon name="hero-arrow-path" class="w-3.5 h-3.5" /> Retry {@failed_count} failed
           </button>
           <button
             :if={@found_count > 0}
             phx-click="process_remaining_sources"
             class="inline-flex items-center gap-1.5 text-xs font-medium text-[#007AFF] hover:text-blue-700 px-3 py-1.5 rounded-full border border-blue-200 hover:bg-blue-50 transition-colors"
           >
-            <.icon name="hero-play" class="w-3.5 h-3.5" />
-            Process {@found_count} remaining
+            <.icon name="hero-play" class="w-3.5 h-3.5" /> Process {@found_count} remaining
           </button>
           <span class="text-xs text-[#8E8E93] ml-auto">
             {@processed_count} done · {@failed_count} failed · {@found_count} pending

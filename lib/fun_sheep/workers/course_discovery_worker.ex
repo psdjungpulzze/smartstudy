@@ -41,7 +41,8 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
       Courses.update_course(course, %{
         processing_status: "failed",
-        processing_step: "Chapter discovery failed — AI service unavailable. Please try again later."
+        processing_step:
+          "Chapter discovery failed — AI service unavailable. Please try again later."
       })
 
       broadcast(course_id, %{
@@ -74,7 +75,9 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
     subject = course.subject
     grade = course.grade
 
-    broadcast(course.id, %{sub_step: "Building curriculum analysis for #{subject} (Grade #{grade})..."})
+    broadcast(course.id, %{
+      sub_step: "Building curriculum analysis for #{subject} (Grade #{grade})..."
+    })
 
     prompt = build_discovery_prompt(subject, grade, textbook_name, source_context)
 
@@ -86,17 +89,26 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
       {:ok, response} ->
         case parse_chapters_json(response) do
           {:ok, chapters} ->
-            broadcast(course.id, %{sub_step: "AI returned #{length(chapters)} chapters, processing..."})
+            broadcast(course.id, %{
+              sub_step: "AI returned #{length(chapters)} chapters, processing..."
+            })
+
             chapters
 
           {:error, reason} ->
-            Logger.error("[Discovery] Failed to parse AI response for course #{course.id}: #{inspect(reason)}")
+            Logger.error(
+              "[Discovery] Failed to parse AI response for course #{course.id}: #{inspect(reason)}"
+            )
+
             broadcast(course.id, %{sub_step: "AI returned invalid format, retrying..."})
             []
         end
 
       {:error, reason} ->
-        Logger.error("[Discovery] AI discovery failed for course #{course.id}: #{inspect(reason)}")
+        Logger.error(
+          "[Discovery] AI discovery failed for course #{course.id}: #{inspect(reason)}"
+        )
+
         broadcast(course.id, %{sub_step: "AI request failed: #{inspect(reason)}"})
         []
     end

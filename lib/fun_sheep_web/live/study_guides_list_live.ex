@@ -68,7 +68,9 @@ defmodule FunSheepWeb.StudyGuidesListLive do
 
   defp guide_days_until(guide) do
     case get_in(guide.content, ["test_date"]) do
-      nil -> nil
+      nil ->
+        nil
+
       date_str ->
         case Date.from_iso8601(date_str) do
           {:ok, date} -> Date.diff(date, Date.utc_today())

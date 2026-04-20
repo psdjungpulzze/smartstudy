@@ -157,7 +157,10 @@ defmodule FunSheepWeb.TestScheduleLive do
               <p class="text-sm text-[#8E8E93]">
                 {Calendar.strftime(schedule.test_date, "%B %d, %Y")}
               </p>
-              <p :if={scope_summary(schedule, @chapter_map)} class="text-sm text-[#8E8E93] mt-0.5 truncate">
+              <p
+                :if={scope_summary(schedule, @chapter_map)}
+                class="text-sm text-[#8E8E93] mt-0.5 truncate"
+              >
                 <.icon name="hero-book-open" class="w-3.5 h-3.5 inline-block mr-1 align-text-bottom" />
                 {scope_summary(schedule, @chapter_map)}
               </p>

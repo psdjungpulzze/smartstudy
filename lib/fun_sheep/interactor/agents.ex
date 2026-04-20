@@ -167,15 +167,20 @@ defmodule FunSheep.Interactor.Agents do
 
   defp get_cached_id(name) do
     case :persistent_term.get(@cache_key, nil) do
-      nil -> :miss
-      map -> Map.get(map, name) |> case do
-        nil -> :miss
-        id -> {:ok, id}
-      end
+      nil ->
+        :miss
+
+      map ->
+        Map.get(map, name)
+        |> case do
+          nil -> :miss
+          id -> {:ok, id}
+        end
     end
   end
 
   defp normalize_cache_result({:ok, id}, _name), do: {:ok, id}
+
   defp normalize_cache_result(:miss, name) do
     Logger.error("[Agents] Assistant '#{name}' not found on Interactor server")
     {:error, {:assistant_not_found, name}}

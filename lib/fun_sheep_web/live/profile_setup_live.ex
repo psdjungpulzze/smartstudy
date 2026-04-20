@@ -780,7 +780,10 @@ defmodule FunSheepWeb.ProfileSetupLive do
               </ul>
 
               <p
-                :if={@selected_state_id not in [nil, ""] and @school_query != "" and @school_results == []}
+                :if={
+                  @selected_state_id not in [nil, ""] and @school_query != "" and
+                    @school_results == []
+                }
                 class="text-xs text-[#8E8E93] mt-1"
               >
                 No schools match "{@school_query}" in this state.

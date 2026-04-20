@@ -173,8 +173,12 @@ defmodule FunSheep.Ingest.Sources.NcesCcd do
   # NCES SCH_TYPE: 1 Regular, 2 Special Education, 3 Vocational, 4 Alternative
   defp school_type(row) do
     cond do
-      yes?(row["CHARTER_TEXT"]) -> "charter"
-      yes?(row["MAGNET_TEXT"]) -> "magnet"
+      yes?(row["CHARTER_TEXT"]) ->
+        "charter"
+
+      yes?(row["MAGNET_TEXT"]) ->
+        "magnet"
+
       true ->
         case trim_or_nil(row["SCH_TYPE_TEXT"]) do
           nil -> "public"
@@ -189,6 +193,7 @@ defmodule FunSheep.Ingest.Sources.NcesCcd do
   end
 
   defp school_level(nil), do: nil
+
   defp school_level(val) do
     case String.downcase(val) do
       "primary" -> "elementary"
@@ -202,6 +207,7 @@ defmodule FunSheep.Ingest.Sources.NcesCcd do
   end
 
   defp status_from_text(nil), do: nil
+
   defp status_from_text(text) do
     case String.downcase(text) do
       "open" -> "open"

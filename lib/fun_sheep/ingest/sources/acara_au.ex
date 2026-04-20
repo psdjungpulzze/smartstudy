@@ -78,8 +78,12 @@ defmodule FunSheep.Ingest.Sources.AcaraAu do
     iso = @au_state_iso[state_abbr]
 
     cond do
-      is_nil(acara_id) or is_nil(name) -> nil
-      is_nil(iso) -> nil
+      is_nil(acara_id) or is_nil(name) ->
+        nil
+
+      is_nil(iso) ->
+        nil
+
       true ->
         %{
           source: @source,

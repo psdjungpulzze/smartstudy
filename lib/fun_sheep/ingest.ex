@@ -68,16 +68,24 @@ defmodule FunSheep.Ingest do
         case apply(mod, :run, [dataset, opts]) do
           {:ok, stats} ->
             finalize_run(run, "completed", stats)
+
             Logger.info("ingest completed",
               source: source,
               dataset: dataset,
               stats: stats
             )
+
             {:ok, stats}
 
           {:error, reason} = err ->
             finalize_run(run, "failed", %{error: inspect(reason)})
-            Logger.error("ingest failed", source: source, dataset: dataset, reason: inspect(reason))
+
+            Logger.error("ingest failed",
+              source: source,
+              dataset: dataset,
+              reason: inspect(reason)
+            )
+
             err
         end
       rescue

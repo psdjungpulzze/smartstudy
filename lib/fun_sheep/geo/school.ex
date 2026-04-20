@@ -124,7 +124,11 @@ defmodule FunSheep.Geo.School do
     case {get_field(changeset, :district_id), get_field(changeset, :state_id),
           get_field(changeset, :country_id)} do
       {nil, nil, nil} ->
-        add_error(changeset, :district_id, "one of district_id, state_id, or country_id is required")
+        add_error(
+          changeset,
+          :district_id,
+          "one of district_id, state_id, or country_id is required"
+        )
 
       _ ->
         changeset

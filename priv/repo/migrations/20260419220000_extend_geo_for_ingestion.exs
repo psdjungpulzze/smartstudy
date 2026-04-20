@@ -45,7 +45,10 @@ defmodule FunSheep.Repo.Migrations.ExtendGeoForIngestion do
       add_if_not_exists :source_id, :string, size: 64
       add_if_not_exists :nces_leaid, :string, size: 12
       add_if_not_exists :native_name, :string
-      add_if_not_exists :country_id, references(:countries, type: :binary_id, on_delete: :restrict)
+
+      add_if_not_exists :country_id,
+                        references(:countries, type: :binary_id, on_delete: :restrict)
+
       add_if_not_exists :type, :string, size: 32
       add_if_not_exists :operational_status, :string, size: 16
       add_if_not_exists :address, :string
@@ -59,8 +62,8 @@ defmodule FunSheep.Repo.Migrations.ExtendGeoForIngestion do
     end
 
     create_if_not_exists unique_index(:districts, [:source, :source_id],
-                          name: :districts_source_pid_index
-                        )
+                           name: :districts_source_pid_index
+                         )
 
     create_if_not_exists index(:districts, [:country_id])
     create_if_not_exists index(:districts, [:nces_leaid])
@@ -80,7 +83,10 @@ defmodule FunSheep.Repo.Migrations.ExtendGeoForIngestion do
       add_if_not_exists :kr_code, :string, size: 32
       add_if_not_exists :ib_code, :string, size: 16
       add_if_not_exists :native_name, :string
-      add_if_not_exists :country_id, references(:countries, type: :binary_id, on_delete: :restrict)
+
+      add_if_not_exists :country_id,
+                        references(:countries, type: :binary_id, on_delete: :restrict)
+
       add_if_not_exists :state_id, references(:states, type: :binary_id, on_delete: :restrict)
       add_if_not_exists :type, :string, size: 32
       add_if_not_exists :level, :string, size: 16
@@ -102,8 +108,8 @@ defmodule FunSheep.Repo.Migrations.ExtendGeoForIngestion do
     end
 
     create_if_not_exists unique_index(:schools, [:source, :source_id],
-                          name: :schools_source_pid_index
-                        )
+                           name: :schools_source_pid_index
+                         )
 
     create_if_not_exists index(:schools, [:country_id])
     create_if_not_exists index(:schools, [:state_id])
@@ -158,8 +164,8 @@ defmodule FunSheep.Repo.Migrations.ExtendGeoForIngestion do
     end
 
     create_if_not_exists unique_index(:universities, [:source, :source_id],
-                          name: :universities_source_pid_index
-                        )
+                           name: :universities_source_pid_index
+                         )
 
     create_if_not_exists index(:universities, [:country_id])
     create_if_not_exists index(:universities, [:state_id])

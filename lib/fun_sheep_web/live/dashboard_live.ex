@@ -50,7 +50,11 @@ defmodule FunSheepWeb.DashboardLive do
   end
 
   @impl true
-  def handle_event("navigate_to_assess", %{"course-id" => course_id, "schedule-id" => schedule_id}, socket) do
+  def handle_event(
+        "navigate_to_assess",
+        %{"course-id" => course_id, "schedule-id" => schedule_id},
+        socket
+      ) do
     {:noreply, push_navigate(socket, to: ~p"/courses/#{course_id}/tests/#{schedule_id}/assess")}
   end
 

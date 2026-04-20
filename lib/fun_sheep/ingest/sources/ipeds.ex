@@ -36,7 +36,9 @@ defmodule FunSheep.Ingest.Sources.Ipeds do
   def run(dataset, opts \\ [])
 
   def run("hd", opts) do
-    url = opts[:url] || Application.get_env(:fun_sheep, __MODULE__, [])[:hd_url] || @default_hd_url
+    url =
+      opts[:url] || Application.get_env(:fun_sheep, __MODULE__, [])[:hd_url] || @default_hd_url
+
     key = Cache.build_key(@source, "ipeds_hd.zip")
 
     with {:ok, zip_path} <- Fetcher.fetch(url, key, opts),

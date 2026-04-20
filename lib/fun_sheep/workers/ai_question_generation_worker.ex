@@ -57,7 +57,8 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
         |> Enum.with_index(1)
         |> Enum.reduce(0, fn {ch, idx}, acc ->
           broadcast(course_id, %{
-            sub_step: "Generating questions for chapter #{idx}/#{chapter_count}: #{String.slice(ch.name, 0, 40)}..."
+            sub_step:
+              "Generating questions for chapter #{idx}/#{chapter_count}: #{String.slice(ch.name, 0, 40)}..."
           })
 
           context = build_context(course, ch, args)
@@ -66,9 +67,11 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           case send_to_ai(prompt, course, ch) do
             {:ok, questions} ->
               inserted = insert_questions(questions, course, ch)
+
               broadcast(course_id, %{
                 sub_step: "Created #{inserted} questions for #{String.slice(ch.name, 0, 40)}"
               })
+
               acc + inserted
 
             {:error, _reason} ->
@@ -361,7 +364,10 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       if total > 0 do
         {"ready", "Processing complete! #{total} questions generated."}
       else
-        Logger.error("[AIGen] Course #{course_id}: AI generation produced 0 questions (#{new_count} new)")
+        Logger.error(
+          "[AIGen] Course #{course_id}: AI generation produced 0 questions (#{new_count} new)"
+        )
+
         {"failed", "Question generation failed — AI service unavailable. Please try again later."}
       end
 

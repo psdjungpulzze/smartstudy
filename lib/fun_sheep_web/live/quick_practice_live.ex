@@ -294,7 +294,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
         {:noreply,
          socket
          |> assign(tutor_loading: false)
-         |> append_tutor_message("assistant", "Sorry, I had trouble responding. Please try again.")}
+         |> append_tutor_message(
+           "assistant",
+           "Sorry, I had trouble responding. Please try again."
+         )}
     end
   end
 
@@ -312,7 +315,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
         {:noreply,
          socket
          |> assign(tutor_loading: false)
-         |> append_tutor_message("assistant", "Sorry, I had trouble responding. Please try again.")}
+         |> append_tutor_message(
+           "assistant",
+           "Sorry, I had trouble responding. Please try again."
+         )}
     end
   end
 
@@ -658,13 +664,19 @@ defmodule FunSheepWeb.QuickPracticeLive do
           class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5"
         >
           <%!-- Result banner --%>
-          <div :if={@card_phase == :feedback && @feedback} class={[
-            "flex items-center gap-2 px-4 py-3 rounded-xl mb-4",
-            if(@feedback.is_correct, do: "bg-[#E8F8EB]", else: "bg-red-50")
-          ]}>
+          <div
+            :if={@card_phase == :feedback && @feedback}
+            class={[
+              "flex items-center gap-2 px-4 py-3 rounded-xl mb-4",
+              if(@feedback.is_correct, do: "bg-[#E8F8EB]", else: "bg-red-50")
+            ]}
+          >
             <.icon
               name={if(@feedback.is_correct, do: "hero-check-circle", else: "hero-x-circle")}
-              class={["w-6 h-6", if(@feedback.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")]}
+              class={[
+                "w-6 h-6",
+                if(@feedback.is_correct, do: "text-[#4CD964]", else: "text-[#FF3B30]")
+              ]}
             />
             <span class={[
               "font-bold text-sm",
@@ -674,7 +686,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </span>
           </div>
 
-          <div :if={@card_phase == :reveal} class="flex items-center gap-2 px-4 py-3 rounded-xl mb-4 bg-yellow-50">
+          <div
+            :if={@card_phase == :reveal}
+            class="flex items-center gap-2 px-4 py-3 rounded-xl mb-4 bg-yellow-50"
+          >
             <.icon name="hero-light-bulb" class="w-6 h-6 text-yellow-500" />
             <span class="font-bold text-sm text-yellow-700">Here's the answer</span>
           </div>
@@ -691,13 +706,20 @@ defmodule FunSheepWeb.QuickPracticeLive do
           </div>
 
           <%!-- Community stats --%>
-          <div :if={assigns[:current_question_stats] && @current_question_stats.total_attempts > 0} class="flex items-center justify-center gap-2 text-xs text-[#8E8E93] mb-4">
+          <div
+            :if={assigns[:current_question_stats] && @current_question_stats.total_attempts > 0}
+            class="flex items-center justify-center gap-2 text-xs text-[#8E8E93] mb-4"
+          >
             <.icon name="hero-users" class="w-4 h-4" />
             <span>
               <span class="font-bold">
-                {trunc(if @current_question_stats.total_attempts > 0,
-                  do: @current_question_stats.correct_attempts / @current_question_stats.total_attempts * 100,
-                  else: 0)}%
+                {trunc(
+                  if @current_question_stats.total_attempts > 0,
+                    do:
+                      @current_question_stats.correct_attempts /
+                        @current_question_stats.total_attempts * 100,
+                    else: 0
+                )}%
               </span>
               got this right
             </span>
@@ -738,7 +760,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
         </div>
 
         <%!-- Session complete --%>
-        <div :if={@session_complete && @summary} class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 text-center">
+        <div
+          :if={@session_complete && @summary}
+          class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 text-center"
+        >
           <div class="text-5xl mb-3">🎉</div>
           <h2 class="text-2xl font-extrabold text-gray-900 mb-1">Session Done!</h2>
           <p class="text-sm text-[#8E8E93] mb-6">{@summary.total} cards reviewed</p>
@@ -750,11 +775,15 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
           <div class="grid grid-cols-2 gap-2 mb-6">
             <div class="bg-[#E8F8EB] rounded-xl p-3">
-              <p class="text-xl font-bold text-[#4CD964]">{@summary.known + @summary.answered_correct}</p>
+              <p class="text-xl font-bold text-[#4CD964]">
+                {@summary.known + @summary.answered_correct}
+              </p>
               <p class="text-[10px] text-[#8E8E93] font-medium">Got Right</p>
             </div>
             <div class="bg-red-50 rounded-xl p-3">
-              <p class="text-xl font-bold text-[#FF3B30]">{@summary.unknown + @summary.answered_wrong}</p>
+              <p class="text-xl font-bold text-[#FF3B30]">
+                {@summary.unknown + @summary.answered_wrong}
+              </p>
               <p class="text-[10px] text-[#8E8E93] font-medium">Need Review</p>
             </div>
           </div>
@@ -837,7 +866,11 @@ defmodule FunSheepWeb.QuickPracticeLive do
             <.icon name="hero-academic-cap" class="w-5 h-5 text-[#4CD964]" />
             <span class="font-bold text-sm text-gray-900">AI Tutor</span>
           </div>
-          <button phx-click="close_tutor" class="p-2 text-[#8E8E93] touch-target" aria-label="Close tutor">
+          <button
+            phx-click="close_tutor"
+            class="p-2 text-[#8E8E93] touch-target"
+            aria-label="Close tutor"
+          >
             <.icon name="hero-x-mark" class="w-5 h-5" />
           </button>
         </div>
@@ -865,9 +898,18 @@ defmodule FunSheepWeb.QuickPracticeLive do
           <div :if={@tutor_loading} class="flex justify-start">
             <div class="bg-[#F5F5F7] px-4 py-3 rounded-2xl">
               <div class="flex gap-1">
-                <div class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce" style="animation-delay: 0ms" />
-                <div class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce" style="animation-delay: 150ms" />
-                <div class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce" style="animation-delay: 300ms" />
+                <div
+                  class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                  style="animation-delay: 0ms"
+                />
+                <div
+                  class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                  style="animation-delay: 150ms"
+                />
+                <div
+                  class="w-2 h-2 bg-[#8E8E93] rounded-full animate-bounce"
+                  style="animation-delay: 300ms"
+                />
               </div>
             </div>
           </div>

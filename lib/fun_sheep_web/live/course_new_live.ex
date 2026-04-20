@@ -477,7 +477,9 @@ defmodule FunSheepWeb.CourseNewLive do
   defp textbook_selector(assigns) do
     ~H"""
     <div class="mt-2">
-      <label class="block text-sm font-medium text-gray-900 mb-2">Textbook <span class="text-red-500">*</span></label>
+      <label class="block text-sm font-medium text-gray-900 mb-2">
+        Textbook <span class="text-red-500">*</span>
+      </label>
 
       <%!-- Selected textbook confirmation --%>
       <div
@@ -646,8 +648,11 @@ defmodule FunSheepWeb.CourseNewLive do
   defp textbook_cover(assigns) do
     {img_class, icon_class} =
       case assigns.size do
-        "lg" -> {"w-16 h-20 object-cover rounded-lg bg-gray-100 shrink-0", "w-8 h-8 text-gray-400"}
-        _ -> {"w-12 h-16 object-cover rounded-lg bg-gray-100 shrink-0", "w-6 h-6 text-gray-400"}
+        "lg" ->
+          {"w-16 h-20 object-cover rounded-lg bg-gray-100 shrink-0", "w-8 h-8 text-gray-400"}
+
+        _ ->
+          {"w-12 h-16 object-cover rounded-lg bg-gray-100 shrink-0", "w-6 h-6 text-gray-400"}
       end
 
     container_class =

@@ -90,9 +90,14 @@ defmodule FunSheepWeb.StudyGuideLive do
     if Map.has_key?(socket.assigns.explanations, question_id) do
       if MapSet.member?(socket.assigns.expanded_explanations, question_id) do
         {:noreply,
-         assign(socket, expanded_explanations: MapSet.delete(socket.assigns.expanded_explanations, question_id))}
+         assign(socket,
+           expanded_explanations: MapSet.delete(socket.assigns.expanded_explanations, question_id)
+         )}
       else
-        {:noreply, assign(socket, expanded_explanations: MapSet.put(socket.assigns.expanded_explanations, question_id))}
+        {:noreply,
+         assign(socket,
+           expanded_explanations: MapSet.put(socket.assigns.expanded_explanations, question_id)
+         )}
       end
     else
       # Start loading
@@ -321,7 +326,11 @@ defmodule FunSheepWeb.StudyGuideLive do
 
       <%!-- Tab Navigation --%>
       <div class="flex gap-2 border-b border-[#E5E5EA] mb-6">
-        <button phx-click="switch_tab" phx-value-tab="overview" class={tab_class(@active_tab, "overview")}>
+        <button
+          phx-click="switch_tab"
+          phx-value-tab="overview"
+          class={tab_class(@active_tab, "overview")}
+        >
           Overview
         </button>
         <button phx-click="switch_tab" phx-value-tab="plan" class={tab_class(@active_tab, "plan")}>
@@ -330,7 +339,11 @@ defmodule FunSheepWeb.StudyGuideLive do
             ({@progress["plan_days_completed"] || 0}/{length(@study_plan)})
           </span>
         </button>
-        <button phx-click="switch_tab" phx-value-tab="chapters" class={tab_class(@active_tab, "chapters")}>
+        <button
+          phx-click="switch_tab"
+          phx-value-tab="chapters"
+          class={tab_class(@active_tab, "chapters")}
+        >
           Chapters
           <span class="text-xs ml-1 text-[#8E8E93]">
             ({@progress["sections_reviewed"] || 0}/{length(@sections)})
@@ -386,15 +399,15 @@ defmodule FunSheepWeb.StudyGuideLive do
       <%!-- Today's Focus (from study plan) --%>
       <div :if={@study_plan != []} class="bg-white rounded-2xl shadow-md p-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-3">
-          <.icon name="hero-fire" class="w-5 h-5 inline -mt-0.5 text-[#FF9500]" />
-          Today's Focus
+          <.icon name="hero-fire" class="w-5 h-5 inline -mt-0.5 text-[#FF9500]" /> Today's Focus
         </h2>
-        <% today_plan = Enum.find(@study_plan, fn d ->
-          case Date.from_iso8601(d["date"]) do
-            {:ok, date} -> Date.compare(date, Date.utc_today()) == :eq
-            _ -> false
-          end
-        end) %>
+        <% today_plan =
+          Enum.find(@study_plan, fn d ->
+            case Date.from_iso8601(d["date"]) do
+              {:ok, date} -> Date.compare(date, Date.utc_today()) == :eq
+              _ -> false
+            end
+          end) %>
         <div :if={today_plan} class="space-y-2">
           <p class="text-sm text-[#1C1C1E] font-medium">{today_plan["focus"]}</p>
           <div :if={(today_plan["chapter_ids"] || []) != []} class="flex flex-wrap gap-2 mt-2">
@@ -486,7 +499,8 @@ defmodule FunSheepWeb.StudyGuideLive do
             <div class={
               if day["completed"],
                 do: "w-6 h-6 rounded-full bg-[#4CD964] flex items-center justify-center",
-                else: "w-6 h-6 rounded-full border-2 border-[#E5E5EA] hover:border-[#4CD964] transition-colors"
+                else:
+                  "w-6 h-6 rounded-full border-2 border-[#E5E5EA] hover:border-[#4CD964] transition-colors"
             }>
               <.icon :if={day["completed"]} name="hero-check-mini" class="w-4 h-4 text-white" />
             </div>
@@ -568,7 +582,11 @@ defmodule FunSheepWeb.StudyGuideLive do
                 {round(section["score"] || 0)}%
               </span>
               <.icon
-                name={if MapSet.member?(@expanded_sections, section["chapter_id"]), do: "hero-chevron-up", else: "hero-chevron-down"}
+                name={
+                  if MapSet.member?(@expanded_sections, section["chapter_id"]),
+                    do: "hero-chevron-up",
+                    else: "hero-chevron-down"
+                }
                 class="w-5 h-5 text-[#8E8E93]"
               />
             </div>
@@ -615,13 +633,25 @@ defmodule FunSheepWeb.StudyGuideLive do
                 {if @loading_summary == section["chapter_id"], do: "Loading...", else: "Generate"}
               </button>
             </div>
-            <div :if={Map.has_key?(@chapter_summaries, section["chapter_id"])} class="text-sm text-[#1C1C1E] leading-relaxed whitespace-pre-wrap">
+            <div
+              :if={Map.has_key?(@chapter_summaries, section["chapter_id"])}
+              class="text-sm text-[#1C1C1E] leading-relaxed whitespace-pre-wrap"
+            >
               {Map.get(@chapter_summaries, section["chapter_id"])}
             </div>
-            <p :if={!Map.has_key?(@chapter_summaries, section["chapter_id"]) and @loading_summary != section["chapter_id"]} class="text-sm text-[#8E8E93]">
+            <p
+              :if={
+                !Map.has_key?(@chapter_summaries, section["chapter_id"]) and
+                  @loading_summary != section["chapter_id"]
+              }
+              class="text-sm text-[#8E8E93]"
+            >
               Click "Generate" for an AI-powered summary of what to focus on in this chapter.
             </p>
-            <div :if={@loading_summary == section["chapter_id"]} class="flex items-center gap-2 text-sm text-[#8E8E93]">
+            <div
+              :if={@loading_summary == section["chapter_id"]}
+              class="flex items-center gap-2 text-sm text-[#8E8E93]"
+            >
               <div class="animate-spin h-4 w-4 border-2 border-[#4CD964] border-t-transparent rounded-full" />
               Generating summary...
             </div>
@@ -631,15 +661,16 @@ defmodule FunSheepWeb.StudyGuideLive do
           <div>
             <h4 class="text-sm font-semibold text-[#1C1C1E] mb-2">Review Topics</h4>
             <ul class="list-disc list-inside text-sm text-[#8E8E93] space-y-1">
-              <li :for={topic <- section["review_topics"] || []}>{if is_map(topic), do: topic["topic"] || topic["name"], else: topic}</li>
+              <li :for={topic <- section["review_topics"] || []}>
+                {if is_map(topic), do: topic["topic"] || topic["name"], else: topic}
+              </li>
             </ul>
           </div>
 
           <%!-- Source Materials --%>
           <div :if={(section["source_materials"] || []) != []}>
             <h4 class="text-sm font-semibold text-[#1C1C1E] mb-2">
-              <.icon name="hero-document-text" class="w-4 h-4 inline -mt-0.5" />
-              Source Materials
+              <.icon name="hero-document-text" class="w-4 h-4 inline -mt-0.5" /> Source Materials
             </h4>
             <div class="flex flex-wrap gap-2">
               <span
@@ -662,7 +693,9 @@ defmodule FunSheepWeb.StudyGuideLive do
                 class="bg-[#F5F5F7] rounded-xl p-4"
               >
                 <div class="flex items-start justify-between gap-2">
-                  <p class="text-sm text-[#1C1C1E] font-medium flex-1">{wq["content"] || wq["question_text"]}</p>
+                  <p class="text-sm text-[#1C1C1E] font-medium flex-1">
+                    {wq["content"] || wq["question_text"]}
+                  </p>
                   <div class="flex items-center gap-2 shrink-0">
                     <% {diff_label, diff_class} = difficulty_badge(wq["difficulty"]) %>
                     <span class={"text-xs px-2 py-0.5 rounded-full #{diff_class}"}>{diff_label}</span>
@@ -692,13 +725,19 @@ defmodule FunSheepWeb.StudyGuideLive do
                     end}
                   </button>
 
-                  <div :if={MapSet.member?(@loading_explanations, wq["id"])} class="mt-2 flex items-center gap-2 text-xs text-[#8E8E93]">
+                  <div
+                    :if={MapSet.member?(@loading_explanations, wq["id"])}
+                    class="mt-2 flex items-center gap-2 text-xs text-[#8E8E93]"
+                  >
                     <div class="animate-spin h-3 w-3 border-2 border-[#4CD964] border-t-transparent rounded-full" />
                     AI is generating an explanation...
                   </div>
 
                   <div
-                    :if={MapSet.member?(@expanded_explanations, wq["id"]) and Map.has_key?(@explanations, wq["id"])}
+                    :if={
+                      MapSet.member?(@expanded_explanations, wq["id"]) and
+                        Map.has_key?(@explanations, wq["id"])
+                    }
                     class="mt-2 bg-white rounded-lg p-3 border border-[#E5E5EA] text-sm text-[#1C1C1E] leading-relaxed whitespace-pre-wrap"
                   >
                     {Map.get(@explanations, wq["id"])}
@@ -719,8 +758,7 @@ defmodule FunSheepWeb.StudyGuideLive do
               navigate={~p"/courses/#{@course_id}/practice"}
               class="inline-flex items-center gap-1 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm"
             >
-              <.icon name="hero-play" class="w-4 h-4" />
-              Practice This Chapter
+              <.icon name="hero-play" class="w-4 h-4" /> Practice This Chapter
             </.link>
           </div>
         </div>
