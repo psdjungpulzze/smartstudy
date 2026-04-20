@@ -129,11 +129,8 @@ defmodule FunSheep.Content do
   end
 
   defp delete_materials(materials) do
-    uploads_dir = Application.app_dir(:fun_sheep, "priv/static")
-
     for mat <- materials do
-      path = Path.join(uploads_dir, mat.file_path)
-      File.rm(path)
+      FunSheep.Storage.delete(mat.file_path)
     end
   end
 

@@ -72,6 +72,8 @@ defmodule FunSheep.MixProject do
       {:oban, "~> 2.17"},
       # JWT verification (for Interactor auth)
       {:jose, "~> 1.11"},
+      # GCP auth (service account / Workload Identity) for Cloud Storage
+      {:goth, "~> 1.4"},
       # Code quality (dev/test only)
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},

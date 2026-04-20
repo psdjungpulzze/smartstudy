@@ -2,6 +2,7 @@ defmodule FunSheepWeb.UploadController do
   use FunSheepWeb, :controller
 
   alias FunSheep.Content
+  alias FunSheep.Storage
 
   def create(conn, %{"file" => upload, "batch_id" => batch_id} = params) do
     user_role_id = params["user_role_id"]
@@ -12,46 +13,34 @@ defmodule FunSheepWeb.UploadController do
     end
 
     basename = Path.basename(upload.filename)
+    key = build_key(batch_id, folder_name, basename)
 
-    sub_dir =
-      if folder_name && folder_name != "",
-        do: Path.join(["uploads", "staging", batch_id, folder_name]),
-        else: Path.join(["uploads", "staging", batch_id])
-
-    uploads_dir = Application.app_dir(:fun_sheep, "priv/static")
-    dest_dir = Path.join(uploads_dir, sub_dir)
-
-    try do
-      File.mkdir_p!(dest_dir)
-      dest = Path.join(dest_dir, basename)
-      File.cp!(upload.path, dest)
-
-      # Check if this batch is already linked to a course
-      course_id = Content.get_course_id_for_batch(batch_id)
-
-      case Content.create_uploaded_material(%{
+    with {:ok, content} <- File.read(upload.path),
+         {:ok, stored_key} <-
+           Storage.put(key, content, content_type: upload.content_type),
+         course_id = Content.get_course_id_for_batch(batch_id),
+         {:ok, material} <-
+           Content.create_uploaded_material(%{
              file_name: basename,
-             file_path: "/#{sub_dir}/#{basename}",
+             file_path: stored_key,
              file_type: upload.content_type,
-             file_size: get_file_size(upload.path),
+             file_size: byte_size(content),
              folder_name: folder_name,
              batch_id: batch_id,
              user_role_id: user_role_id,
              course_id: course_id
            }) do
-        {:ok, material} ->
-          json(conn, %{id: material.id, file_name: material.file_name})
+      json(conn, %{id: material.id, file_name: material.file_name})
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "Failed to save", details: inspect(changeset.errors)})
 
-        {:error, changeset} ->
-          conn
-          |> put_status(422)
-          |> json(%{error: "Failed to save", details: inspect(changeset.errors)})
-      end
-    rescue
-      e ->
+      {:error, reason} ->
         conn
         |> put_status(500)
-        |> json(%{error: "Upload failed", details: Exception.message(e)})
+        |> json(%{error: "Upload failed", details: inspect(reason)})
     end
   end
 
@@ -59,10 +48,11 @@ defmodule FunSheepWeb.UploadController do
     conn |> put_status(400) |> json(%{error: "Missing file, batch_id, or user_role_id"})
   end
 
-  defp get_file_size(path) do
-    case File.stat(path) do
-      {:ok, %{size: size}} -> size
-      _ -> 0
-    end
+  defp build_key(batch_id, folder_name, basename) when folder_name in [nil, ""] do
+    Path.join(["staging", batch_id, basename])
+  end
+
+  defp build_key(batch_id, folder_name, basename) do
+    Path.join(["staging", batch_id, folder_name, basename])
   end
 end

@@ -50,6 +50,22 @@ if System.get_env("PHX_SERVER") do
 end
 
 if config_env() == :prod do
+  # Object storage: use GCS in production so uploads survive Cloud Run's
+  # ephemeral filesystem and are shared across horizontally-scaled instances.
+  gcs_bucket =
+    System.get_env("GCS_BUCKET") ||
+      raise """
+      environment variable GCS_BUCKET is missing.
+      Create the bucket with scripts/deploy/gcs-setup.sh and set GCS_BUCKET
+      to its name (e.g. funsheep-uploads-prod).
+      """
+
+  config :fun_sheep, :storage_backend, FunSheep.Storage.GCS
+
+  config :fun_sheep, FunSheep.Storage.GCS,
+    bucket: gcs_bucket,
+    goth_name: FunSheep.Goth
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
