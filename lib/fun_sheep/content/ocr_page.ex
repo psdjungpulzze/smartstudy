@@ -24,6 +24,7 @@ defmodule FunSheep.Content.OcrPage do
     field :error, :string
 
     belongs_to :material, FunSheep.Content.UploadedMaterial
+    has_many :figures, FunSheep.Content.SourceFigure
 
     timestamps(type: :utc_datetime)
   end

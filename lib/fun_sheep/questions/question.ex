@@ -36,6 +36,11 @@ defmodule FunSheep.Questions.Question do
     has_many :question_attempts, FunSheep.Questions.QuestionAttempt
     has_one :stats, FunSheep.Questions.QuestionStats
 
+    many_to_many :figures, FunSheep.Content.SourceFigure,
+      join_through: FunSheep.Questions.QuestionFigure,
+      join_keys: [question_id: :id, source_figure_id: :id],
+      on_replace: :delete
+
     timestamps(type: :utc_datetime)
   end
 

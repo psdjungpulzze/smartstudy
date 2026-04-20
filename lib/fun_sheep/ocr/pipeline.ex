@@ -9,8 +9,10 @@ defmodule FunSheep.OCR.Pipeline do
   """
 
   alias FunSheep.Content
-  alias FunSheep.OCR.GoogleVision
+  alias FunSheep.OCR.{FigureExtractor, GoogleVision}
   alias FunSheep.Storage
+
+  require Logger
 
   @doc """
   Process a material by its ID.
@@ -125,6 +127,7 @@ defmodule FunSheep.OCR.Pipeline do
         case GoogleVision.detect_text(Base.encode64(content)) do
           {:ok, result} ->
             page = create_ocr_page(material, 1, result)
+            maybe_extract_figures(page, result.blocks, content)
             {:ok, [page]}
 
           {:error, reason} ->
@@ -134,6 +137,29 @@ defmodule FunSheep.OCR.Pipeline do
       {:error, reason} ->
         {:error, {:file_read_error, reason}}
     end
+  end
+
+  defp maybe_extract_figures(page, blocks, page_image_binary) do
+    case FigureExtractor.extract_and_store(page, blocks, page_image_binary) do
+      {:ok, figures} when figures != [] ->
+        Logger.info(
+          "[OCR] Extracted #{length(figures)} figure(s) from material #{page.material_id} page #{page.page_number}"
+        )
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  rescue
+    # Figure extraction is best-effort — don't fail the whole OCR run if it
+    # blows up. We already stored the text, which is the primary goal.
+    e ->
+      Logger.warning(
+        "[OCR] Figure extraction failed for material #{page.material_id}: #{inspect(e)}"
+      )
+
+      :ok
   end
 
   defp create_ocr_page(material, page_number, ocr_result) do

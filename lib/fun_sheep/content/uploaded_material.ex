@@ -48,6 +48,7 @@ defmodule FunSheep.Content.UploadedMaterial do
     belongs_to :course, FunSheep.Courses.Course
 
     has_many :ocr_pages, FunSheep.Content.OcrPage, foreign_key: :material_id
+    has_many :figures, FunSheep.Content.SourceFigure, foreign_key: :material_id
 
     timestamps(type: :utc_datetime)
   end

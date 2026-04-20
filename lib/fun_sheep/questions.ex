@@ -8,7 +8,7 @@ defmodule FunSheep.Questions do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Questions.{Question, QuestionAttempt, QuestionStats}
+  alias FunSheep.Questions.{Question, QuestionAttempt, QuestionFigure, QuestionStats}
 
   ## Questions
 
@@ -453,5 +453,49 @@ defmodule FunSheep.Questions do
       group_by: [m.id, m.file_name]
     )
     |> Repo.all()
+  end
+
+  ## Figure attachments
+
+  @doc """
+  Attaches a list of SourceFigure IDs to a question. Ignores invalid IDs
+  (they would fail the FK constraint).
+  """
+  def attach_figures(%Question{} = question, figure_ids) when is_list(figure_ids) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    entries =
+      figure_ids
+      |> Enum.with_index()
+      |> Enum.map(fn {fid, idx} ->
+        %{
+          question_id: question.id,
+          source_figure_id: fid,
+          position: idx,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    {count, _} =
+      Repo.insert_all(QuestionFigure, entries,
+        on_conflict: :nothing,
+        conflict_target: [:question_id, :source_figure_id]
+      )
+
+    {:ok, count}
+  end
+
+  def attach_figures(_question, _), do: {:ok, 0}
+
+  @doc """
+  Preloads a question's figures.
+  """
+  def with_figures(%Question{} = question) do
+    Repo.preload(question, :figures)
+  end
+
+  def with_figures(questions) when is_list(questions) do
+    Repo.preload(questions, :figures)
   end
 end

@@ -1,8 +1,10 @@
 defmodule FunSheepWeb.PracticeLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Courses, Questions, Tutor}
+  alias FunSheep.{Courses, Engagement, Gamification, Questions, Tutor}
   alias FunSheep.Assessments.PracticeEngine
+
+  @xp_per_correct 10
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do
@@ -108,6 +110,12 @@ defmodule FunSheepWeb.PracticeLive do
           time_taken_seconds: max(time_taken, 0),
           difficulty_at_attempt: to_string(question.difficulty)
         })
+
+        if is_correct do
+          Gamification.award_xp(user_role_id, @xp_per_correct, "practice", source_id: question.id)
+        end
+
+        Gamification.record_activity(user_role_id)
       end
 
       new_state = PracticeEngine.record_answer(state, question.id, answer, is_correct)
@@ -336,13 +344,14 @@ defmodule FunSheepWeb.PracticeLive do
       {:question, question, new_state} ->
         assign(socket,
           engine_state: new_state,
-          current_question: question,
+          current_question: FunSheep.Questions.with_figures(question),
           question_number: socket.assigns.question_number + 1,
           start_time: System.monotonic_time(:second)
         )
 
       {:complete, new_state} ->
         summary = PracticeEngine.summary(new_state)
+        finalize_session(socket)
 
         assign(socket,
           engine_state: new_state,
@@ -353,8 +362,65 @@ defmodule FunSheepWeb.PracticeLive do
     end
   end
 
+  defp finalize_session(socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    course_id = socket.assigns.course.id
+
+    if user_role_id && course_id do
+      Engagement.after_session(user_role_id, course_id)
+    end
+
+    :ok
+  end
+
   defp check_answer(question, answer) do
     String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
+  end
+
+  defp has_figures?(%{figures: figures}) when is_list(figures), do: figures != []
+  defp has_figures?(_), do: false
+
+  defp figure_url(%{image_path: path}) when is_binary(path), do: FunSheep.Storage.url(path)
+  defp figure_url(_), do: nil
+
+  defp table_spec(%{metadata: %{"table_spec" => %{"headers" => _, "rows" => _} = spec}}), do: spec
+  defp table_spec(_), do: nil
+
+  # Renders an AI-supplied table spec as an accessible HTML table. Used when a
+  # question depends on tabular data but no source figure exists — the LLM
+  # supplies the data as structured JSON and we render it honestly, labeled
+  # as AI-generated.
+  attr :spec, :map, required: true
+
+  defp render_table_spec(assigns) do
+    ~H"""
+    <figure class="bg-white rounded-2xl border border-[#E5E5EA] overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-[#F5F5F7]">
+            <tr>
+              <th
+                :for={header <- @spec["headers"] || []}
+                scope="col"
+                class="px-4 py-3 text-left font-semibold text-[#1C1C1E]"
+              >
+                {header}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={row <- @spec["rows"] || []} class="border-t border-[#E5E5EA]">
+              <td :for={cell <- row} class="px-4 py-3 text-[#1C1C1E]">{cell}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption class="px-4 py-2 text-xs text-[#8E8E93] bg-[#F5F5F7] border-t border-[#E5E5EA]">
+        <span :if={@spec["caption"] && @spec["caption"] != ""}>{@spec["caption"]} · </span>
+        AI-generated reference table
+      </figcaption>
+    </figure>
+    """
   end
 
   defp difficulty_badge_class(difficulty) do
@@ -466,6 +532,32 @@ defmodule FunSheepWeb.PracticeLive do
           <span class={"px-3 py-1 rounded-full text-xs font-medium #{difficulty_badge_class(@current_question.difficulty)}"}>
             {difficulty_label(@current_question.difficulty)}
           </span>
+        </div>
+
+        <%!-- Attached figures (tables, graphs, diagrams) from source material --%>
+        <div
+          :if={has_figures?(@current_question)}
+          class="mb-6 space-y-4"
+        >
+          <figure
+            :for={fig <- @current_question.figures}
+            class="bg-[#F5F5F7] rounded-2xl p-4 border border-[#E5E5EA]"
+          >
+            <img
+              src={figure_url(fig)}
+              alt={fig.caption || "#{fig.figure_type} from source material"}
+              class="w-full max-h-96 object-contain rounded-xl bg-white"
+              loading="lazy"
+            />
+            <figcaption :if={fig.caption} class="mt-2 text-sm text-[#8E8E93]">
+              {fig.caption}
+            </figcaption>
+          </figure>
+        </div>
+
+        <%!-- AI-generated table spec (rendered as HTML table, never fabricated image) --%>
+        <div :if={table_spec(@current_question)} class="mb-6">
+          <.render_table_spec spec={table_spec(@current_question)} />
         </div>
 
         <div class="mb-8">

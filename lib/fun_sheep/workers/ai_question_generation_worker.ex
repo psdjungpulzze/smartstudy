@@ -66,7 +66,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
           case send_to_ai(prompt, course, ch) do
             {:ok, questions} ->
-              inserted = insert_questions(questions, course, ch)
+              inserted = insert_questions(questions, course, ch, context[:figures] || [])
 
               broadcast(course_id, %{
                 sub_step: "Created #{inserted} questions for #{String.slice(ch.name, 0, 40)}"
@@ -92,7 +92,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
       case send_to_ai(prompt, course, chapter) do
         {:ok, questions} ->
-          inserted = insert_questions(questions, course, chapter)
+          inserted = insert_questions(questions, course, chapter, context[:figures] || [])
 
           Logger.info(
             "[AIGen] Inserted #{inserted} AI-generated questions for course #{course_id}"
@@ -142,11 +142,28 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       |> Enum.take(20)
       |> Enum.map(& &1.content)
 
+    figures = collect_figures(course.id, args["source_material_id"])
+
     %{
       material_text: material_text |> String.slice(0, 8000),
       existing_questions: existing_questions,
-      chapter_names: Enum.map(course.chapters, & &1.name)
+      chapter_names: Enum.map(course.chapters, & &1.name),
+      figures: figures
     }
+  end
+
+  # Gather available SourceFigures for the course so the generator can
+  # reference real visuals instead of hallucinating "Table 3". Cap at 30 to
+  # keep the prompt tokens manageable.
+  defp collect_figures(course_id, specific_material_id) do
+    base =
+      if specific_material_id do
+        Content.list_figures_by_material(specific_material_id)
+      else
+        Content.list_figures_by_course(course_id)
+      end
+
+    Enum.take(base, 30)
   end
 
   defp collect_material_text(course_id, specific_material_id) do
@@ -263,6 +280,31 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           end
       end
 
+    figures_section = build_figures_section(context[:figures] || [])
+
+    visual_rule =
+      if (context[:figures] || []) == [] do
+        """
+
+        CRITICAL VISUAL RULE: Do NOT write questions that require the student to
+        look at a table, figure, graph, chart, diagram, or image. You have no
+        figures attached to this generation. Writing "based on the table above"
+        or "according to figure 3" when no such figure is shown to the student
+        is forbidden — it produces broken, misleading questions.
+
+        Write only questions that can be answered from the text context alone.
+        """
+      else
+        """
+
+        FIGURES AVAILABLE: You have been given #{length(context[:figures])} figure(s)
+        above. If a question depends on a visual, set "figure_ids" to an array of
+        the relevant figure IDs from the list. Never reference a figure_id that
+        is not in the provided list. Never describe a table/figure/graph in the
+        question text without also attaching its figure_id.
+        """
+      end
+
     format = """
 
     IMPORTANT: Return your response as a JSON array of question objects. Each object must have:
@@ -271,11 +313,35 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     - "question_type": one of "multiple_choice", "true_false", "short_answer"
     - "options": for multiple_choice, an object like {"A": "...", "B": "...", "C": "...", "D": "..."}
     - "difficulty": one of "easy", "medium", "hard"
+    - "figure_ids": (optional) array of figure IDs from the FIGURES AVAILABLE list, when the question depends on a visual
+    - "table_spec": (optional) JSON table spec when the question requires a table you are inventing. Format: {"headers": [...], "rows": [[...], ...], "caption": "..."}
 
     Return ONLY the JSON array, no other text.
     """
 
-    base <> chapters_section <> material_section <> existing_section <> instructions <> format
+    base <>
+      chapters_section <>
+      material_section <>
+      figures_section <>
+      existing_section <>
+      instructions <>
+      visual_rule <>
+      format
+  end
+
+  defp build_figures_section([]), do: ""
+
+  defp build_figures_section(figures) do
+    lines =
+      Enum.map_join(figures, "\n", fn f ->
+        "- id=#{f.id} | type=#{f.figure_type} | page=#{f.page_number} | caption: #{f.caption || "(none)"}"
+      end)
+
+    """
+    FIGURES AVAILABLE FOR REFERENCE (attach by "figure_ids" when a question depends on one):
+    #{lines}
+
+    """
   end
 
   defp send_to_ai(prompt, course, _chapter) do
@@ -317,29 +383,101 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     Jason.decode(cleaned)
   end
 
-  defp insert_questions(questions, course, chapter) do
+  defp insert_questions(questions, course, chapter, available_figures) do
+    available_figure_ids = MapSet.new(available_figures, & &1.id)
+
     Enum.reduce(questions, 0, fn q_data, count ->
-      attrs = %{
-        content: q_data["content"],
-        answer: q_data["answer"],
-        question_type: normalize_question_type(q_data["question_type"]),
-        options: q_data["options"],
-        difficulty: normalize_difficulty(q_data["difficulty"]),
-        is_generated: true,
-        course_id: course.id,
-        chapter_id: if(chapter, do: chapter.id),
-        metadata: %{"source" => "ai_generation"}
-      }
+      claimed_figure_ids = sanitize_figure_ids(q_data["figure_ids"], available_figure_ids)
+      table_spec = sanitize_table_spec(q_data["table_spec"])
+      has_visual = claimed_figure_ids != [] or table_spec != nil
 
-      case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
-        {:ok, _} ->
-          count + 1
+      case validate_figure_dependency(q_data["content"], has_visual) do
+        :ok ->
+          attrs = %{
+            content: q_data["content"],
+            answer: q_data["answer"],
+            question_type: normalize_question_type(q_data["question_type"]),
+            options: q_data["options"],
+            difficulty: normalize_difficulty(q_data["difficulty"]),
+            is_generated: true,
+            course_id: course.id,
+            chapter_id: if(chapter, do: chapter.id),
+            metadata:
+              %{"source" => "ai_generation"}
+              |> maybe_put_meta("table_spec", table_spec)
+          }
 
-        {:error, changeset} ->
-          Logger.warning("[AIGen] Failed to insert question: #{inspect(changeset.errors)}")
+          case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
+            {:ok, question} ->
+              attach_figures(question, claimed_figure_ids)
+              count + 1
+
+            {:error, changeset} ->
+              Logger.warning("[AIGen] Failed to insert question: #{inspect(changeset.errors)}")
+              count
+          end
+
+        {:error, reason} ->
+          Logger.warning(
+            "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
+          )
+
           count
       end
     end)
+  end
+
+  defp attach_figures(_question, []), do: :ok
+
+  defp attach_figures(question, figure_ids) do
+    # Phase 3 wires `FunSheep.Questions.attach_figures/2`. In Phase 1 this list
+    # is always empty, so the call never reaches here. The `function_exported?`
+    # guard keeps the worker safe if figures are later claimed before Phase 3
+    # is deployed.
+    if function_exported?(FunSheep.Questions, :attach_figures, 2) do
+      FunSheep.Questions.attach_figures(question, figure_ids)
+    else
+      :ok
+    end
+  end
+
+  defp sanitize_figure_ids(ids, available) when is_list(ids) do
+    ids
+    |> Enum.filter(&is_binary/1)
+    |> Enum.filter(&MapSet.member?(available, &1))
+    |> Enum.uniq()
+  end
+
+  defp sanitize_figure_ids(_, _), do: []
+
+  defp sanitize_table_spec(%{"headers" => headers, "rows" => rows} = spec)
+       when is_list(headers) and is_list(rows) do
+    %{
+      "headers" => Enum.map(headers, &to_string/1),
+      "rows" => Enum.map(rows, fn row -> Enum.map(row, &to_string/1) end),
+      "caption" => (spec["caption"] || "") |> to_string()
+    }
+  end
+
+  defp sanitize_table_spec(_), do: nil
+
+  defp maybe_put_meta(map, _k, nil), do: map
+  defp maybe_put_meta(map, k, v), do: Map.put(map, k, v)
+
+  # Returns :ok when the question is safe to insert, {:error, reason} when it
+  # references a visual we cannot render. Catches cases where the LLM writes
+  # "based on the table above" without attaching a figure_id or table_spec.
+  @figure_reference_pattern ~r/\b(table|figure|fig\.?|graph|chart|diagram|image|shown (above|below)|the picture|the photo|the illustration|depicted|see (the )?(table|figure|graph))\b/i
+
+  @doc false
+  def validate_figure_dependency(nil, _has_visual), do: {:error, :empty_content}
+
+  def validate_figure_dependency(content, has_visual) when is_binary(content) do
+    if Regex.match?(@figure_reference_pattern, content) and not has_visual do
+      {:error, :figure_reference_without_attachment}
+    else
+      :ok
+    end
   end
 
   defp normalize_question_type("multiple_choice"), do: :multiple_choice

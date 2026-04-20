@@ -8,7 +8,7 @@ defmodule FunSheep.Content do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Content.{UploadedMaterial, OcrPage, DiscoveredSource}
+  alias FunSheep.Content.{UploadedMaterial, OcrPage, DiscoveredSource, SourceFigure}
 
   ## Uploaded Materials
 
@@ -342,5 +342,44 @@ defmodule FunSheep.Content do
 
   def delete_discovered_source(%DiscoveredSource{} = source) do
     Repo.delete(source)
+  end
+
+  ## Source Figures
+
+  @doc """
+  Creates a source figure record (extracted table/figure/graph from OCR).
+  """
+  def create_source_figure(attrs) do
+    %SourceFigure{}
+    |> SourceFigure.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def get_source_figure!(id), do: Repo.get!(SourceFigure, id)
+
+  def list_figures_by_material(material_id) do
+    from(f in SourceFigure,
+      where: f.material_id == ^material_id,
+      order_by: [asc: f.page_number, asc: f.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  def list_figures_by_course(course_id) do
+    from(f in SourceFigure,
+      join: m in UploadedMaterial,
+      on: f.material_id == m.id,
+      where: m.course_id == ^course_id,
+      order_by: [asc: f.page_number, asc: f.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Deletes all figures for a given ocr_page. Used when reprocessing a page.
+  """
+  def delete_figures_for_page(ocr_page_id) do
+    from(f in SourceFigure, where: f.ocr_page_id == ^ocr_page_id)
+    |> Repo.delete_all()
   end
 end
