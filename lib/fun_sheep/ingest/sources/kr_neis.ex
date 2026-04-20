@@ -4,9 +4,20 @@ defmodule FunSheep.Ingest.Sources.KrNeis do
   authoritative directory of every 유치원/초/중/고/특수 school under the
   17 시도교육청 (metropolitan/provincial education offices).
 
-  Total coverage ~12,000 schools. Authentication is optional — without a
-  `NEIS_API_KEY` env var, requests hit a lower rate limit (sufficient for
-  an overnight batch). The API returns JSON; there is no CSV equivalent.
+  Total coverage ~12,000 schools.
+
+  ## API key is effectively required
+
+  NEIS documents authentication as "optional" but in practice the keyless
+  endpoint (a) caps responses to 5 rows regardless of the requested pSize
+  and (b) returns the same first page for every `pIndex` — pagination is
+  disabled. Without a key this ingester only recovers ~85 schools total
+  (5 per office × 17 offices).
+
+  Register for a free key at https://open.neis.go.kr/portal/mainPage.do
+  (~5 minutes, email confirmation), then set `NEIS_API_KEY=...` and re-run.
+  With a key, `pSize=1000` and proper pagination give full coverage in
+  ~30 seconds.
 
   Natural key: `SD_SCHUL_CODE` (7-digit school standard code, nationally
   unique). Stored as `schools.kr_code` and `schools.source_id`.
@@ -30,7 +41,12 @@ defmodule FunSheep.Ingest.Sources.KrNeis do
 
   @source "kr_neis"
   @endpoint "https://open.neis.go.kr/hub/schoolInfo"
-  @page_size 1000
+  # Without an API key NEIS hard-caps responses to 5 rows regardless of
+  # requested pSize. With a free key (`NEIS_API_KEY`) you can request up to
+  # 1000. Default to the keyless cap so ingestion works zero-config and bump
+  # to 1000 when a key is present.
+  @keyless_page_size 5
+  @keyed_page_size 1000
 
   # 교육청 코드 → ISO 3166-2
   @office_to_iso %{
@@ -101,14 +117,19 @@ defmodule FunSheep.Ingest.Sources.KrNeis do
   # ── Paging ─────────────────────────────────────────────────────────────────
 
   defp fetch_office_all_pages(office_code, api_key) do
-    fetch_page(office_code, api_key, 1, [])
+    page_size = if api_key, do: @keyed_page_size, else: @keyless_page_size
+    fetch_page(office_code, api_key, page_size, 1, [], nil)
   end
 
-  defp fetch_page(office_code, api_key, page, acc) do
+  # Paginate using `list_total_count` from the response header so we always
+  # stop at the right boundary — the keyless rate-limiter returns a small
+  # row count regardless of the caller's requested pSize, so checking
+  # `length(rows) < page_size` isn't a reliable termination signal.
+  defp fetch_page(office_code, api_key, page_size, page, acc, total) do
     params = %{
       "Type" => "json",
       "pIndex" => page,
-      "pSize" => @page_size,
+      "pSize" => page_size,
       "ATPT_OFCDC_SC_CODE" => office_code
     }
 
@@ -116,17 +137,23 @@ defmodule FunSheep.Ingest.Sources.KrNeis do
 
     case Req.get(@endpoint, params: params, receive_timeout: :timer.seconds(60)) do
       {:ok, %{status: 200, body: body}} ->
-        case extract_rows(body) do
-          {:ok, []} ->
-            {:ok, acc}
-
-          {:ok, rows} ->
+        case extract_response(body) do
+          {:ok, rows, reported_total} ->
             new_acc = acc ++ rows
+            new_total = total || reported_total
 
-            if length(rows) < @page_size do
-              {:ok, new_acc}
-            else
-              fetch_page(office_code, api_key, page + 1, new_acc)
+            cond do
+              rows == [] ->
+                {:ok, new_acc}
+
+              new_total && length(new_acc) >= new_total ->
+                {:ok, new_acc}
+
+              true ->
+                # 50ms sleep per request keeps us well under the keyless
+                # rate limit (1000 req/hr == ~3.6 s cadence is safe).
+                Process.sleep(50)
+                fetch_page(office_code, api_key, page_size, page + 1, new_acc, new_total)
             end
 
           {:error, :no_data} ->
@@ -145,22 +172,40 @@ defmodule FunSheep.Ingest.Sources.KrNeis do
   end
 
   # NEIS wraps responses as:
-  #   {"schoolInfo": [{"head": [...]}, {"row": [...]}]}
+  #   {"schoolInfo": [
+  #     {"head": [{"list_total_count": 1415}, {"RESULT": {...}}]},
+  #     {"row": [...]}
+  #   ]}
   # or on no-data:
   #   {"RESULT": {"CODE": "INFO-200", "MESSAGE": "해당하는 데이터가 없습니다."}}
-  defp extract_rows(%{"schoolInfo" => frames}) when is_list(frames) do
+  defp extract_response(%{"schoolInfo" => frames}) when is_list(frames) do
     rows =
       Enum.find_value(frames, [], fn
         %{"row" => row} when is_list(row) -> row
         _ -> false
       end) || []
 
-    {:ok, rows}
+    total =
+      Enum.find_value(frames, nil, fn
+        %{"head" => head} when is_list(head) ->
+          Enum.find_value(head, nil, fn
+            %{"list_total_count" => c} when is_integer(c) -> c
+            _ -> nil
+          end)
+
+        _ ->
+          nil
+      end)
+
+    {:ok, rows, total}
   end
 
-  defp extract_rows(%{"RESULT" => %{"CODE" => "INFO-200"}}), do: {:error, :no_data}
-  defp extract_rows(%{"RESULT" => %{"CODE" => code, "MESSAGE" => msg}}), do: {:error, {code, msg}}
-  defp extract_rows(_), do: {:error, :unexpected_shape}
+  defp extract_response(%{"RESULT" => %{"CODE" => "INFO-200"}}), do: {:error, :no_data}
+
+  defp extract_response(%{"RESULT" => %{"CODE" => code, "MESSAGE" => msg}}),
+    do: {:error, {code, msg}}
+
+  defp extract_response(_), do: {:error, :unexpected_shape}
 
   # ── Row mapping ────────────────────────────────────────────────────────────
 

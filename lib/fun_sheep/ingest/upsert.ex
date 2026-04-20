@@ -44,6 +44,7 @@ defmodule FunSheep.Ingest.Upsert do
       rows =
         batch
         |> on_before.()
+        |> Enum.uniq_by(&{Map.get(&1, :source), Map.get(&1, :source_id)})
         |> Enum.map(&stamp_timestamps(&1, now))
         |> Enum.map(&add_id_if_missing/1)
 
