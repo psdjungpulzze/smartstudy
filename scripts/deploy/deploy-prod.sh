@@ -91,24 +91,18 @@ else
   warn "Git state check skipped (--skip-git-check)"
 fi
 
+# --- Preflight: validate env file ---------------------------------------
+# Canonical check lives in lib/mix/tasks/funsheep.deploy.preflight.ex so CI
+# and local deploy share one source of truth for required variables.
+info "Preflight: validating $ENV_FILE..."
+mix funsheep.deploy.preflight --env-file "$ENV_FILE" \
+  || fail "Preflight failed — fix the issues above before deploying."
+
 # --- Load env ------------------------------------------------------------
 set -a
 # shellcheck source=/dev/null
 source "$ENV_FILE"
 set +a
-
-REQUIRED=(
-  GCP_PROJECT_ID GCP_REGION CLOUD_RUN_SERVICE DB_INSTANCE PHX_HOST
-  INTERACTOR_URL INTERACTOR_CORE_URL INTERACTOR_UKB_URL INTERACTOR_UDB_URL
-  INTERACTOR_ORG_NAME INTERACTOR_CLIENT_ID INTERACTOR_CLIENT_SECRET
-  GCS_BUCKET GCS_SERVICE_ACCOUNT
-)
-for v in "${REQUIRED[@]}"; do
-  [ -n "${!v:-}" ] || fail "$v is empty in $ENV_FILE"
-  case "${!v}" in
-    *XXXX*) fail "$v still contains placeholder (XXXX) in $ENV_FILE" ;;
-  esac
-done
 
 # --- gcloud checks -------------------------------------------------------
 command -v gcloud >/dev/null 2>&1 || fail "gcloud CLI not installed."
@@ -181,6 +175,7 @@ upsert_secret() {
 }
 
 upsert_secret interactor-client-secret "$INTERACTOR_CLIENT_SECRET"
+upsert_secret google-vision-api-key "$GOOGLE_VISION_API_KEY"
 
 for required_secret in database-url secret-key-base; do
   gcloud secrets describe "$required_secret" >/dev/null 2>&1 \
@@ -235,7 +230,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --service-account="$GCS_SERVICE_ACCOUNT" \
   --add-cloudsql-instances="$CONNECTION_NAME" \
   --env-vars-file="$ENV_VARS_FILE" \
-  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest"
+  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest"
 
 NEW_REVISION=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.latestReadyRevisionName)')
 SERVICE_URL=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.url)')

@@ -35,8 +35,10 @@ defmodule FunSheep.Content.UploadedMaterial do
       default: :textbook
 
     field :ocr_status, Ecto.Enum,
-      values: [:pending, :processing, :completed, :failed],
+      values: [:pending, :processing, :completed, :partial, :failed],
       default: :pending
+
+    field :ocr_error, :string
 
     field :relevance_status, :string, default: "pending"
     field :relevance_score, :float
@@ -62,6 +64,7 @@ defmodule FunSheep.Content.UploadedMaterial do
       :batch_id,
       :material_kind,
       :ocr_status,
+      :ocr_error,
       :relevance_status,
       :relevance_score,
       :relevance_notes,

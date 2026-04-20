@@ -41,6 +41,7 @@ npm-debug.log
 /test/e2e/test-results/
 /test/e2e/playwright-report/
 /test/e2e/screenshots/
+/test/visual/
 /test-results/
 /screenshots/
 

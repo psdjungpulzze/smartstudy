@@ -15,7 +15,14 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
   - Numbered problem sets
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 2
+  use Oban.Worker,
+    queue: :ai,
+    max_attempts: 2,
+    unique: [
+      period: 300,
+      fields: [:worker, :args],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias FunSheep.{Content, Courses, Repo}
   alias FunSheep.Questions.Question
@@ -23,8 +30,45 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   require Logger
 
-  @max_sources_per_run 50
+  @max_sources_per_run 500
   @max_page_size 100_000
+
+  # How many sources to fetch + extract in parallel within one job.
+  # Each source hits Playwright renderer + OpenAI — 5 is a reasonable balance
+  # between throughput and not hammering upstream services.
+  @source_concurrency 5
+
+  # AI extraction text chunking
+  @ai_chunk_size 18_000
+  @ai_max_chunks 4
+  @ai_chunk_overlap 500
+
+  # Minimum text length (in bytes) after plain fetch before we retry via the
+  # JS-rendering Playwright service. Short responses typically mean an SPA
+  # returned shell HTML/JS without the actual content.
+  @min_plain_text_bytes 1_500
+
+  # Hosts known to require JavaScript rendering — always go through the
+  # Playwright renderer for these, skipping the plain Req fetch entirely.
+  @spa_hosts ~w(
+    quizlet.com
+    khanacademy.org
+    collegeboard.org
+    albert.io
+    brainly.com
+    brainly.com.br
+    chegg.com
+    coursehero.com
+    studocu.com
+    slader.com
+    numerade.com
+    sparknotes.com
+    gradesaver.com
+    study.com
+    magoosh.com
+    varsitytutors.com
+    proprofs.com
+  )
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"course_id" => course_id}}) do
@@ -39,15 +83,35 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       generate_from_discovered_knowledge(course)
       :ok
     else
+      total = length(sources)
+
+      broadcast(course_id, %{
+        sub_step: "Processing 0/#{total} sources…"
+      })
+
       total_questions =
-        Enum.reduce(sources, 0, fn source, count ->
-          result = scrape_and_extract(source, course)
-          count + result
+        sources
+        |> Task.async_stream(
+          fn source -> scrape_and_extract(source, course) end,
+          max_concurrency: @source_concurrency,
+          # Individual source timeout — renderer can take ~45s + AI chunks add up
+          timeout: 180_000,
+          on_timeout: :kill_task,
+          ordered: false
+        )
+        |> Stream.with_index(1)
+        |> Enum.reduce(0, fn
+          {{:ok, inserted}, done}, count ->
+            broadcast(course_id, %{sub_step: "Processing #{done}/#{total} sources…"})
+            count + inserted
+
+          {{:exit, reason}, done}, count ->
+            Logger.warning("[Scraper] Source task failed: #{inspect(reason)}")
+            broadcast(course_id, %{sub_step: "Processing #{done}/#{total} sources…"})
+            count
         end)
 
-      Logger.info(
-        "[Scraper] Extracted #{total_questions} questions from #{length(sources)} sources"
-      )
+      Logger.info("[Scraper] Extracted #{total_questions} questions from #{total} sources")
 
       Courses.update_course(course, %{
         processing_step: "Extracted #{total_questions} questions from web sources"
@@ -58,12 +122,24 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         questions_scraped: total_questions
       })
 
+      # If there are still scrapable sources (e.g. 500 cap exceeded, or new ones
+      # were added mid-run), re-enqueue so the user doesn't have to click again.
+      remaining = Content.list_scrapable_sources(course_id)
+
+      if remaining != [] do
+        Logger.info("[Scraper] #{length(remaining)} sources remain, re-enqueueing")
+        enqueue(course_id)
+      end
+
       :ok
     end
   end
 
   @doc """
   Enqueues a scraping job for a course.
+
+  Oban uniqueness prevents duplicate jobs from stacking up for the same course —
+  if one is already queued/running/retryable, this returns the existing job.
   """
   def enqueue(course_id) do
     %{course_id: course_id}
@@ -113,6 +189,37 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
   # --- Page Fetching ---
 
   defp fetch_page(url) when is_binary(url) do
+    if needs_js_rendering?(url) do
+      case fetch_via_renderer(url) do
+        {:ok, text} -> {:ok, text}
+        {:error, _} -> fetch_plain(url)
+      end
+    else
+      case fetch_plain(url) do
+        {:ok, text} ->
+          if byte_size(text) < @min_plain_text_bytes do
+            # Plain fetch returned shell content — likely an SPA. Retry via renderer.
+            case fetch_via_renderer(url) do
+              {:ok, js_text} when byte_size(js_text) > byte_size(text) -> {:ok, js_text}
+              _ -> {:ok, text}
+            end
+          else
+            {:ok, text}
+          end
+
+        {:error, _} = err ->
+          # Plain fetch failed — give the renderer a shot as last resort.
+          case fetch_via_renderer(url) do
+            {:ok, text} -> {:ok, text}
+            _ -> err
+          end
+      end
+    end
+  end
+
+  defp fetch_page(_), do: {:error, :invalid_url}
+
+  defp fetch_plain(url) do
     case Req.get(url,
            headers: [
              {"user-agent",
@@ -122,9 +229,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
            max_redirects: 3
          ) do
       {:ok, %{status: 200, body: body}} when is_binary(body) ->
-        # Strip HTML tags to get plain text
-        text = strip_html(body)
-        {:ok, text}
+        {:ok, strip_html(body)}
 
       {:ok, %{status: status}} ->
         {:error, {:http_status, status}}
@@ -134,7 +239,49 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     end
   end
 
-  defp fetch_page(_), do: {:error, :invalid_url}
+  defp needs_js_rendering?(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) ->
+        host = String.downcase(host)
+        Enum.any?(@spa_hosts, fn spa -> host == spa or String.ends_with?(host, "." <> spa) end)
+
+      _ ->
+        false
+    end
+  end
+
+  defp fetch_via_renderer(url) do
+    renderer_url = renderer_base_url()
+
+    body = %{
+      url: url,
+      textOnly: false,
+      waitForNetworkIdle: true,
+      waitAfterLoad: 2500,
+      timeout: 45_000
+    }
+
+    case Req.post("#{renderer_url}/render",
+           json: body,
+           receive_timeout: 60_000
+         ) do
+      {:ok, %{status: 200, body: %{"content" => content}}} when is_binary(content) ->
+        {:ok, strip_html(content)}
+
+      {:ok, %{status: status}} ->
+        Logger.warning("[Scraper] Renderer returned status #{status} for #{url}")
+        {:error, {:renderer_status, status}}
+
+      {:error, reason} ->
+        Logger.debug("[Scraper] Renderer unavailable (#{inspect(reason)}) for #{url}")
+        {:error, reason}
+    end
+  end
+
+  defp renderer_base_url do
+    System.get_env("PLAYWRIGHT_RENDERER_URL") ||
+      Application.get_env(:fun_sheep, :playwright_renderer_url, "http://localhost:3000")
+  end
 
   defp strip_html(html) do
     html
@@ -237,41 +384,86 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
   end
 
   defp extract_with_ai(text, course, source) do
-    # Truncate text for AI processing
-    truncated = String.slice(text, 0, 6000)
+    chunks = chunk_text(text, @ai_chunk_size, @ai_chunk_overlap) |> Enum.take(@ai_max_chunks)
 
-    if String.length(truncated) < 100 do
+    if chunks == [] do
       []
     else
-      prompt = """
-      Extract all practice questions from this educational content about #{course.subject}.
+      chunks
+      |> Task.async_stream(
+        fn {chunk, idx} -> extract_ai_chunk(chunk, idx, length(chunks), course, source) end,
+        max_concurrency: 2,
+        timeout: 120_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.flat_map(fn
+        {:ok, questions} -> questions
+        _ -> []
+      end)
+    end
+  end
 
-      Content from: #{source.title}
-      ---
-      #{truncated}
-      ---
-
-      Return a JSON array of questions found. Each question must have:
-      - "content": the question text
-      - "answer": the correct answer (use letter for MCQ, "True"/"False" for T/F)
-      - "question_type": "multiple_choice", "true_false", or "short_answer"
-      - "options": for MCQ only, {"A": "...", "B": "...", "C": "...", "D": "..."}
-      - "difficulty": "easy", "medium", or "hard"
-
-      If no questions are found, return an empty array [].
-      Return ONLY the JSON array.
-      """
-
-      case Agents.chat("question_extract", prompt, %{
-             metadata: %{course_id: course.id, source_url: source.url}
-           }) do
-        {:ok, response} ->
-          parse_ai_questions(response, source)
-
-        {:error, reason} ->
-          Logger.warning("[Scraper] AI extraction failed: #{inspect(reason)}")
-          []
+  defp extract_ai_chunk(chunk, idx, total, course, source) do
+    chunk_note =
+      if total > 1 do
+        "\n\n(This is part #{idx + 1} of #{total} from the same source — extract only questions visible in THIS excerpt.)"
+      else
+        ""
       end
+
+    prompt = """
+    Extract all practice questions from this educational content about #{course.subject}.
+
+    Content from: #{source.title}#{chunk_note}
+    ---
+    #{chunk}
+    ---
+
+    Return a JSON array of questions found. Each question must have:
+    - "content": the question text
+    - "answer": the correct answer (use letter for MCQ, "True"/"False" for T/F)
+    - "question_type": "multiple_choice", "true_false", or "short_answer"
+    - "options": for MCQ only, {"A": "...", "B": "...", "C": "...", "D": "..."}
+    - "difficulty": "easy", "medium", or "hard"
+
+    If no questions are found, return an empty array [].
+    Return ONLY the JSON array.
+    """
+
+    case Agents.chat("question_extract", prompt, %{
+           metadata: %{course_id: course.id, source_url: source.url, chunk: idx}
+         }) do
+      {:ok, response} ->
+        parse_ai_questions(response, source)
+
+      {:error, reason} ->
+        Logger.warning("[Scraper] AI extraction failed (chunk #{idx}): #{inspect(reason)}")
+        []
+    end
+  end
+
+  # Splits text into overlapping chunks so questions straddling boundaries
+  # aren't lost. Returns [{chunk, index}, ...].
+  defp chunk_text(text, chunk_size, overlap) when is_binary(text) do
+    trimmed = String.trim(text)
+    length = String.length(trimmed)
+
+    cond do
+      length < 100 ->
+        []
+
+      length <= chunk_size ->
+        [{trimmed, 0}]
+
+      true ->
+        step = max(chunk_size - overlap, 1)
+
+        0..div(length - 1, step)
+        |> Enum.map(fn i ->
+          start = i * step
+          {String.slice(trimmed, start, chunk_size), i}
+        end)
+        |> Enum.reject(fn {chunk, _} -> String.length(chunk) < 200 end)
     end
   end
 
@@ -311,13 +503,19 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       # Use the discovered textbook names to generate better questions
       textbook_names = Enum.map(textbook_sources, & &1.title) |> Enum.join(", ")
 
-      Logger.info("[Scraper] Generating questions from known textbooks: #{textbook_names}")
+      # Scale per-chapter count by source richness — more textbooks discovered
+      # means more curricular coverage to draw from. Floor at 5, cap at 20.
+      per_chapter = textbook_sources |> length() |> Kernel.+(4) |> min(20) |> max(5)
+
+      Logger.info(
+        "[Scraper] Generating #{per_chapter} questions/chapter from known textbooks: #{textbook_names}"
+      )
 
       # Generate questions per chapter using textbook context
       Enum.each(course.chapters, fn chapter ->
         FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course.id,
           chapter_id: chapter.id,
-          count: 5,
+          count: per_chapter,
           mode: "from_curriculum"
         )
       end)

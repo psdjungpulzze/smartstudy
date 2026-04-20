@@ -17,6 +17,12 @@ defmodule FunSheep.Content.OcrPage do
     field :bounding_boxes, :map
     field :images, :map
 
+    field :status, Ecto.Enum,
+      values: [:pending, :processing, :completed, :failed],
+      default: :completed
+
+    field :error, :string
+
     belongs_to :material, FunSheep.Content.UploadedMaterial
 
     timestamps(type: :utc_datetime)
@@ -25,7 +31,15 @@ defmodule FunSheep.Content.OcrPage do
   @doc false
   def changeset(ocr_page, attrs) do
     ocr_page
-    |> cast(attrs, [:page_number, :extracted_text, :bounding_boxes, :images, :material_id])
+    |> cast(attrs, [
+      :page_number,
+      :extracted_text,
+      :bounding_boxes,
+      :images,
+      :status,
+      :error,
+      :material_id
+    ])
     |> validate_required([:page_number, :material_id])
     |> validate_number(:page_number, greater_than: 0)
     |> foreign_key_constraint(:material_id)

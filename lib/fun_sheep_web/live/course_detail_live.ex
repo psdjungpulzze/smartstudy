@@ -91,19 +91,23 @@ defmodule FunSheepWeb.CourseDetailLive do
   @impl true
   def handle_info({:processing_update, %{sub_step: sub_step} = update}, socket)
       when is_binary(sub_step) do
-    # Sub-step updates are lightweight — just update the text, don't reload everything
     socket = assign(socket, processing_sub_step: sub_step)
 
-    # Only do a full reload if there's also a status/step change
+    # Refresh sources list on every sub_step so scraping progress shows live
+    # (Found → Loading… → Done). This is a single cheap query.
+    socket =
+      assign(socket,
+        discovered_sources: Content.list_discovered_sources(socket.assigns.course.id)
+      )
+
+    # Full reload (course + questions) only when a major step changes
     socket =
       if Map.has_key?(update, :status) or Map.has_key?(update, :step) do
         course = Courses.get_course_with_chapters!(socket.assigns.course.id)
-        discovered_sources = Content.list_discovered_sources(course.id)
         question_count = Questions.count_questions_by_course(course.id)
 
         assign(socket,
           course: course,
-          discovered_sources: discovered_sources,
           question_count: question_count
         )
       else
@@ -292,15 +296,51 @@ defmodule FunSheepWeb.CourseDetailLive do
      |> put_flash(:info, "Retrying #{reset_count} failed sources...")}
   end
 
-  def handle_event("process_remaining_sources", _params, socket) do
+  def handle_event("retry_failed_materials", _params, socket) do
     course_id = socket.assigns.course.id
+    {count, material_ids} = Content.reset_failed_materials(course_id)
 
-    # Re-run the scraper — it picks up sources with status "discovered"
-    FunSheep.Workers.WebQuestionScraperWorker.enqueue(course_id)
+    for material_id <- material_ids do
+      %{material_id: material_id, course_id: course_id}
+      |> FunSheep.Workers.OCRMaterialWorker.new()
+      |> Oban.insert()
+    end
+
+    user_role_id = socket.assigns.current_user["user_role_id"]
+
+    materials =
+      Content.list_materials_by_course_for_user(course_id, user_role_id) ++
+        Content.list_unlinked_materials_for_user(user_role_id)
 
     {:noreply,
      socket
-     |> put_flash(:info, "Processing remaining sources...")}
+     |> assign(uploaded_materials: materials)
+     |> put_flash(:info, "Retrying #{count} failed material(s)...")}
+  end
+
+  def handle_event("process_remaining_sources", _params, socket) do
+    course_id = socket.assigns.course.id
+    pending = Content.list_scrapable_sources(course_id) |> length()
+
+    flash_msg =
+      case FunSheep.Workers.WebQuestionScraperWorker.enqueue(course_id) do
+        {:ok, %Oban.Job{conflict?: true}} ->
+          "Already processing #{pending} sources — progress will appear as each finishes."
+
+        {:ok, _job} ->
+          "Processing #{pending} sources — this may take a few minutes."
+
+        {:error, reason} ->
+          "Couldn't start processing: #{inspect(reason)}"
+      end
+
+    # Refresh the sources list so the user sees up-to-date statuses
+    discovered_sources = Content.list_discovered_sources(course_id)
+
+    {:noreply,
+     socket
+     |> assign(discovered_sources: discovered_sources)
+     |> put_flash(:info, flash_msg)}
   end
 
   @impl true
@@ -1010,9 +1050,19 @@ defmodule FunSheepWeb.CourseDetailLive do
 
       <%!-- Uploaded files list --%>
       <div :if={@materials != []} class="mb-4">
-        <h3 class="text-sm font-medium text-[#1C1C1E] mb-2">
-          Uploaded Materials ({length(@materials)})
-        </h3>
+        <div class="flex items-center justify-between mb-2 gap-2">
+          <h3 class="text-sm font-medium text-[#1C1C1E]">
+            Uploaded Materials ({length(@materials)})
+          </h3>
+          <button
+            :if={Enum.any?(@materials, &(&1.ocr_status in [:failed, :partial]))}
+            phx-click="retry_failed_materials"
+            class="inline-flex items-center gap-1.5 text-xs font-medium text-[#FF3B30] hover:text-red-700 px-3 py-1.5 rounded-full border border-red-200 hover:bg-red-50 transition-colors shrink-0"
+          >
+            <.icon name="hero-arrow-path" class="w-3.5 h-3.5" />
+            Retry {Enum.count(@materials, &(&1.ocr_status in [:failed, :partial]))} failed
+          </button>
+        </div>
         <div class="max-h-48 overflow-y-auto space-y-1.5">
           <div
             :for={mat <- @materials}
@@ -1046,10 +1096,17 @@ defmodule FunSheepWeb.CourseDetailLive do
                   </option>
                 </select>
               </form>
-              <span class={[
-                "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                ocr_status_class(mat.ocr_status)
-              ]}>
+              <span
+                class={[
+                  "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                  ocr_status_class(mat.ocr_status),
+                  mat.ocr_status in [:failed, :partial] && mat.ocr_error && "cursor-help"
+                ]}
+                title={
+                  if mat.ocr_status in [:failed, :partial],
+                    do: mat.ocr_error || "Unknown error"
+                }
+              >
                 {ocr_status_label(mat.ocr_status)}
               </span>
               <button
@@ -1141,12 +1198,14 @@ defmodule FunSheepWeb.CourseDetailLive do
   defp ocr_status_class(:pending), do: "bg-[#F5F5F7] text-[#8E8E93]"
   defp ocr_status_class(:processing), do: "bg-blue-50 text-[#007AFF]"
   defp ocr_status_class(:completed), do: "bg-[#E8F8EB] text-[#4CD964]"
+  defp ocr_status_class(:partial), do: "bg-amber-50 text-amber-700"
   defp ocr_status_class(:failed), do: "bg-red-50 text-[#FF3B30]"
   defp ocr_status_class(_), do: "bg-[#F5F5F7] text-[#8E8E93]"
 
   defp ocr_status_label(:pending), do: "Pending"
   defp ocr_status_label(:processing), do: "Processing..."
   defp ocr_status_label(:completed), do: "Done"
+  defp ocr_status_label(:partial), do: "Partial"
   defp ocr_status_label(:failed), do: "Failed"
   defp ocr_status_label(_), do: "Unknown"
 

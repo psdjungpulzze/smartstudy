@@ -161,6 +161,25 @@ defmodule FunSheep.Content do
     end
   end
 
+  @doc """
+  Resets failed AND partially-failed uploaded materials in a course back to
+  `:pending` so OCR can be retried. Returns `{count, material_ids}` — the
+  count and IDs of materials that were reset. Fully-completed materials are
+  left alone so we don't redo work that already succeeded.
+  """
+  def reset_failed_materials(course_id) do
+    query =
+      from(m in UploadedMaterial,
+        where: m.course_id == ^course_id and m.ocr_status in [:failed, :partial],
+        select: m.id
+      )
+
+    {count, ids} =
+      Repo.update_all(query, set: [ocr_status: :pending, ocr_error: nil])
+
+    {count, ids}
+  end
+
   def get_uploaded_material!(id), do: Repo.get!(UploadedMaterial, id)
 
   def create_uploaded_material(attrs \\ %{}) do
@@ -210,6 +229,19 @@ defmodule FunSheep.Content do
     ocr_page
     |> OcrPage.changeset(attrs)
     |> Repo.update()
+  end
+
+  @doc """
+  Deletes all OCR pages for a material. Used by the OCR pipeline before a
+  reprocess so we don't collide with the `(material_id, page_number)` unique
+  constraint when retrying.
+  """
+  def delete_ocr_pages_for_material(material_id) do
+    {count, _} =
+      from(p in OcrPage, where: p.material_id == ^material_id)
+      |> Repo.delete_all()
+
+    count
   end
 
   def delete_ocr_page(%OcrPage{} = ocr_page) do

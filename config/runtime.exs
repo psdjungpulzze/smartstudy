@@ -40,9 +40,23 @@ if config_env() in [:dev, :test] do
   end
 end
 
-# Google Vision API key (from env or .env.credentials)
-if api_key = System.get_env("GOOGLE_VISION_API_KEY") do
-  config :fun_sheep, :google_vision_api_key, api_key
+# Google Vision API key (from env or .env.credentials).
+# Required in prod — without it, every OCR call returns HTTP 400 and uploaded
+# materials silently end up in `:failed` status. Fail fast at boot rather than
+# discovering this after a thousand failed jobs.
+google_vision_api_key = System.get_env("GOOGLE_VISION_API_KEY")
+
+if config_env() == :prod and (is_nil(google_vision_api_key) or google_vision_api_key == "") do
+  raise """
+  environment variable GOOGLE_VISION_API_KEY is missing.
+  OCR cannot run without it — every uploaded material would fail.
+  Set it in .env.prod and redeploy via scripts/deploy/deploy-prod.sh, which
+  pushes it to Secret Manager as `google-vision-api-key`.
+  """
+end
+
+if google_vision_api_key do
+  config :fun_sheep, :google_vision_api_key, google_vision_api_key
 end
 
 if System.get_env("PHX_SERVER") do
