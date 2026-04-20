@@ -33,18 +33,35 @@ fun_sheep-*.tar
 
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log
+/node_modules/
 /assets/node_modules/
 /test/e2e/node_modules/
 
 # Playwright
 /test/e2e/test-results/
 /test/e2e/playwright-report/
+/test/e2e/screenshots/
+/test-results/
+/screenshots/
 
-# File uploads
+# Runtime logs
+/log/
+/logs/
+
+# Releases (built artifacts)
+/rel/
+
+# File uploads (local dev + prod uses GCS)
 /priv/uploads/
+/priv/static/uploads/
+
+# Claude Code scheduled task lock
+/.claude/scheduled_tasks.lock
 
 # Environment
 .env
 .env.local
 .env.production
+.env.prod
+.env.credentials
 
