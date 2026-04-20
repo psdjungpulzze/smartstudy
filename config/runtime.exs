@@ -130,7 +130,7 @@ if config_env() == :prod do
   # Lifeline auto-recovers jobs orphaned by any unexpected container death.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      [default: 10, ocr: 3, ai: 2]
+      [default: 10, ocr: 3, ai: 2, ingest: 1]
     else
       false
     end

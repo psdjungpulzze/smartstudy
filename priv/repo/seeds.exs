@@ -718,4 +718,8 @@ end
 
 IO.puts("Seeded chapters")
 
+# ── ISO 3166-2 subdivision codes (required by ingestion pipelines) ────────────
+
+Code.eval_file(Path.join(__DIR__, "seeds_geo_iso.exs"))
+
 IO.puts("\nSeed data loaded successfully!")

@@ -70,6 +70,8 @@ defmodule FunSheep.MixProject do
       {:bandit, "~> 1.5"},
       # Background jobs
       {:oban, "~> 2.17"},
+      # Streaming CSV parser for ingestion pipelines (NCES, IPEDS, NEIS, GIAS, ACARA)
+      {:nimble_csv, "~> 1.2"},
       # JWT verification (for Interactor auth)
       {:jose, "~> 1.11"},
       # GCP auth (service account / Workload Identity) for Cloud Storage

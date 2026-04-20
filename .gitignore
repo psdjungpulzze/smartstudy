@@ -55,6 +55,9 @@ npm-debug.log
 /priv/uploads/
 /priv/static/uploads/
 
+# Ingestion cache (NCES, IPEDS, NEIS, GIAS, ACARA raw downloads)
+/priv/cache/
+
 # Claude Code scheduled task lock
 /.claude/scheduled_tasks.lock
 

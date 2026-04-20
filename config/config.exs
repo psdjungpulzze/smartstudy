@@ -66,7 +66,12 @@ config :fun_sheep, Oban,
   queues: [
     default: 10,
     ocr: 3,
-    ai: 2
+    ai: 2,
+    # Ingestion of large authoritative school/district/university registries
+    # (NCES CCD ~130K rows, IPEDS ~6K, NEIS ~12K, GIAS ~32K, ROR ~100K).
+    # Low concurrency: one job at a time keeps the DB write throughput
+    # sane and avoids hammering upstream servers.
+    ingest: 1
   ]
 
 # Interactor integration (billing, auth, agents)
