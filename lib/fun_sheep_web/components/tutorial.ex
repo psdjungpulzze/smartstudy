@@ -44,16 +44,18 @@ defmodule FunSheepWeb.Components.Tutorial do
     ~H"""
     <div
       id="tutorial-overlay"
-      class="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-      phx-click="dismiss_tutorial"
+      class="fixed inset-0 z-[60] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="tutorial-title"
     >
       <div
-        class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4"
-        onclick="event.stopPropagation()"
+        class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        phx-click="dismiss_tutorial"
+        aria-hidden="true"
       >
+      </div>
+      <div class="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4">
         <div class="flex items-start justify-between gap-3">
           <div>
             <h2 id="tutorial-title" class="text-xl font-bold text-[#1C1C1E]">
