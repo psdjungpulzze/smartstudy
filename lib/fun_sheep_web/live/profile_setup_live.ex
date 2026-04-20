@@ -906,25 +906,42 @@ defmodule FunSheepWeb.ProfileSetupLive do
 
   defp save_hobbies(user_role_id, selected_ids, interests) do
     existing = Learning.list_hobbies_for_user(user_role_id)
+    existing_by_hobby = Map.new(existing, &{&1.hobby_id, &1})
 
+    # Delete deselected hobbies.
     Enum.each(existing, fn sh ->
       unless MapSet.member?(selected_ids, sh.hobby_id) do
         Learning.delete_student_hobby(sh)
       end
     end)
 
-    existing_hobby_ids = MapSet.new(existing, & &1.hobby_id)
+    # For each selected hobby: create if new, update if the interest text changed.
+    Enum.reduce_while(selected_ids, :ok, fn hobby_id, :ok ->
+      new_interest_text = Map.get(interests, hobby_id, "")
+      desired = %{"text" => new_interest_text}
 
-    selected_ids
-    |> Enum.reject(&MapSet.member?(existing_hobby_ids, &1))
-    |> Enum.reduce_while(:ok, fn hobby_id, :ok ->
-      case Learning.create_student_hobby(%{
-             user_role_id: user_role_id,
-             hobby_id: hobby_id,
-             specific_interests: %{"text" => Map.get(interests, hobby_id, "")}
-           }) do
-        {:ok, _} -> {:cont, :ok}
-        {:error, changeset} -> {:halt, {:error, changeset}}
+      case Map.get(existing_by_hobby, hobby_id) do
+        nil ->
+          case Learning.create_student_hobby(%{
+                 user_role_id: user_role_id,
+                 hobby_id: hobby_id,
+                 specific_interests: desired
+               }) do
+            {:ok, _} -> {:cont, :ok}
+            {:error, changeset} -> {:halt, {:error, changeset}}
+          end
+
+        %{specific_interests: stored} = sh ->
+          stored_text = (stored || %{}) |> Map.get("text", "")
+
+          if stored_text == new_interest_text do
+            {:cont, :ok}
+          else
+            case Learning.update_student_hobby(sh, %{specific_interests: desired}) do
+              {:ok, _} -> {:cont, :ok}
+              {:error, changeset} -> {:halt, {:error, changeset}}
+            end
+          end
       end
     end)
   end

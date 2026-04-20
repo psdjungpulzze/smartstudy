@@ -253,6 +253,42 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
       assert reloaded.ethnicity == "Korean"
     end
 
+    test "updating interest text on an already-selected hobby persists", %{conn: conn} do
+      conn = auth_conn(conn)
+      user_role_id = get_session(conn, :dev_user)["user_role_id"]
+
+      {:ok, hobby} = FunSheep.Learning.create_hobby(%{name: "KPOP", category: "Music"})
+
+      # Previously saved: KPOP with no specific interest text.
+      FunSheep.Accounts.update_user_role(
+        FunSheep.Accounts.get_user_role!(user_role_id),
+        %{grade: "11"}
+      )
+
+      {:ok, _} =
+        FunSheep.Learning.create_student_hobby(%{
+          user_role_id: user_role_id,
+          hobby_id: hobby.id,
+          specific_interests: %{"text" => ""}
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/profile/setup")
+      render_click(view, "edit_profile")
+      render_click(view, "next_step")
+
+      # Type the bands into the KPOP interest input.
+      render_change(view, "update_hobby_interest", %{
+        "hobby-id" => hobby.id,
+        "value" => "Enhypen, TXT, P1harmony, Stray Kids, ATEEZ"
+      })
+
+      render_click(view, "complete_hobbies")
+
+      [reloaded] = FunSheep.Learning.list_hobbies_for_user(user_role_id)
+      assert reloaded.specific_interests["text"] ==
+               "Enhypen, TXT, P1harmony, Stray Kids, ATEEZ"
+    end
+
     test "hobbies persist and profile gaps clear after Complete Setup", %{conn: conn} do
       {:ok, country} = Geo.create_country(%{name: "United States", code: "US"})
 
