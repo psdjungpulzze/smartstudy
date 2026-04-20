@@ -141,4 +141,62 @@ defmodule FunSheep.Geo do
   def change_school(%School{} = school, attrs \\ %{}) do
     School.changeset(school, attrs)
   end
+
+  @doc """
+  Search schools for the profile-setup autocomplete.
+
+  Filters by optional `state_id`/`country_id`, case-insensitive `query`
+  against `name` and `native_name`, and optional `level`/`type`. Results
+  are capped at `limit` (default 20) and ordered by student_count desc,
+  then name — so large/well-known schools surface first.
+
+  Used to replace cascading district + school dropdowns when the DB
+  holds 100K+ ingested schools.
+  """
+  @spec search_schools(map() | keyword()) :: [School.t()]
+  def search_schools(opts) do
+    opts = Enum.into(opts, %{})
+    limit = Map.get(opts, :limit, 20)
+    query = Map.get(opts, :query) |> normalize_query()
+
+    base = from(s in School, limit: ^limit)
+
+    base
+    |> maybe_filter(:state_id, Map.get(opts, :state_id))
+    |> maybe_filter(:country_id, Map.get(opts, :country_id))
+    |> maybe_filter(:level, Map.get(opts, :level))
+    |> maybe_filter(:type, Map.get(opts, :type))
+    |> maybe_filter_name(query)
+    |> order_by([s], [fragment("COALESCE(?, 0) DESC", s.student_count), s.name])
+    |> Repo.all()
+  end
+
+  defp normalize_query(nil), do: nil
+  defp normalize_query(""), do: nil
+
+  defp normalize_query(q) when is_binary(q) do
+    case String.trim(q) do
+      "" -> nil
+      t -> t
+    end
+  end
+
+  defp maybe_filter(query, _k, nil), do: query
+  defp maybe_filter(query, _k, ""), do: query
+  defp maybe_filter(query, :state_id, v), do: where(query, [s], s.state_id == ^v)
+  defp maybe_filter(query, :country_id, v), do: where(query, [s], s.country_id == ^v)
+  defp maybe_filter(query, :level, v), do: where(query, [s], s.level == ^v)
+  defp maybe_filter(query, :type, v), do: where(query, [s], s.type == ^v)
+
+  defp maybe_filter_name(query, nil), do: query
+
+  defp maybe_filter_name(query, q) do
+    pattern = "%" <> q <> "%"
+
+    where(
+      query,
+      [s],
+      ilike(s.name, ^pattern) or ilike(coalesce(s.native_name, ^""), ^pattern)
+    )
+  end
 end

@@ -12,6 +12,13 @@ alias FunSheep.Geo.{Country, State}
 import Ecto.Query
 
 defmodule GeoIsoSeeds do
+  # Resolve the target state by, in order of preference:
+  #   1. iso_code exact match (post-migration rows)
+  #   2. name exact match      (clean seeds)
+  #   3. name ILIKE "name%"    (legacy rows like "Seoul (서울)")
+  #   4. native_name exact     (legacy rows that stored native-only)
+  # If more than one candidate is found for (3)/(4), keep the one with the
+  # most children and re-point others to avoid duplicate dropdown entries.
   def upsert!(repo, country_id, entries) do
     for %{iso: iso, name: name} = entry <- entries do
       attrs = %{
@@ -22,23 +29,19 @@ defmodule GeoIsoSeeds do
         subdivision_type: Map.get(entry, :type)
       }
 
-      case repo.one(from s in State, where: s.iso_code == ^iso, limit: 1) do
-        nil ->
-          case repo.one(
-                 from s in State,
-                   where: s.country_id == ^country_id and s.name == ^name,
-                   limit: 1
-               ) do
-            nil ->
-              %State{}
-              |> State.changeset(attrs)
-              |> repo.insert!()
+      native = Map.get(entry, :native)
 
-            existing ->
-              existing
-              |> State.changeset(attrs)
-              |> repo.update!()
-          end
+      canonical =
+        find_by_iso(repo, iso) ||
+          find_by_name(repo, country_id, name) ||
+          find_by_name_prefix(repo, country_id, name) ||
+          find_by_native(repo, country_id, native)
+
+      case canonical do
+        nil ->
+          %State{}
+          |> State.changeset(attrs)
+          |> repo.insert!()
 
         existing ->
           existing
@@ -48,6 +51,45 @@ defmodule GeoIsoSeeds do
     end
 
     length(entries)
+  end
+
+  defp find_by_iso(repo, iso) do
+    repo.one(from s in State, where: s.iso_code == ^iso, limit: 1)
+  end
+
+  defp find_by_name(repo, country_id, name) do
+    repo.one(
+      from s in State,
+        where: s.country_id == ^country_id and s.name == ^name,
+        limit: 1
+    )
+  end
+
+  defp find_by_name_prefix(repo, country_id, name) do
+    pattern = name <> "%"
+
+    repo.one(
+      from s in State,
+        where:
+          s.country_id == ^country_id and
+            ilike(s.name, ^pattern) and
+            is_nil(s.iso_code),
+        order_by: s.name,
+        limit: 1
+    )
+  end
+
+  defp find_by_native(_repo, _country_id, nil), do: nil
+
+  defp find_by_native(repo, country_id, native) do
+    repo.one(
+      from s in State,
+        where:
+          s.country_id == ^country_id and
+            s.native_name == ^native and
+            is_nil(s.iso_code),
+        limit: 1
+    )
   end
 end
 

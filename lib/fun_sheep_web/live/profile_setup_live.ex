@@ -51,14 +51,17 @@ defmodule FunSheepWeb.ProfileSetupLive do
         # Step 1 fields
         countries: countries,
         states: existing.states,
-        districts: existing.districts,
-        schools: existing.schools,
         grade_options: @grade_options,
         gender_options: @gender_options,
         selected_country_id: existing.country_id,
         selected_state_id: existing.state_id,
-        selected_district_id: existing.district_id,
         selected_school_id: existing.school_id,
+        # Keep a lightweight reference to the already-chosen school so the
+        # autocomplete can render its name without an extra query.
+        selected_school: existing.summary_school,
+        # School autocomplete state — query + top-N results live here.
+        school_query: "",
+        school_results: [],
         selected_grade: existing.grade,
         selected_gender: existing.gender,
         ethnicity: existing.ethnicity || "",
@@ -85,10 +88,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
       school_id: nil,
       country_id: nil,
       state_id: nil,
-      district_id: nil,
       states: [],
-      districts: [],
-      schools: [],
       hobby_ids: MapSet.new(),
       hobby_interests: %{},
       summary_hobbies: [],
@@ -99,7 +99,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
 
     case interactor_id && Accounts.get_user_role_by_interactor_id(interactor_id) do
       %Accounts.UserRole{} = user_role ->
-        location = rebuild_location_cascades(user_role.school_id)
+        location = rebuild_location_from_school(user_role.school_id)
 
         student_hobbies = Learning.list_hobbies_for_user(user_role.id)
 
@@ -123,8 +123,6 @@ defmodule FunSheepWeb.ProfileSetupLive do
             }
           end)
 
-        summary_school = user_role.school_id && Geo.get_school(user_role.school_id)
-
         Map.merge(empty, %{
           grade: user_role.grade,
           gender: user_role.gender,
@@ -132,14 +130,11 @@ defmodule FunSheepWeb.ProfileSetupLive do
           school_id: user_role.school_id,
           country_id: location.country_id,
           state_id: location.state_id,
-          district_id: location.district_id,
           states: location.states,
-          districts: location.districts,
-          schools: location.schools,
           hobby_ids: hobby_ids,
           hobby_interests: hobby_interests,
           summary_hobbies: summary_hobbies,
-          summary_school: summary_school
+          summary_school: location.school
         })
 
       _ ->
@@ -147,32 +142,48 @@ defmodule FunSheepWeb.ProfileSetupLive do
     end
   end
 
-  defp rebuild_location_cascades(nil) do
-    %{country_id: nil, state_id: nil, district_id: nil, states: [], districts: [], schools: []}
+  # Resolve (country_id, state_id, states-for-country, school) from a saved
+  # school_id. Schools ingested from NCES carry state_id/country_id directly
+  # (denormalized), while legacy seed schools only have district_id — fall
+  # back to the district→state walk for those.
+  defp rebuild_location_from_school(nil) do
+    %{country_id: nil, state_id: nil, states: [], school: nil}
   end
 
-  defp rebuild_location_cascades(school_id) do
-    with %FunSheep.Geo.School{district_id: district_id} <- Geo.get_school(school_id),
-         %FunSheep.Geo.District{state_id: state_id} = district <- Geo.get_district(district_id),
-         %FunSheep.Geo.State{country_id: country_id} <- Geo.get_state(state_id) do
-      %{
-        country_id: country_id,
-        state_id: state_id,
-        district_id: district_id,
-        states: Geo.list_states_by_country(country_id),
-        districts: Geo.list_districts_by_state(state_id),
-        schools: Geo.list_schools_by_district(district.id)
-      }
-    else
+  defp rebuild_location_from_school(school_id) do
+    case Geo.get_school(school_id) do
+      %FunSheep.Geo.School{} = school ->
+        {state_id, country_id} = resolve_state_and_country(school)
+
+        states =
+          if country_id, do: Geo.list_states_by_country(country_id), else: []
+
+        %{country_id: country_id, state_id: state_id, states: states, school: school}
+
       _ ->
-        %{
-          country_id: nil,
-          state_id: nil,
-          district_id: nil,
-          states: [],
-          districts: [],
-          schools: []
-        }
+        %{country_id: nil, state_id: nil, states: [], school: nil}
+    end
+  end
+
+  defp resolve_state_and_country(%FunSheep.Geo.School{} = s) do
+    cond do
+      s.state_id && s.country_id ->
+        {s.state_id, s.country_id}
+
+      s.district_id ->
+        case Geo.get_district(s.district_id) do
+          %FunSheep.Geo.District{state_id: state_id} ->
+            case state_id && Geo.get_state(state_id) do
+              %FunSheep.Geo.State{country_id: country_id} -> {state_id, country_id}
+              _ -> {state_id, nil}
+            end
+
+          _ ->
+            {nil, nil}
+        end
+
+      true ->
+        {s.state_id, s.country_id}
     end
   end
 
@@ -204,18 +215,20 @@ defmodule FunSheepWeb.ProfileSetupLive do
      assign(socket,
        selected_country_id: country_id,
        states: states,
-       districts: [],
-       schools: [],
        selected_state_id: nil,
-       selected_district_id: nil,
-       selected_school_id: nil
+       selected_school_id: nil,
+       selected_school: nil,
+       school_query: "",
+       school_results: []
      )}
   end
 
   def handle_event("select_state", %{"state_id" => state_id}, socket) do
-    districts =
+    # Pre-populate the top 20 schools for the chosen state so the user sees
+    # options immediately without having to type.
+    results =
       if state_id != "" do
-        Geo.list_districts_by_state(state_id)
+        Geo.search_schools(state_id: state_id, limit: 20)
       else
         []
       end
@@ -223,31 +236,65 @@ defmodule FunSheepWeb.ProfileSetupLive do
     {:noreply,
      assign(socket,
        selected_state_id: state_id,
-       districts: districts,
-       schools: [],
-       selected_district_id: nil,
-       selected_school_id: nil
+       selected_school_id: nil,
+       selected_school: nil,
+       school_query: "",
+       school_results: results
      )}
   end
 
-  def handle_event("select_district", %{"district_id" => district_id}, socket) do
-    schools =
-      if district_id != "" do
-        Geo.list_schools_by_district(district_id)
+  # phx-keyup sends `%{"key" => key, "value" => current_input_value}`.
+  # phx-change on a wrapping form would send `%{"school_query" => ...}`.
+  # Accept both shapes so the autocomplete works regardless of how it's wired.
+  def handle_event("search_schools", params, socket) do
+    query = params["value"] || params["school_query"] || params["query"] || ""
+    state_id = socket.assigns.selected_state_id
+    country_id = socket.assigns.selected_country_id
+
+    results =
+      cond do
+        state_id not in [nil, ""] ->
+          Geo.search_schools(state_id: state_id, query: query, limit: 20)
+
+        country_id not in [nil, ""] ->
+          Geo.search_schools(country_id: country_id, query: query, limit: 20)
+
+        true ->
+          []
+      end
+
+    {:noreply, assign(socket, school_query: query, school_results: results)}
+  end
+
+  def handle_event("select_school", %{"school_id" => school_id}, socket) do
+    school = school_id && school_id != "" && Geo.get_school(school_id)
+
+    {:noreply,
+     assign(socket,
+       selected_school_id: school_id,
+       selected_school: school || nil,
+       # Collapse the result list once a school is picked.
+       school_results: []
+     )}
+  end
+
+  def handle_event("clear_school", _params, socket) do
+    state_id = socket.assigns.selected_state_id
+
+    results =
+      if state_id not in [nil, ""] do
+        Geo.search_schools(state_id: state_id, limit: 20)
       else
         []
       end
 
     {:noreply,
      assign(socket,
-       selected_district_id: district_id,
-       schools: schools,
-       selected_school_id: nil
+       selected_school_id: nil,
+       selected_school: nil,
+       school_query: "",
+       school_results: results
      )}
-  end
-
-  def handle_event("select_school", %{"school_id" => school_id}, socket) do
-    {:noreply, assign(socket, selected_school_id: school_id)}
   end
 
   def handle_event("update_field", %{"field" => field, "value" => value}, socket) do
@@ -318,11 +365,11 @@ defmodule FunSheepWeb.ProfileSetupLive do
            ethnicity: refreshed.ethnicity || "",
            selected_country_id: refreshed.country_id,
            selected_state_id: refreshed.state_id,
-           selected_district_id: refreshed.district_id,
            selected_school_id: refreshed.school_id,
+           selected_school: refreshed.summary_school,
            states: refreshed.states,
-           districts: refreshed.districts,
-           schools: refreshed.schools,
+           school_query: "",
+           school_results: [],
            selected_hobby_ids: refreshed.hobby_ids,
            hobby_interests: refreshed.hobby_interests
          )}
@@ -360,11 +407,11 @@ defmodule FunSheepWeb.ProfileSetupLive do
        ethnicity: refreshed.ethnicity || "",
        selected_country_id: refreshed.country_id,
        selected_state_id: refreshed.state_id,
-       selected_district_id: refreshed.district_id,
        selected_school_id: refreshed.school_id,
+       selected_school: refreshed.summary_school,
        states: refreshed.states,
-       districts: refreshed.districts,
-       schools: refreshed.schools,
+       school_query: "",
+       school_results: [],
        selected_hobby_ids: refreshed.hobby_ids,
        hobby_interests: refreshed.hobby_interests
      )}
@@ -447,14 +494,14 @@ defmodule FunSheepWeb.ProfileSetupLive do
                   current_user={@current_user}
                   countries={@countries}
                   states={@states}
-                  districts={@districts}
-                  schools={@schools}
                   grade_options={@grade_options}
                   gender_options={@gender_options}
                   selected_country_id={@selected_country_id}
                   selected_state_id={@selected_state_id}
-                  selected_district_id={@selected_district_id}
                   selected_school_id={@selected_school_id}
+                  selected_school={@selected_school}
+                  school_query={@school_query}
+                  school_results={@school_results}
                   selected_grade={@selected_grade}
                   selected_gender={@selected_gender}
                   ethnicity={@ethnicity}
@@ -604,14 +651,14 @@ defmodule FunSheepWeb.ProfileSetupLive do
   attr :current_user, :map, required: true
   attr :countries, :list, required: true
   attr :states, :list, required: true
-  attr :districts, :list, required: true
-  attr :schools, :list, required: true
   attr :grade_options, :list, required: true
   attr :gender_options, :list, required: true
   attr :selected_country_id, :string, default: nil
   attr :selected_state_id, :string, default: nil
-  attr :selected_district_id, :string, default: nil
   attr :selected_school_id, :string, default: nil
+  attr :selected_school, :any, default: nil
+  attr :school_query, :string, default: ""
+  attr :school_results, :list, default: []
   attr :selected_grade, :string, default: nil
   attr :selected_gender, :string, default: nil
   attr :ethnicity, :string, default: ""
@@ -672,44 +719,74 @@ defmodule FunSheepWeb.ProfileSetupLive do
           </select>
         </div>
 
-        <%!-- District --%>
-        <div>
-          <label class="block text-sm font-medium text-[#1C1C1E] mb-1">District</label>
-          <select
-            phx-change="select_district"
-            name="district_id"
-            disabled={@districts == []}
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
-          >
-            <option value="">Select a district</option>
-            <option
-              :for={district <- @districts}
-              value={district.id}
-              selected={district.id == @selected_district_id}
-            >
-              {district.name}
-            </option>
-          </select>
-        </div>
-
-        <%!-- School --%>
+        <%!-- School: typeahead over ingested 100K+ schools.
+             The state filter keeps result sets tractable. --%>
         <div>
           <label class="block text-sm font-medium text-[#1C1C1E] mb-1">School</label>
-          <select
-            phx-change="select_school"
-            name="school_id"
-            disabled={@schools == []}
-            class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-lg outline-none transition-colors appearance-none disabled:opacity-50"
-          >
-            <option value="">Select a school</option>
-            <option
-              :for={school <- @schools}
-              value={school.id}
-              selected={school.id == @selected_school_id}
-            >
-              {school.name}
-            </option>
-          </select>
+
+          <%= if @selected_school do %>
+            <div class="flex items-center justify-between gap-3 px-4 py-3 bg-[#E8F8EB] border border-[#4CD964]/30 rounded-full">
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-[#1C1C1E] truncate">{@selected_school.name}</div>
+                <div :if={@selected_school.city} class="text-xs text-[#8E8E93] truncate">
+                  {@selected_school.city}{if @selected_school.type, do: " · #{@selected_school.type}"}
+                </div>
+              </div>
+              <button
+                type="button"
+                phx-click="clear_school"
+                class="shrink-0 text-sm font-medium text-[#4CD964] hover:text-[#3DBF55] transition-colors"
+                aria-label="Clear school"
+              >
+                Change
+              </button>
+            </div>
+            <input type="hidden" name="school_id" value={@selected_school_id} />
+          <% else %>
+            <div class="relative">
+              <input
+                type="text"
+                name="school_query"
+                value={@school_query}
+                placeholder={
+                  if @selected_state_id in [nil, ""],
+                    do: "Select a state first",
+                    else: "Search by name (e.g. Saratoga, Palo Alto)"
+                }
+                disabled={@selected_state_id in [nil, ""]}
+                phx-keyup="search_schools"
+                phx-debounce="250"
+                autocomplete="off"
+                class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-full outline-none transition-colors disabled:opacity-50"
+              />
+
+              <ul
+                :if={@school_results != []}
+                class="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-[#E5E5EA] rounded-xl shadow-lg"
+              >
+                <li
+                  :for={school <- @school_results}
+                  phx-click="select_school"
+                  phx-value-school_id={school.id}
+                  class="px-4 py-2 hover:bg-[#E8F8EB] cursor-pointer border-b border-[#F5F5F7] last:border-b-0"
+                >
+                  <div class="text-sm font-medium text-[#1C1C1E] truncate">{school.name}</div>
+                  <div class="text-xs text-[#8E8E93] truncate">
+                    {[school.city, school.level, school.type]
+                    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+                    |> Enum.join(" · ")}
+                  </div>
+                </li>
+              </ul>
+
+              <p
+                :if={@selected_state_id not in [nil, ""] and @school_query != "" and @school_results == []}
+                class="text-xs text-[#8E8E93] mt-1"
+              >
+                No schools match "{@school_query}" in this state.
+              </p>
+            </div>
+          <% end %>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
