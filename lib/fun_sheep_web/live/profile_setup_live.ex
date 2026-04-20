@@ -137,7 +137,14 @@ defmodule FunSheepWeb.ProfileSetupLive do
       }
     else
       _ ->
-        %{country_id: nil, state_id: nil, district_id: nil, states: [], districts: [], schools: []}
+        %{
+          country_id: nil,
+          state_id: nil,
+          district_id: nil,
+          states: [],
+          districts: [],
+          schools: []
+        }
     end
   end
 
@@ -299,7 +306,6 @@ defmodule FunSheepWeb.ProfileSetupLive do
     interests = Map.put(socket.assigns.hobby_interests, hobby_id, value)
     {:noreply, assign(socket, hobby_interests: interests)}
   end
-
 
   defp validate_step1(assigns) do
     errors = %{}

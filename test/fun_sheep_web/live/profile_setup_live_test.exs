@@ -6,11 +6,23 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
   alias FunSheep.Geo
 
   defp auth_conn(conn) do
+    interactor_id = "test_interactor_#{System.unique_integer([:positive])}"
+
+    {:ok, user_role} =
+      FunSheep.Accounts.create_user_role(%{
+        interactor_user_id: interactor_id,
+        role: "student",
+        email: "test@test.com",
+        display_name: "Test Student"
+      })
+
     conn
     |> init_test_session(%{
-      dev_user_id: "test_student",
+      dev_user_id: user_role.id,
       dev_user: %{
-        "id" => "test_student",
+        "id" => user_role.id,
+        "user_role_id" => user_role.id,
+        "interactor_user_id" => interactor_id,
         "role" => "student",
         "email" => "test@test.com",
         "display_name" => "Test Student"
@@ -159,36 +171,54 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
     end
   end
 
-  describe "step 3 - file upload" do
-    setup %{conn: conn} do
+  describe "persistence across full flow" do
+    test "demographics persist to user_role after Next", %{conn: conn} do
       {:ok, country} = Geo.create_country(%{name: "United States", code: "US"})
 
       conn = auth_conn(conn)
+      user_role_id = get_session(conn, :dev_user)["user_role_id"]
+
       {:ok, view, _html} = live(conn, ~p"/profile/setup")
 
-      # Navigate through steps
+      view
+      |> element("select[name=country_id]")
+      |> render_change(%{country_id: country.id})
+
+      render_click(view, "update_field", %{"field" => "selected_grade", "value" => "10"})
+      render_click(view, "update_field", %{"field" => "selected_gender", "value" => "Female"})
+      render_click(view, "update_field", %{"field" => "ethnicity", "value" => "Korean"})
+
+      render_click(view, "next_step")
+
+      reloaded = FunSheep.Accounts.get_user_role!(user_role_id)
+      assert reloaded.grade == "10"
+      assert reloaded.gender == "Female"
+      assert reloaded.ethnicity == "Korean"
+    end
+
+    test "hobbies persist and profile gaps clear after Complete Setup", %{conn: conn} do
+      {:ok, country} = Geo.create_country(%{name: "United States", code: "US"})
+
+      {:ok, hobby} =
+        FunSheep.Learning.create_hobby(%{name: "Coding", category: "Tech"})
+
+      conn = auth_conn(conn)
+      user = get_session(conn, :dev_user)
+
+      {:ok, view, _html} = live(conn, ~p"/profile/setup")
+
       view
       |> element("select[name=country_id]")
       |> render_change(%{country_id: country.id})
 
       render_click(view, "update_field", %{"field" => "selected_grade", "value" => "10"})
       render_click(view, "next_step")
-      render_click(view, "next_step")
+      render_click(view, "toggle_hobby", %{"hobby-id" => hobby.id})
+      render_click(view, "complete_hobbies")
 
-      %{view: view}
-    end
-
-    test "renders upload UI", %{view: view} do
-      html = render(view)
-      assert html =~ "Upload Materials"
-      assert html =~ "Drag and drop"
-      assert html =~ "Browse Files"
-      assert html =~ "Complete Setup"
-    end
-
-    test "shows back button on step 3", %{view: view} do
-      html = render(view)
-      assert html =~ "Back"
+      # The exact bug from production: compute_profile_gaps reported [:grade, :hobbies]
+      # even though the data was saved. Now it should be empty.
+      assert FunSheepWeb.LiveHelpers.compute_profile_gaps(user) == []
     end
   end
 end

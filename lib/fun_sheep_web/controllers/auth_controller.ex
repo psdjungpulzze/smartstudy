@@ -137,23 +137,60 @@ defmodule FunSheepWeb.AuthController do
       {:ok, %{"sub" => sub, "org" => org} = claims} ->
         profile = fetch_interactor_user(sub, org)
 
+        email = profile["email"] || claims["username"]
+        display_name = profile["username"] || claims["username"] || "User"
+        role = get_in(profile, ["metadata", "role"]) || "student"
+
+        # Resolve/create the local user_role row so "id" and "user_role_id"
+        # point to the local PK, matching the shape expected by downstream
+        # LiveViews (see dev_auth_controller for the reference shape).
+        user_role_id = ensure_local_user_role(sub, role, email, display_name)
+
         %{
-          "id" => sub,
+          "id" => user_role_id || sub,
+          "user_role_id" => user_role_id,
           "interactor_user_id" => sub,
-          "email" => profile["email"] || claims["username"],
-          "display_name" => profile["username"] || claims["username"] || "User",
-          "role" => get_in(profile, ["metadata", "role"]) || "student",
+          "email" => email,
+          "display_name" => display_name,
+          "role" => role,
           "org" => org
         }
 
       _ ->
         %{
           "id" => "unknown",
+          "user_role_id" => nil,
           "interactor_user_id" => "unknown",
           "email" => "user@example.com",
           "display_name" => "User",
           "role" => "student"
         }
+    end
+  end
+
+  defp ensure_local_user_role(interactor_user_id, role, email, display_name) do
+    # user_roles.role is an Ecto.Enum [:student, :parent, :teacher].
+    # Admin-ish roles (if any) fall back to student at the DB layer.
+    db_role = if role in ~w(student parent teacher), do: role, else: "student"
+
+    case FunSheep.Accounts.get_user_role_by_interactor_id(interactor_user_id) do
+      %FunSheep.Accounts.UserRole{id: id} ->
+        id
+
+      nil ->
+        case FunSheep.Accounts.create_user_role(%{
+               interactor_user_id: interactor_user_id,
+               role: db_role,
+               email: email || "unknown@example.com",
+               display_name: display_name
+             }) do
+          {:ok, %{id: id}} ->
+            id
+
+          {:error, changeset} ->
+            Logger.error("Failed to create user_role on login: #{inspect(changeset.errors)}")
+            nil
+        end
     end
   end
 

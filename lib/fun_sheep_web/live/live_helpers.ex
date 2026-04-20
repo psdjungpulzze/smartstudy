@@ -11,7 +11,8 @@ defmodule FunSheepWeb.LiveHelpers do
   def on_mount(:require_auth, _params, session, socket) do
     case get_user_from_session(session) do
       {:ok, user} ->
-        {streak_count, total_xp, due_reviews} = load_gamification_stats(user["id"])
+        user = normalize_user(user)
+        {streak_count, total_xp, due_reviews} = load_gamification_stats(user["user_role_id"])
 
         profile_gaps = compute_profile_gaps(user)
 
@@ -41,6 +42,8 @@ defmodule FunSheepWeb.LiveHelpers do
   def on_mount(:require_admin, _params, session, socket) do
     case get_user_from_session(session) do
       {:ok, %{"role" => "admin"} = user} ->
+        user = normalize_user(user)
+
         socket =
           socket
           |> assign(:current_user, user)
@@ -67,6 +70,29 @@ defmodule FunSheepWeb.LiveHelpers do
         {:halt, socket}
     end
   end
+
+  # Patches legacy session shapes: older sessions stored `user["id"]` as the
+  # Interactor sub and had no `user_role_id`. Re-resolve the local user_role
+  # so `user["id"]` and `user["user_role_id"]` point at the local PK.
+  defp normalize_user(%{"user_role_id" => id} = user)
+       when is_binary(id) and id != "" do
+    user
+  end
+
+  defp normalize_user(%{"interactor_user_id" => interactor_id} = user)
+       when is_binary(interactor_id) and interactor_id != "" and interactor_id != "unknown" do
+    case Accounts.get_user_role_by_interactor_id(interactor_id) do
+      %Accounts.UserRole{id: id} ->
+        user
+        |> Map.put("user_role_id", id)
+        |> Map.put("id", id)
+
+      nil ->
+        Map.put(user, "user_role_id", nil)
+    end
+  end
+
+  defp normalize_user(user), do: Map.put_new(user, "user_role_id", nil)
 
   # Check real auth first, then fall back to dev auth
   defp get_user_from_session(%{"current_user" => user}) when is_map(user) do
@@ -119,16 +145,11 @@ defmodule FunSheepWeb.LiveHelpers do
     user_role_id = user["user_role_id"] || user["id"]
 
     user_role =
-      case Ecto.UUID.cast(user_role_id) do
-        {:ok, _} ->
-          try do
-            Accounts.get_user_role!(user_role_id)
-          rescue
-            Ecto.NoResultsError -> nil
-          end
-
-        :error ->
-          nil
+      with id when is_binary(id) and id != "" <- user_role_id,
+           {:ok, _} <- Ecto.UUID.cast(id) do
+        Accounts.get_user_role(id)
+      else
+        _ -> nil
       end
 
     gaps = []
