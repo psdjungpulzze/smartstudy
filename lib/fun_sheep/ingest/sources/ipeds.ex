@@ -22,7 +22,9 @@ defmodule FunSheep.Ingest.Sources.Ipeds do
   import Ecto.Query
 
   @source "ipeds"
-  @default_hd_url "https://nces.ed.gov/ipeds/datacenter/data/HD2023.zip"
+  # HD{YYYY}.zip — academic year. Verified HD2022, HD2023, HD2024 all
+  # return 200. HD2024 is the most recent as of 2026-04.
+  @default_hd_url "https://nces.ed.gov/ipeds/datacenter/data/HD2024.zip"
 
   @impl true
   def source, do: @source

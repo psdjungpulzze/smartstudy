@@ -28,10 +28,12 @@ defmodule FunSheep.Ingest.Sources.NcesCcd do
 
   @source "nces_ccd"
 
-  # 2022-23 school year public-use files released 2024-08-29. Update when
-  # a newer release is published at https://nces.ed.gov/ccd/files.asp.
-  @default_lea_url "https://nces.ed.gov/ccd/Data/zip/ccd_lea_029_2223_w_2a_082924.zip"
-  @default_school_url "https://nces.ed.gov/ccd/Data/zip/ccd_sch_029_2223_w_2a_082924.zip"
+  # 2021-22 preliminary release (released 2022-07-17). NCES follows the
+  # pattern `ccd_{lea|sch}_029_YYMM_w_{1a|2a}_MMDDYY.zip` where 1a is
+  # preliminary and 2a is final. Override with `--url` when a newer file
+  # is published at https://nces.ed.gov/ccd/files.asp.
+  @default_lea_url "https://nces.ed.gov/ccd/data/zip/ccd_lea_029_2122_w_1a_071722.zip"
+  @default_school_url "https://nces.ed.gov/ccd/data/zip/ccd_sch_029_2122_w_1a_071722.zip"
 
   @impl true
   def source, do: @source
