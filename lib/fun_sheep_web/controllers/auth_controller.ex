@@ -11,6 +11,17 @@ defmodule FunSheepWeb.AuthController do
 
   require Logger
 
+  def root(conn, _params) do
+    case get_session(conn, :current_user) do
+      nil -> redirect(conn, to: ~p"/auth/login/redirect")
+      user -> redirect(conn, to: redirect_path_for_role(user["role"]))
+    end
+  end
+
+  def register(conn, _params) do
+    redirect(conn, to: ~p"/auth/login/redirect")
+  end
+
   def login(conn, _params) do
     state = Base.url_encode64(:crypto.strong_rand_bytes(32))
 
@@ -119,21 +130,23 @@ defmodule FunSheepWeb.AuthController do
   end
 
   defp extract_user_from_tokens(tokens) do
-    # Decode the access token to get user info (JWT claims)
-    # The Interactor User JWT contains: sub, type, org, username, metadata
+    # The Interactor user JWT contains only: sub, org, username, scopes, type.
+    # It does NOT include email or metadata.role, so we fetch the full user
+    # record from Interactor's admin API using our M2M (client_credentials) token.
     case decode_jwt(tokens["access_token"]) do
-      {:ok, claims} ->
+      {:ok, %{"sub" => sub, "org" => org} = claims} ->
+        profile = fetch_interactor_user(sub, org)
+
         %{
-          "id" => claims["sub"],
-          "interactor_user_id" => claims["sub"],
-          "email" => claims["email"] || claims["username"],
-          "display_name" => claims["name"] || claims["username"] || "User",
-          "role" => get_in(claims, ["metadata", "role"]) || "student",
-          "org" => claims["org"]
+          "id" => sub,
+          "interactor_user_id" => sub,
+          "email" => profile["email"] || claims["username"],
+          "display_name" => profile["username"] || claims["username"] || "User",
+          "role" => get_in(profile, ["metadata", "role"]) || "student",
+          "org" => org
         }
 
-      {:error, _} ->
-        # Fallback: minimal user from token response
+      _ ->
         %{
           "id" => "unknown",
           "interactor_user_id" => "unknown",
@@ -141,6 +154,19 @@ defmodule FunSheepWeb.AuthController do
           "display_name" => "User",
           "role" => "student"
         }
+    end
+  end
+
+  defp fetch_interactor_user(user_id, org) do
+    with {:ok, app_token} <- FunSheep.Interactor.Auth.get_token(),
+         url = "#{interactor_url()}/api/v1/orgs/#{org}/users/#{user_id}",
+         {:ok, %{status: 200, body: body}} <-
+           Req.get(url, headers: [{"authorization", "Bearer #{app_token}"}]) do
+      body
+    else
+      other ->
+        Logger.warning("Failed to fetch Interactor user profile: #{inspect(other)}")
+        %{}
     end
   end
 

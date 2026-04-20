@@ -14,11 +14,17 @@ defmodule FunSheepWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Health check for Cloud Run (no auth, no CSRF)
+  scope "/health", FunSheepWeb do
+    pipe_through :api
+    get "/", HealthController, :index
+  end
+
   scope "/", FunSheepWeb do
     pipe_through :browser
 
-    live "/", LoginLive, :index
-    live "/register", RegisterLive, :index
+    get "/", AuthController, :root
+    get "/register", AuthController, :register
   end
 
   # OAuth callback routes (regular controller, not LiveView)
