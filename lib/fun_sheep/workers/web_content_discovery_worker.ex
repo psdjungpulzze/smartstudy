@@ -131,8 +131,13 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
         end
       end)
 
-    # Also discover known textbooks for this subject
-    textbook_count = discover_known_textbooks(course)
+    # Skip known-textbook discovery if user already uploaded a textbook —
+    # their upload is the source of truth for textbook content.
+    uploaded_has_textbook =
+      Content.course_material_kinds(course.id)
+      |> Enum.any?(&(&1 in [:textbook, :supplementary_book]))
+
+    textbook_count = if uploaded_has_textbook, do: 0, else: discover_known_textbooks(course)
 
     total = stored_count + textbook_count
 
@@ -197,20 +202,28 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     textbook_name = get_textbook_name(course)
     chapter_names = Enum.map(course.chapters, & &1.name) |> Enum.take(5)
 
+    uploaded_kinds = Content.course_material_kinds(course.id)
+    has_textbook = Enum.any?(uploaded_kinds, &(&1 in [:textbook, :supplementary_book]))
+    has_question_bank = :sample_questions in uploaded_kinds
+
     queries = []
 
-    # 1. Question banks — the most direct source of questions
+    # 1. Question banks — skip if user already supplied sample questions
     queries =
-      queries ++
-        [
-          {"#{subject} grade #{grade} practice questions", "question_bank"},
-          {"#{subject} grade #{grade} test questions with answers", "question_bank"},
-          {"#{subject} multiple choice questions and answers", "question_bank"}
-        ]
+      if has_question_bank do
+        queries
+      else
+        queries ++
+          [
+            {"#{subject} grade #{grade} practice questions", "question_bank"},
+            {"#{subject} grade #{grade} test questions with answers", "question_bank"},
+            {"#{subject} multiple choice questions and answers", "question_bank"}
+          ]
+      end
 
-    # 2. Textbook-specific searches
+    # 2. Textbook-specific searches — skip if user already uploaded a textbook
     queries =
-      if textbook_name do
+      if textbook_name && !has_textbook do
         queries ++
           [
             {"#{textbook_name} practice test questions", "question_bank"},

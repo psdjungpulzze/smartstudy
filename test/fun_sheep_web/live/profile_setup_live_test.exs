@@ -226,6 +226,75 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
       assert html =~ "Demographics"
       assert html =~ ~r/phx-click="cancel_edit"/
     end
+
+    test "summary exposes Edit Hobbies shortcut that jumps to step 2", %{conn: conn} do
+      conn = auth_conn(conn)
+      user_role_id = get_session(conn, :dev_user)["user_role_id"]
+
+      {:ok, hobby} =
+        FunSheep.Learning.create_hobby(%{name: "KPOP", category: "Music"})
+
+      FunSheep.Accounts.update_user_role(
+        FunSheep.Accounts.get_user_role!(user_role_id),
+        %{grade: "11"}
+      )
+
+      {:ok, _} =
+        FunSheep.Learning.create_student_hobby(%{
+          user_role_id: user_role_id,
+          hobby_id: hobby.id,
+          specific_interests: %{"text" => ""}
+        })
+
+      {:ok, view, html} = live(conn, ~p"/profile/setup")
+
+      assert html =~ ~r/phx-click="edit_hobbies"/
+
+      html = render_click(view, "edit_hobbies")
+
+      assert html =~ "Your Hobbies"
+      # Step 2 exposes the Save Changes button wired to complete_hobbies;
+      # step 1 would show select[name=country_id] and next_step instead.
+      assert html =~ ~r/phx-click="complete_hobbies"/
+      refute html =~ ~r/select[^>]*name="country_id"/
+    end
+
+    test "edit_hobbies -> complete_hobbies persists interest text without revisiting step 1",
+         %{conn: conn} do
+      conn = auth_conn(conn)
+      user_role_id = get_session(conn, :dev_user)["user_role_id"]
+
+      {:ok, hobby} =
+        FunSheep.Learning.create_hobby(%{name: "KPOP", category: "Music"})
+
+      FunSheep.Accounts.update_user_role(
+        FunSheep.Accounts.get_user_role!(user_role_id),
+        %{grade: "11"}
+      )
+
+      {:ok, _} =
+        FunSheep.Learning.create_student_hobby(%{
+          user_role_id: user_role_id,
+          hobby_id: hobby.id,
+          specific_interests: %{"text" => ""}
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/profile/setup")
+
+      render_click(view, "edit_hobbies")
+
+      render_change(view, "update_hobby_interest", %{
+        "hobby-id" => hobby.id,
+        "value" => "Enhypen, TXT, P1harmony, Stray Kids, ATEEZ"
+      })
+
+      render_click(view, "complete_hobbies")
+
+      [reloaded] = FunSheep.Learning.list_hobbies_for_user(user_role_id)
+
+      assert reloaded.specific_interests["text"] ==
+               "Enhypen, TXT, P1harmony, Stray Kids, ATEEZ"
+    end
   end
 
   describe "persistence across full flow" do

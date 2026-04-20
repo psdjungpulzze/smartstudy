@@ -20,24 +20,49 @@ defmodule FunSheepWeb.CourseSearchLive do
         _ -> {[], [], nil, nil, %{}}
       end
 
-    {:ok,
-     assign(socket,
-       page_title: "My Courses",
-       search_subject: "",
-       search_grade: "",
-       search_school_id: "",
-       schools: schools,
-       my_courses: my_courses,
-       nearby_courses: nearby_courses,
-       user_grade: user_grade,
-       user_school_id: user_school_id,
-       tests_by_course: tests_by_course,
-       expanded_courses: MapSet.new(),
-       results: [],
-       searched: false,
-       show_search: false,
-       confirm_delete: nil
-     )}
+    socket =
+      socket
+      |> assign(
+        page_title: "My Courses",
+        search_subject: "",
+        search_grade: "",
+        search_school_id: "",
+        schools: schools,
+        my_courses: my_courses,
+        nearby_courses: nearby_courses,
+        user_grade: user_grade,
+        user_school_id: user_school_id,
+        tests_by_course: tests_by_course,
+        expanded_courses: MapSet.new(),
+        results: [],
+        searched: false,
+        show_search: false,
+        confirm_delete: nil
+      )
+      |> FunSheepWeb.LiveHelpers.assign_tutorial(
+        key: "course_search",
+        title: "Your courses live here",
+        subtitle: "Browse, search, and create courses.",
+        steps: [
+          %{
+            emoji: "📖",
+            title: "My courses",
+            body: "Everything you've already added shows up at the top."
+          },
+          %{
+            emoji: "🔍",
+            title: "Search",
+            body: "Find courses by subject, grade, or school."
+          },
+          %{
+            emoji: "✨",
+            title: "Create new",
+            body: "Don't see it? Create a course from your own materials."
+          }
+        ]
+      )
+
+    {:ok, socket}
   end
 
   @impl true

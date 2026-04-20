@@ -11,6 +11,17 @@ defmodule FunSheep.Content.UploadedMaterial do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
+  @material_kinds [
+    :textbook,
+    :supplementary_book,
+    :sample_questions,
+    :lecture_notes,
+    :syllabus,
+    :other
+  ]
+
+  def material_kinds, do: @material_kinds
+
   schema "uploaded_materials" do
     field :file_path, :string
     field :file_name, :string
@@ -18,6 +29,10 @@ defmodule FunSheep.Content.UploadedMaterial do
     field :file_size, :integer
     field :folder_name, :string
     field :batch_id, Ecto.UUID
+
+    field :material_kind, Ecto.Enum,
+      values: @material_kinds,
+      default: :textbook
 
     field :ocr_status, Ecto.Enum,
       values: [:pending, :processing, :completed, :failed],
@@ -45,6 +60,7 @@ defmodule FunSheep.Content.UploadedMaterial do
       :file_size,
       :folder_name,
       :batch_id,
+      :material_kind,
       :ocr_status,
       :relevance_status,
       :relevance_score,

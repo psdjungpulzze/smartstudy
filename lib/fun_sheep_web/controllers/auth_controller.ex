@@ -13,37 +13,44 @@ defmodule FunSheepWeb.AuthController do
 
   def root(conn, _params) do
     case get_session(conn, :current_user) do
-      nil -> redirect(conn, to: ~p"/auth/login/redirect")
+      nil -> redirect(conn, to: ~p"/auth/login")
       user -> redirect(conn, to: redirect_path_for_role(user["role"]))
     end
   end
 
   def register(conn, _params) do
-    redirect(conn, to: ~p"/auth/login/redirect")
+    redirect(conn, to: ~p"/auth/register")
   end
 
-  def login(conn, _params) do
+  def login(conn, params) do
     state = Base.url_encode64(:crypto.strong_rand_bytes(32))
+
+    query =
+      %{
+        client_id: client_id(),
+        redirect_uri: callback_url(conn),
+        response_type: "code",
+        scope: "openid profile email",
+        state: state
+      }
+      |> maybe_add_idp_hint(params["idp_hint"])
 
     authorize_url =
       interactor_url()
       |> URI.parse()
       |> Map.put(:path, "/oauth/authorize")
-      |> URI.append_query(
-        URI.encode_query(%{
-          client_id: client_id(),
-          redirect_uri: callback_url(conn),
-          response_type: "code",
-          scope: "openid profile email",
-          state: state
-        })
-      )
+      |> URI.append_query(URI.encode_query(query))
       |> URI.to_string()
 
     conn
     |> put_session(:oauth_state, state)
     |> redirect(external: authorize_url)
   end
+
+  defp maybe_add_idp_hint(query, provider) when provider in ~w(google github apple),
+    do: Map.put(query, :idp_hint, provider)
+
+  defp maybe_add_idp_hint(query, _), do: query
 
   def callback(conn, %{"code" => code, "state" => state}) do
     saved_state = get_session(conn, :oauth_state)
@@ -55,7 +62,7 @@ defmodule FunSheepWeb.AuthController do
     else
       case exchange_code_for_tokens(code, conn) do
         {:ok, tokens} ->
-          user = extract_user_from_tokens(tokens)
+          user = extract_user_from_tokens(tokens, nil)
 
           conn
           |> delete_session(:oauth_state)
@@ -88,8 +95,9 @@ defmodule FunSheepWeb.AuthController do
     |> redirect(to: ~p"/")
   end
 
-  def session(conn, %{"token" => token}) do
-    user = extract_user_from_tokens(%{"access_token" => token})
+  def session(conn, %{"token" => token} = params) do
+    selected_role = params["role"]
+    user = extract_user_from_tokens(%{"access_token" => token}, selected_role)
 
     conn
     |> put_session(:user_token, token)
@@ -129,7 +137,7 @@ defmodule FunSheepWeb.AuthController do
     end
   end
 
-  defp extract_user_from_tokens(tokens) do
+  defp extract_user_from_tokens(tokens, selected_role) do
     # The Interactor user JWT contains only: sub, org, username, scopes, type.
     # It does NOT include email or metadata.role, so we fetch the full user
     # record from Interactor's admin API using our M2M (client_credentials) token.
@@ -139,11 +147,9 @@ defmodule FunSheepWeb.AuthController do
 
         email = profile["email"] || claims["username"]
         display_name = profile["username"] || claims["username"] || "User"
-        role = get_in(profile, ["metadata", "role"]) || "student"
+        default_role = get_in(profile, ["metadata", "role"]) || "student"
+        role = normalize_role(selected_role) || default_role
 
-        # Resolve/create the local user_role row so "id" and "user_role_id"
-        # point to the local PK, matching the shape expected by downstream
-        # LiveViews (see dev_auth_controller for the reference shape).
         user_role_id = ensure_local_user_role(sub, role, email, display_name)
 
         %{
@@ -168,12 +174,15 @@ defmodule FunSheepWeb.AuthController do
     end
   end
 
+  defp normalize_role(role) when role in ~w(student parent teacher), do: role
+  defp normalize_role(_), do: nil
+
   defp ensure_local_user_role(interactor_user_id, role, email, display_name) do
     # user_roles.role is an Ecto.Enum [:student, :parent, :teacher].
     # Admin-ish roles (if any) fall back to student at the DB layer.
     db_role = if role in ~w(student parent teacher), do: role, else: "student"
 
-    case FunSheep.Accounts.get_user_role_by_interactor_id(interactor_user_id) do
+    case FunSheep.Accounts.get_user_role_by_interactor_id_and_role(interactor_user_id, db_role) do
       %FunSheep.Accounts.UserRole{id: id} ->
         id
 

@@ -55,7 +55,8 @@ defmodule FunSheepWeb.CourseDetailLive do
        show_upload: has_pending,
        upload_batch_id: Ecto.UUID.generate(),
        uploaded_materials: materials,
-       upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0}
+       upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0},
+       upload_default_kind: :textbook
      )}
   end
 
@@ -236,6 +237,29 @@ defmodule FunSheepWeb.CourseDetailLive do
 
     user_role_id = socket.assigns.current_user["user_role_id"]
     materials = Content.list_materials_by_course_for_user(socket.assigns.course.id, user_role_id)
+    {:noreply, assign(socket, uploaded_materials: materials)}
+  end
+
+  def handle_event("set_default_kind", %{"kind" => kind}, socket) do
+    kind_atom = parse_material_kind(kind)
+    {:noreply, assign(socket, upload_default_kind: kind_atom)}
+  end
+
+  def handle_event(
+        "set_material_kind",
+        %{"material_id" => material_id, "kind" => kind},
+        socket
+      ) do
+    kind_atom = parse_material_kind(kind)
+    material = Content.get_uploaded_material!(material_id)
+    {:ok, _} = Content.update_uploaded_material(material, %{material_kind: kind_atom})
+
+    user_role_id = socket.assigns.current_user["user_role_id"]
+
+    materials =
+      Content.list_materials_by_course_for_user(socket.assigns.course.id, user_role_id) ++
+        Content.list_unlinked_materials_for_user(user_role_id)
+
     {:noreply, assign(socket, uploaded_materials: materials)}
   end
 
@@ -609,6 +633,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       <.upload_panel
         :if={@show_upload}
         batch_id={@upload_batch_id}
+        default_kind={@upload_default_kind}
         user_role_id={@current_user && @current_user["user_role_id"]}
         materials={@uploaded_materials}
         progress={@upload_progress}
@@ -886,6 +911,7 @@ defmodule FunSheepWeb.CourseDetailLive do
   attr :materials, :list, default: []
   attr :progress, :map, required: true
   attr :course, :map, required: true
+  attr :default_kind, :atom, default: :textbook
 
   defp upload_panel(assigns) do
     pending_materials = Enum.filter(assigns.materials, fn m -> m.ocr_status == :pending end)
@@ -905,15 +931,39 @@ defmodule FunSheepWeb.CourseDetailLive do
       phx-hook="DirectUploader"
       data-batch-id={@batch_id}
       data-user-role-id={@user_role_id}
+      data-default-material-kind={Atom.to_string(@default_kind)}
       class="bg-white rounded-2xl shadow-md p-6 mb-6"
     >
       <div class="flex items-center justify-between mb-4">
         <div>
-          <h2 class="text-lg font-semibold text-[#1C1C1E]">Upload Textbook Pages</h2>
+          <h2 class="text-lg font-semibold text-[#1C1C1E]">Upload Materials</h2>
           <p class="text-sm text-[#8E8E93] mt-0.5">
-            Upload scanned pages or photos of your textbook to improve course content
+            Choose a file type, then upload. You can change the type per file below.
           </p>
         </div>
+      </div>
+
+      <%!-- Material kind selector (default for new uploads) --%>
+      <div class="flex items-center gap-3 mb-3">
+        <label for="default-material-kind" class="text-sm font-medium text-[#1C1C1E] shrink-0">
+          File type:
+        </label>
+        <form phx-change="set_default_kind" class="flex-1">
+          <select
+            id="default-material-kind"
+            name="kind"
+            data-material-kind-select
+            class="w-full sm:w-auto px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full text-sm outline-none transition-colors"
+          >
+            <option
+              :for={{label, value} <- material_kind_options()}
+              value={value}
+              selected={value == Atom.to_string(@default_kind)}
+            >
+              {label}
+            </option>
+          </select>
+        </form>
       </div>
 
       <%!-- Upload buttons --%>
@@ -966,7 +1016,7 @@ defmodule FunSheepWeb.CourseDetailLive do
         <div class="max-h-48 overflow-y-auto space-y-1.5">
           <div
             :for={mat <- @materials}
-            class="flex items-center justify-between px-3 py-2 bg-[#F5F5F7] rounded-xl text-sm"
+            class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 py-2 bg-[#F5F5F7] rounded-xl text-sm"
           >
             <div class="flex items-center gap-2 min-w-0">
               <.icon name={file_type_icon(mat.file_type)} class="w-4 h-4 text-[#8E8E93] shrink-0" />
@@ -978,7 +1028,24 @@ defmodule FunSheepWeb.CourseDetailLive do
                 {mat.folder_name}
               </span>
             </div>
-            <div class="flex items-center gap-2 shrink-0 ml-2">
+            <div class="flex items-center gap-2 shrink-0 sm:ml-2 flex-wrap">
+              <form phx-change="set_material_kind" class="shrink-0">
+                <input type="hidden" name="material_id" value={mat.id} />
+                <select
+                  name="kind"
+                  disabled={mat.ocr_status != :pending}
+                  class="text-[11px] px-2 py-1 bg-white border border-[#E5E5EA] rounded-full outline-none focus:border-[#4CD964] disabled:opacity-60 disabled:cursor-not-allowed max-w-[160px]"
+                  title={material_kind_label(mat.material_kind)}
+                >
+                  <option
+                    :for={{label, value} <- material_kind_options()}
+                    value={value}
+                    selected={value == Atom.to_string(mat.material_kind || :textbook)}
+                  >
+                    {label}
+                  </option>
+                </select>
+              </form>
               <span class={[
                 "text-[10px] px-2 py-0.5 rounded-full font-medium",
                 ocr_status_class(mat.ocr_status)
@@ -1051,6 +1118,25 @@ defmodule FunSheepWeb.CourseDetailLive do
   end
 
   defp file_type_icon(_), do: "hero-document"
+
+  defp material_kind_options do
+    [
+      {"Textbook", "textbook"},
+      {"Supplementary Book", "supplementary_book"},
+      {"Sample Questions & Answers", "sample_questions"},
+      {"Lecture Notes", "lecture_notes"},
+      {"Syllabus", "syllabus"},
+      {"Other", "other"}
+    ]
+  end
+
+  defp material_kind_label(kind) do
+    kind_str = Atom.to_string(kind || :textbook)
+
+    Enum.find_value(material_kind_options(), kind_str, fn {label, value} ->
+      if value == kind_str, do: label
+    end)
+  end
 
   defp ocr_status_class(:pending), do: "bg-[#F5F5F7] text-[#8E8E93]"
   defp ocr_status_class(:processing), do: "bg-blue-50 text-[#007AFF]"
@@ -1838,4 +1924,14 @@ defmodule FunSheepWeb.CourseDetailLive do
   defp source_status_label("failed"), do: "Failed"
   defp source_status_label("skipped"), do: "Skipped"
   defp source_status_label(status), do: status
+
+  defp parse_material_kind(value) when is_binary(value) do
+    allowed = FunSheep.Content.UploadedMaterial.material_kinds()
+    atom = String.to_existing_atom(value)
+    if atom in allowed, do: atom, else: :textbook
+  rescue
+    ArgumentError -> :textbook
+  end
+
+  defp parse_material_kind(value) when is_atom(value), do: value
 end

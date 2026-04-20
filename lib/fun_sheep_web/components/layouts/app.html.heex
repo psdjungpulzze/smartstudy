@@ -187,6 +187,15 @@
   </div>
 </main>
 
+<%!-- First-visit tutorial overlay. Pages opt in via LiveHelpers.assign_tutorial/2. --%>
+<FunSheepWeb.Components.Tutorial.tutorial
+  :if={assigns[:show_tutorial] && assigns[:tutorial_config]}
+  title={@tutorial_config.title}
+  subtitle={@tutorial_config.subtitle}
+  cta_label={@tutorial_config.cta_label}
+  steps={@tutorial_config.steps}
+/>
+
 <%!-- Bottom Tab Bar (mobile only, hidden on tablet+ and on practice page) --%>
 <nav class={[
   "fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 z-50 safe-area-bottom",

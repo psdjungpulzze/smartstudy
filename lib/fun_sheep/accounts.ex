@@ -21,8 +21,40 @@ defmodule FunSheep.Accounts do
   def get_user_role(id), do: Repo.get(UserRole, id)
 
   def get_user_role_by_interactor_id(interactor_user_id) do
-    Repo.get_by(UserRole, interactor_user_id: interactor_user_id)
+    from(ur in UserRole,
+      where: ur.interactor_user_id == ^interactor_user_id,
+      order_by: [asc: ur.inserted_at],
+      limit: 1
+    )
+    |> Repo.one()
   end
+
+  def get_user_role_by_interactor_id_and_role(interactor_user_id, role)
+      when is_binary(role) or is_atom(role) do
+    role_atom =
+      case role do
+        r when is_atom(r) -> r
+        r when is_binary(r) -> safe_to_role_atom(r)
+      end
+
+    case role_atom do
+      nil -> nil
+      r -> Repo.get_by(UserRole, interactor_user_id: interactor_user_id, role: r)
+    end
+  end
+
+  def list_user_roles_by_interactor_id(interactor_user_id) do
+    from(ur in UserRole,
+      where: ur.interactor_user_id == ^interactor_user_id,
+      order_by: [asc: ur.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  defp safe_to_role_atom("student"), do: :student
+  defp safe_to_role_atom("parent"), do: :parent
+  defp safe_to_role_atom("teacher"), do: :teacher
+  defp safe_to_role_atom(_), do: nil
 
   def create_user_role(attrs \\ %{}) do
     %UserRole{}

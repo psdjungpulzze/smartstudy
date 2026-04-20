@@ -61,6 +61,33 @@ defmodule FunSheep.Content do
     |> Repo.all()
   end
 
+  @doc """
+  Lists materials for a course filtered to one or more material_kind values.
+  Pass a single atom or a list of atoms.
+  """
+  def list_materials_by_course_and_kind(course_id, kinds) when is_list(kinds) do
+    from(m in UploadedMaterial,
+      where: m.course_id == ^course_id and m.material_kind in ^kinds,
+      order_by: [asc: m.folder_name, asc: m.file_name]
+    )
+    |> Repo.all()
+  end
+
+  def list_materials_by_course_and_kind(course_id, kind) when is_atom(kind),
+    do: list_materials_by_course_and_kind(course_id, [kind])
+
+  @doc """
+  Returns which material kinds the user has uploaded for this course.
+  """
+  def course_material_kinds(course_id) do
+    from(m in UploadedMaterial,
+      where: m.course_id == ^course_id,
+      select: m.material_kind,
+      distinct: true
+    )
+    |> Repo.all()
+  end
+
   def count_materials_by_batch(batch_id) do
     from(m in UploadedMaterial, where: m.batch_id == ^batch_id, select: count())
     |> Repo.one()

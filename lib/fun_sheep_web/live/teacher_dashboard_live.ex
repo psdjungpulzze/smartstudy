@@ -28,13 +28,38 @@ defmodule FunSheepWeb.TeacherDashboardLive do
           end)
       end
 
-    {:ok,
-     assign(socket,
-       page_title: "Teacher Dashboard",
-       students: students,
-       sort_by: :name,
-       sort_dir: :asc
-     )}
+    socket =
+      socket
+      |> assign(
+        page_title: "Teacher Dashboard",
+        students: students,
+        sort_by: :name,
+        sort_dir: :asc
+      )
+      |> FunSheepWeb.LiveHelpers.assign_tutorial(
+        key: "teacher_dashboard",
+        title: "Welcome to your classroom",
+        subtitle: "A quick look at what's here.",
+        steps: [
+          %{
+            emoji: "👥",
+            title: "Your students",
+            body: "Every student you've invited appears here with their readiness."
+          },
+          %{
+            emoji: "📈",
+            title: "Sort + filter",
+            body: "Sort by readiness to find students who need a check-in."
+          },
+          %{
+            emoji: "✉️",
+            title: "Invite more",
+            body: "Use Guardians to invite more students to your class."
+          }
+        ]
+      )
+
+    {:ok, socket}
   end
 
   @impl true

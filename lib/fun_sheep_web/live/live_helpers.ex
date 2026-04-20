@@ -6,7 +6,7 @@ defmodule FunSheepWeb.LiveHelpers do
   import Phoenix.LiveView
   import Phoenix.Component
 
-  alias FunSheep.{Accounts, Learning}
+  alias FunSheep.{Accounts, Learning, Tutorials}
 
   def on_mount(:require_auth, _params, session, socket) do
     case get_user_from_session(session) do
@@ -26,6 +26,10 @@ defmodule FunSheepWeb.LiveHelpers do
           |> assign(:due_reviews, due_reviews)
           |> assign(:profile_gaps, profile_gaps)
           |> attach_hook(:save_request_path, :handle_params, &save_request_path/3)
+          |> attach_hook(:gate_onboarding, :handle_params, &gate_onboarding/3)
+          |> attach_hook(:tutorial_events, :handle_event, &handle_tutorial_event/3)
+          |> assign(:show_tutorial, false)
+          |> assign(:tutorial_config, nil)
 
         {:cont, socket}
 
@@ -117,6 +121,105 @@ defmodule FunSheepWeb.LiveHelpers do
     uri = URI.parse(url)
     {:cont, assign(socket, :current_path, uri.path)}
   end
+
+  @doc """
+  Assigns tutorial config on a LiveView socket. Reads the persisted
+  seen-state so the overlay auto-shows once per user per key, and is
+  dismissed/replayed via global `dismiss_tutorial` / `replay_tutorial`
+  events handled in this module.
+
+  ## Example
+
+      socket
+      |> LiveHelpers.assign_tutorial(
+        key: "dashboard",
+        title: "Welcome to FunSheep!",
+        subtitle: "A quick tour of your home base.",
+        steps: [
+          %{emoji: "📚", title: "Courses", body: "Browse or create courses"},
+          %{emoji: "⚡", title: "Practice", body: "Quick-fire flashcards"}
+        ]
+      )
+  """
+  def assign_tutorial(socket, opts) do
+    key = Keyword.fetch!(opts, :key)
+    title = Keyword.fetch!(opts, :title)
+    steps = Keyword.fetch!(opts, :steps)
+    subtitle = Keyword.get(opts, :subtitle)
+    cta_label = Keyword.get(opts, :cta_label, "Got it!")
+
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+    seen = Tutorials.seen?(user_role_id, key)
+
+    socket
+    |> assign(:show_tutorial, not seen)
+    |> assign(:tutorial_config, %{
+      key: key,
+      title: title,
+      subtitle: subtitle,
+      cta_label: cta_label,
+      steps: steps
+    })
+  end
+
+  defp handle_tutorial_event("dismiss_tutorial", _params, socket) do
+    case socket.assigns[:tutorial_config] do
+      %{key: key} ->
+        user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+        Tutorials.mark_seen(user_role_id, key)
+        {:halt, assign(socket, show_tutorial: false)}
+
+      _ ->
+        {:cont, socket}
+    end
+  end
+
+  defp handle_tutorial_event("replay_tutorial", _params, socket) do
+    if socket.assigns[:tutorial_config] do
+      {:halt, assign(socket, show_tutorial: true)}
+    else
+      {:cont, socket}
+    end
+  end
+
+  defp handle_tutorial_event(_event, _params, socket), do: {:cont, socket}
+
+  # Redirects first-time students (missing grade or hobbies) to /profile/setup.
+  # Teachers and parents are exempt — the gap fields (grade, hobbies) are
+  # student-specific. The profile setup page and the subscription/guardian
+  # flows pass through freely so users aren't trapped. Disabled in test
+  # (via :fun_sheep, :onboarding_gate) so live tests can hit feature
+  # pages without first filling out a profile fixture.
+  @onboarding_exempt_paths ~w(/profile/setup /guardians /subscription)
+  defp gate_onboarding(_params, url, socket) do
+    uri = URI.parse(url)
+    path = uri.path || ""
+    gaps = socket.assigns[:profile_gaps] || []
+    role = socket.assigns[:current_role]
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+
+    cond do
+      not onboarding_gate_enabled?() -> {:cont, socket}
+      role != "student" -> {:cont, socket}
+      not valid_uuid?(user_role_id) -> {:cont, socket}
+      gaps == [] -> {:cont, socket}
+      path in @onboarding_exempt_paths -> {:cont, socket}
+      String.starts_with?(path, "/auth/") -> {:cont, socket}
+      true -> {:halt, redirect(socket, to: "/profile/setup")}
+    end
+  end
+
+  defp onboarding_gate_enabled?,
+    do: Application.get_env(:fun_sheep, :onboarding_gate, true)
+
+  defp valid_uuid?(id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, _} -> true
+      :error -> false
+    end
+  end
+
+  defp valid_uuid?(_), do: false
 
   defp load_gamification_stats(user_role_id) do
     case Ecto.UUID.cast(user_role_id) do

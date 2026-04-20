@@ -166,6 +166,27 @@ textarea {
 .animate-pulse-subtle { animation: pulse-subtle 2s ease-in-out infinite; }
 @keyframes pulse-subtle { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 
+/* Tutorial swipe finger animations */
+@keyframes swipe-right {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(12px); }
+}
+@keyframes swipe-left {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-12px); }
+}
+@keyframes swipe-up {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.animate-swipe-right { animation: swipe-right 1.4s ease-in-out infinite; display: inline-block; }
+.animate-swipe-left { animation: swipe-left 1.4s ease-in-out infinite; display: inline-block; }
+.animate-swipe-up { animation: swipe-up 1.4s ease-in-out infinite; display: inline-block; }
+
+/* Hide horizontal scrollbar but keep scrollability (pill row) */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 /* Fun hover effects for cards */
 .card-hover {
   transition: transform 0.2s ease, box-shadow 0.2s ease;

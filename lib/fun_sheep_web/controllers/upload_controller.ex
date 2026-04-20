@@ -7,6 +7,7 @@ defmodule FunSheepWeb.UploadController do
   def create(conn, %{"file" => upload, "batch_id" => batch_id} = params) do
     user_role_id = params["user_role_id"]
     folder_name = params["folder_name"]
+    material_kind = normalize_kind(params["material_kind"])
 
     unless user_role_id do
       conn |> put_status(401) |> json(%{error: "unauthorized"}) |> halt()
@@ -27,10 +28,15 @@ defmodule FunSheepWeb.UploadController do
              file_size: byte_size(content),
              folder_name: folder_name,
              batch_id: batch_id,
+             material_kind: material_kind,
              user_role_id: user_role_id,
              course_id: course_id
            }) do
-      json(conn, %{id: material.id, file_name: material.file_name})
+      json(conn, %{
+        id: material.id,
+        file_name: material.file_name,
+        material_kind: material.material_kind
+      })
     else
       {:error, %Ecto.Changeset{} = changeset} ->
         conn
@@ -54,5 +60,20 @@ defmodule FunSheepWeb.UploadController do
 
   defp build_key(batch_id, folder_name, basename) do
     Path.join(["staging", batch_id, folder_name, basename])
+  end
+
+  defp normalize_kind(nil), do: :textbook
+  defp normalize_kind(""), do: :textbook
+
+  defp normalize_kind(value) when is_binary(value) do
+    allowed = FunSheep.Content.UploadedMaterial.material_kinds()
+    atom = String.to_existing_atom(value)
+    if atom in allowed, do: atom, else: :textbook
+  rescue
+    ArgumentError -> :textbook
+  end
+
+  defp normalize_kind(value) when is_atom(value) do
+    if value in FunSheep.Content.UploadedMaterial.material_kinds(), do: value, else: :textbook
   end
 end

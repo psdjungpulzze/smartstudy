@@ -99,9 +99,30 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
     )
   end
 
+  # Regex-based question extraction is reliable on sample-question materials
+  # (practice tests, past exams, Q&A banks) and noisy on textbook prose.
+  # Prefer sample_questions materials; only fall back to textbook-like
+  # materials when the user hasn't supplied any question sources.
+  @question_kinds [:sample_questions]
+  @textbook_fallback_kinds [:textbook, :supplementary_book]
+
   defp collect_ocr_pages(course_id) do
     materials = Content.list_materials_by_course(course_id)
-    completed_ids = Enum.filter(materials, &(&1.ocr_status == :completed)) |> Enum.map(& &1.id)
+    completed = Enum.filter(materials, &(&1.ocr_status == :completed))
+
+    question_ids =
+      completed
+      |> Enum.filter(&(&1.material_kind in @question_kinds))
+      |> Enum.map(& &1.id)
+
+    completed_ids =
+      if question_ids != [] do
+        question_ids
+      else
+        completed
+        |> Enum.filter(&(&1.material_kind in @textbook_fallback_kinds))
+        |> Enum.map(& &1.id)
+      end
 
     if completed_ids == [] do
       []

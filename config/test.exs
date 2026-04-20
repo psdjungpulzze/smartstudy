@@ -36,6 +36,10 @@ config :fun_sheep, interactor_mock: true
 # Storage backend
 config :fun_sheep, :storage_backend, FunSheep.Storage.Local
 
+# Let LiveView tests hit feature pages without first walking through
+# /profile/setup. Real envs keep the gate on (defaults to true).
+config :fun_sheep, :onboarding_gate, false
+
 # OCR configuration - always mock in tests
 config :fun_sheep, :ocr_mock, true
 

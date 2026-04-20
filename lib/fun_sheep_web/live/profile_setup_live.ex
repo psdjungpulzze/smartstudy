@@ -391,6 +391,16 @@ defmodule FunSheepWeb.ProfileSetupLive do
     {:noreply, assign(socket, mode: :edit, step: 1, step1_errors: %{})}
   end
 
+  def handle_event("edit_hobbies", _params, socket) do
+    {:noreply,
+     assign(socket,
+       mode: :edit,
+       step: 2,
+       hobbies: Learning.list_hobbies(),
+       step1_errors: %{}
+     )}
+  end
+
   def handle_event("cancel_edit", _params, socket) do
     # Revert any in-flight form changes by re-reading the persisted profile.
     refreshed = load_existing_profile(socket.assigns.current_user)
@@ -560,7 +570,15 @@ defmodule FunSheepWeb.ProfileSetupLive do
       </dl>
 
       <div class="mt-8">
-        <h2 class="text-lg font-semibold text-[#1C1C1E] mb-3">Hobbies</h2>
+        <div class="flex items-center justify-between mb-3 gap-4 flex-wrap">
+          <h2 class="text-lg font-semibold text-[#1C1C1E]">Hobbies</h2>
+          <button
+            phx-click="edit_hobbies"
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white text-sm font-medium px-4 py-1.5 rounded-full shadow-sm transition-colors"
+          >
+            Edit Hobbies
+          </button>
+        </div>
 
         <div :if={@hobbies == []} class="text-sm text-[#8E8E93]">
           No hobbies selected yet.

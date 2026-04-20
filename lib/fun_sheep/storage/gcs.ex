@@ -29,7 +29,7 @@ defmodule FunSheep.Storage.GCS do
   def put(key, content, opts \\ []) do
     key = normalize_key(key)
     content_type = Keyword.get(opts, :content_type, "application/octet-stream")
-    url = "#{@upload_url}/#{bucket()}/o?uploadType=media&name=#{URI.encode_www_form(key)}"
+    url = "#{@upload_url}/#{bucket()}/o?uploadType=media&name=#{encode_object_name(key)}"
 
     case request(:post, url,
            headers: [{"content-type", content_type}],
@@ -49,7 +49,7 @@ defmodule FunSheep.Storage.GCS do
   @impl true
   def get(key, _opts \\ []) do
     key = normalize_key(key)
-    url = "#{@base_url}/storage/v1/b/#{bucket()}/o/#{URI.encode_www_form(key)}?alt=media"
+    url = "#{@base_url}/storage/v1/b/#{bucket()}/o/#{encode_object_name(key)}?alt=media"
 
     case request(:get, url) do
       {:ok, %{status: 200, body: body}} when is_binary(body) ->
@@ -69,7 +69,7 @@ defmodule FunSheep.Storage.GCS do
   @impl true
   def delete(key, _opts \\ []) do
     key = normalize_key(key)
-    url = "#{@base_url}/storage/v1/b/#{bucket()}/o/#{URI.encode_www_form(key)}"
+    url = "#{@base_url}/storage/v1/b/#{bucket()}/o/#{encode_object_name(key)}"
 
     case request(:delete, url) do
       {:ok, %{status: status}} when status in [200, 204, 404] ->
@@ -120,4 +120,11 @@ defmodule FunSheep.Storage.GCS do
 
   defp normalize_key("/" <> rest), do: normalize_key(rest)
   defp normalize_key(key) when is_binary(key), do: key
+
+  # Percent-encode the object name for use in a URL path segment.
+  # `URI.encode_www_form/1` is for form bodies and encodes spaces as `+`,
+  # which GCS interprets as a literal `+` in a URL path — causing 404s
+  # on keys containing spaces.
+  @doc false
+  def encode_object_name(key), do: URI.encode(key, &URI.char_unreserved?/1)
 end

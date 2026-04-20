@@ -73,7 +73,28 @@ defmodule FunSheep.AccountsTest do
       assert %{role: _} = errors_on(changeset)
     end
 
-    test "enforces unique interactor_user_id" do
+    test "allows the same interactor_user_id across different roles" do
+      # A single Interactor account can hold multiple local roles (student +
+      # parent + teacher). The unique constraint is on (interactor_user_id,
+      # role), not interactor_user_id alone.
+      interactor_id = Ecto.UUID.generate()
+
+      assert {:ok, _student} =
+               Accounts.create_user_role(%{
+                 interactor_user_id: interactor_id,
+                 role: :student,
+                 email: "first@test.com"
+               })
+
+      assert {:ok, _parent} =
+               Accounts.create_user_role(%{
+                 interactor_user_id: interactor_id,
+                 role: :parent,
+                 email: "second@test.com"
+               })
+    end
+
+    test "rejects duplicate (interactor_user_id, role) pairs" do
       interactor_id = Ecto.UUID.generate()
 
       attrs = %{
@@ -84,13 +105,9 @@ defmodule FunSheep.AccountsTest do
 
       assert {:ok, _} = Accounts.create_user_role(attrs)
 
-      duplicate_attrs = %{
-        interactor_user_id: interactor_id,
-        role: :parent,
-        email: "second@test.com"
-      }
+      assert {:error, changeset} =
+               Accounts.create_user_role(%{attrs | email: "dup@test.com"})
 
-      assert {:error, changeset} = Accounts.create_user_role(duplicate_attrs)
       assert %{interactor_user_id: _} = errors_on(changeset)
     end
   end

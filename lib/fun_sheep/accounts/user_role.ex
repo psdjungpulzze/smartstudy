@@ -51,7 +51,10 @@ defmodule FunSheep.Accounts.UserRole do
     ])
     |> validate_required([:interactor_user_id, :role, :email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/)
-    |> unique_constraint(:interactor_user_id)
+    |> unique_constraint([:interactor_user_id, :role],
+      name: :user_roles_interactor_user_id_role_index,
+      message: "already has this role"
+    )
     |> foreign_key_constraint(:school_id)
   end
 end

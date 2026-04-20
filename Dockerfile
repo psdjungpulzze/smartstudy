@@ -98,4 +98,7 @@ USER nobody
 ENV PHX_SERVER=true
 ENV PORT=8080
 
-CMD ["bin/fun_sheep", "start"]
+# Run pending migrations before booting Phoenix. Ecto.Migrator takes a
+# repo-level lock so multiple Cloud Run instances racing here serialize
+# safely on cold start.
+CMD ["sh", "-c", "bin/fun_sheep eval 'FunSheep.Release.migrate()' && exec bin/fun_sheep start"]

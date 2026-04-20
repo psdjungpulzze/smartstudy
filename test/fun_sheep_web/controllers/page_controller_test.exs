@@ -1,9 +1,9 @@
 defmodule FunSheepWeb.PageControllerTest do
   use FunSheepWeb.ConnCase
 
-  test "GET / shows login page when not authenticated", %{conn: conn} do
+  test "GET / redirects to /auth/login when not authenticated", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Welcome back"
+    assert redirected_to(conn) == "/auth/login"
   end
 
   test "GET / redirects to dashboard when authenticated as student", %{conn: conn} do

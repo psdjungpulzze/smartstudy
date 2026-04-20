@@ -139,9 +139,18 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     end
   end
 
+  # Only textbook-like materials define course structure. Sample questions,
+  # lecture notes, and syllabi should not drive chapter discovery — they'd
+  # pollute the table of contents with unrelated headings.
+  @structure_kinds [:textbook, :supplementary_book]
+
   defp collect_ocr_text(course_id) do
     materials = Content.list_materials_by_course(course_id)
-    completed = Enum.filter(materials, fn m -> m.ocr_status == :completed end)
+
+    completed =
+      Enum.filter(materials, fn m ->
+        m.ocr_status == :completed and m.material_kind in @structure_kinds
+      end)
 
     completed
     |> Enum.flat_map(fn mat ->

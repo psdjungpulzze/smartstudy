@@ -1,26 +1,51 @@
 defmodule FunSheepWeb.RegisterLive do
+  @moduledoc """
+  Custom registration screen.
+
+  Mirrors `LoginLive`'s role selector: Student is featured as the large hero
+  card, Teacher and Parent are secondary chips. The selected role is submitted
+  to Interactor as `metadata.role` so downstream login flows can resolve the
+  corresponding local `UserRole`.
+  """
+
   use FunSheepWeb, :live_view
 
+  require Logger
+
+  @roles ~w(student teacher parent)
+  @default_role "student"
+
   @impl true
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     if session["current_user"] || session["dev_user"] do
       {:ok, redirect(socket, to: "/dashboard")}
     else
-      changeset = %{
+      initial_role = normalize_role(params["role"]) || @default_role
+
+      form = %{
         "email" => "",
         "username" => "",
         "password" => "",
-        "password_confirmation" => "",
-        "role" => "student"
+        "password_confirmation" => ""
       }
 
       {:ok,
        socket
-       |> assign(:page_title, "Register")
-       |> assign(:form, changeset)
+       |> assign(:page_title, "Create an account")
+       |> assign(:role, initial_role)
+       |> assign(:form, form)
        |> assign(:errors, %{})
        |> assign(:success, false)
+       |> assign(:success_message, nil)
        |> assign(:loading, false), layout: false}
+    end
+  end
+
+  @impl true
+  def handle_event("select_role", %{"role" => role}, socket) do
+    case normalize_role(role) do
+      nil -> {:noreply, socket}
+      r -> {:noreply, assign(socket, role: r)}
     end
   end
 
@@ -35,11 +60,11 @@ defmodule FunSheepWeb.RegisterLive do
     errors = validate_params(params)
 
     if map_size(errors) > 0 do
-      {:noreply, assign(socket, errors: errors)}
+      {:noreply, assign(socket, form: params, errors: errors)}
     else
-      socket = assign(socket, loading: true)
+      socket = assign(socket, loading: true, errors: %{})
 
-      case register_user(params) do
+      case register_user(params, socket.assigns.role) do
         {:ok, message} ->
           {:noreply,
            socket
@@ -50,6 +75,7 @@ defmodule FunSheepWeb.RegisterLive do
         {:error, error_msg} ->
           {:noreply,
            socket
+           |> assign(:form, params)
            |> assign(:loading, false)
            |> assign(:errors, %{"base" => error_msg})}
       end
@@ -82,20 +108,22 @@ defmodule FunSheepWeb.RegisterLive do
     errors
   end
 
-  defp register_user(params) do
+  defp register_user(params, role) do
     url = "#{interactor_url()}/api/v1/orgs/#{org_name()}/users/register"
 
     body = %{
       email: params["email"],
       username: params["username"],
       password: params["password"],
-      metadata: %{role: params["role"] || "student"},
-      redirect_uri: FunSheepWeb.Endpoint.url() <> "/auth/verify-email"
+      metadata: %{role: role},
+      redirect_uri: FunSheepWeb.Endpoint.url() <> "/auth/login"
     }
 
     case Req.post(url, json: body) do
       {:ok, %{status: 201, body: resp}} ->
-        {:ok, resp["message"] || "Registration successful! Please check your email."}
+        {:ok,
+         resp["message"] ||
+           "Registration successful! Check your email to verify your account."}
 
       {:ok, %{status: 422, body: %{"errors" => errors}}} ->
         msg =
@@ -111,12 +139,20 @@ defmodule FunSheepWeb.RegisterLive do
         {:error, error}
 
       {:ok, %{status: status, body: body}} ->
-        {:error, "Registration failed (#{status}): #{inspect(body)}"}
+        Logger.error("Registration failed (#{status}): #{inspect(body)}")
+        {:error, "Registration failed (#{status}). Please try again."}
+
+      {:error, %Req.TransportError{reason: :econnrefused}} ->
+        {:error, "Registration service unavailable. Please try again later."}
 
       {:error, reason} ->
-        {:error, "Connection error: #{inspect(reason)}"}
+        Logger.error("Registration error: #{inspect(reason)}")
+        {:error, "Connection error. Please try again."}
     end
   end
+
+  defp normalize_role(role) when role in @roles, do: role
+  defp normalize_role(_), do: nil
 
   defp interactor_url,
     do: Application.get_env(:fun_sheep, :interactor_url, "https://auth.interactor.com")
@@ -127,188 +163,304 @@ defmodule FunSheepWeb.RegisterLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-6">
-      <div class="w-full max-w-md animate-slide-up">
-        <%!-- Logo / Header --%>
-        <div class="text-center mb-8">
-          <div class="inline-block animate-float">
-            <span class="text-7xl">🐑</span>
+    <div class="min-h-screen bg-[#F5F5F7] flex items-center justify-center p-4 sm:p-6">
+      <div class="w-full max-w-md">
+        <%!-- Logo --%>
+        <div class="text-center mb-6">
+          <div class="inline-block">
+            <span class="text-6xl">🐑</span>
           </div>
-          <h1 class="text-3xl font-extrabold text-gray-900 mt-3">Join the Flock!</h1>
-          <p class="text-purple-500 font-medium mt-1">Start your Fun Sheep adventure</p>
+          <h1 class="text-3xl font-bold text-[#1C1C1E] mt-2">Join the Flock!</h1>
+          <p class="text-[#8E8E93] font-medium text-sm mt-1">Start your FunSheep adventure</p>
         </div>
 
         <%!-- Success State --%>
         <div
           :if={@success}
-          class="bg-white rounded-2xl shadow-lg p-8 text-center border border-emerald-200 animate-slide-up"
+          class="bg-white rounded-2xl shadow-md p-8 text-center border border-[#E5E5EA]"
         >
-          <div class="animate-confetti">
+          <div>
             <span class="text-6xl">🎉</span>
           </div>
-          <h2 class="text-xl font-bold text-gray-900 mt-4 mb-2">Check your email!</h2>
-          <p class="text-gray-500 mb-6">{@success_message}</p>
-          <a
-            href="/"
-            class="inline-flex items-center justify-center bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold px-6 py-3 rounded-full shadow-lg shadow-purple-200 transition-all btn-bounce"
+          <h2 class="text-xl font-semibold text-[#1C1C1E] mt-4 mb-2">Check your email!</h2>
+          <p class="text-[#8E8E93] mb-6 text-sm">{@success_message}</p>
+          <.link
+            navigate={~p"/auth/login?role=#{@role}"}
+            class="inline-flex items-center justify-center bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2.5 rounded-full shadow-md transition-colors"
           >
-            Go to Login 🚀
-          </a>
+            Go to sign in
+          </.link>
         </div>
 
         <%!-- Registration Form --%>
-        <div :if={!@success} class="bg-white rounded-2xl shadow-lg p-8 border border-purple-100">
-          <h2 class="text-xl font-bold text-gray-900 text-center mb-6">Create your account ✨</h2>
+        <div :if={!@success} class="bg-white rounded-2xl shadow-md p-6 sm:p-8 border border-[#E5E5EA]">
+          <h2 class="text-xl font-semibold text-[#1C1C1E] text-center mb-5">Create your account</h2>
 
-          <%!-- Base error --%>
+          <.role_selector role={@role} />
+
+          <%!-- Google SSO --%>
+          <a
+            href={~p"/auth/login/redirect?idp_hint=google"}
+            class="w-full inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-full border border-[#E5E5EA] bg-white hover:bg-[#F5F5F7] text-[#1C1C1E] font-medium shadow-sm transition-colors mb-4"
+            data-google-sso
+          >
+            <.google_icon />
+            <span>Continue with Google</span>
+          </a>
+
+          <div class="relative mb-4">
+            <div class="absolute inset-0 flex items-center" aria-hidden="true">
+              <div class="w-full border-t border-[#E5E5EA]"></div>
+            </div>
+            <div class="relative flex justify-center text-xs">
+              <span class="bg-white px-2 text-[#8E8E93]">or with email</span>
+            </div>
+          </div>
+
           <div
             :if={@errors["base"]}
-            class="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm mb-4 flex items-center gap-2"
+            role="alert"
+            class="bg-[#FFE5E3] border border-[#FF3B30]/20 text-[#FF3B30] px-4 py-3 rounded-xl text-sm mb-4 flex items-center gap-2"
           >
-            <span>😬</span> {@errors["base"]}
+            <span aria-hidden="true">⚠️</span> {@errors["base"]}
           </div>
 
           <form phx-change="validate" phx-submit="register" class="space-y-4">
-            <%!-- Role Selection --%>
-            <div>
-              <label class="block text-sm font-bold text-gray-700 mb-2">I am a...</label>
-              <div class="grid grid-cols-3 gap-2">
-                <label
-                  :for={{role, emoji} <- [{"student", "🎒"}, {"parent", "👨‍👩‍👧"}, {"teacher", "🎓"}]}
-                  class={[
-                    "flex flex-col items-center justify-center px-3 py-3 rounded-xl border-2 text-sm font-bold cursor-pointer transition-all",
-                    if(@form["role"] == role,
-                      do: "bg-purple-600 border-purple-600 text-white shadow-md shadow-purple-200",
-                      else: "bg-white border-purple-100 text-gray-700 hover:border-purple-300"
-                    )
-                  ]}
-                >
-                  <input
-                    type="radio"
-                    name="registration[role]"
-                    value={role}
-                    checked={@form["role"] == role}
-                    class="sr-only"
-                  />
-                  <span class="text-xl mb-1">{emoji}</span>
-                  {String.capitalize(role)}
-                </label>
-              </div>
-            </div>
-
             <%!-- Email --%>
             <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1">Email</label>
+              <label for="reg-email" class="block text-sm font-medium text-[#1C1C1E] mb-1.5">
+                Email
+              </label>
               <input
+                id="reg-email"
                 type="email"
                 name="registration[email]"
                 value={@form["email"]}
                 placeholder="you@school.edu"
                 required
+                autocomplete="email"
                 class={[
-                  "w-full px-4 py-3 bg-purple-50/50 border rounded-full outline-none transition-all text-gray-900",
+                  "w-full px-4 py-3 bg-[#F5F5F7] border rounded-full outline-none transition-colors text-[#1C1C1E]",
                   if(@errors["email"],
-                    do: "border-red-300 bg-red-50/50",
-                    else: "border-purple-100 focus:border-purple-400 focus:bg-white"
+                    do: "border-[#FF3B30]/40",
+                    else: "border-transparent focus:border-[#4CD964] focus:bg-white"
                   )
                 ]}
               />
-              <p :if={@errors["email"]} class="text-red-500 text-xs mt-1 font-medium">
+              <p :if={@errors["email"]} class="text-[#FF3B30] text-xs mt-1 font-medium">
                 {@errors["email"]}
               </p>
             </div>
 
             <%!-- Username --%>
             <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1">Username</label>
+              <label for="reg-username" class="block text-sm font-medium text-[#1C1C1E] mb-1.5">
+                Username
+              </label>
               <input
+                id="reg-username"
                 type="text"
                 name="registration[username]"
                 value={@form["username"]}
                 placeholder="Pick something cool"
                 required
+                autocomplete="username"
                 class={[
-                  "w-full px-4 py-3 bg-purple-50/50 border rounded-full outline-none transition-all text-gray-900",
+                  "w-full px-4 py-3 bg-[#F5F5F7] border rounded-full outline-none transition-colors text-[#1C1C1E]",
                   if(@errors["username"],
-                    do: "border-red-300 bg-red-50/50",
-                    else: "border-purple-100 focus:border-purple-400 focus:bg-white"
+                    do: "border-[#FF3B30]/40",
+                    else: "border-transparent focus:border-[#4CD964] focus:bg-white"
                   )
                 ]}
               />
-              <p :if={@errors["username"]} class="text-red-500 text-xs mt-1 font-medium">
+              <p :if={@errors["username"]} class="text-[#FF3B30] text-xs mt-1 font-medium">
                 {@errors["username"]}
               </p>
             </div>
 
             <%!-- Password --%>
             <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1">Password</label>
+              <label for="reg-password" class="block text-sm font-medium text-[#1C1C1E] mb-1.5">
+                Password
+              </label>
               <input
+                id="reg-password"
                 type="password"
                 name="registration[password]"
                 value={@form["password"]}
-                placeholder="Make it strong 💪 (min 8 chars)"
+                placeholder="At least 8 characters"
                 required
+                autocomplete="new-password"
                 class={[
-                  "w-full px-4 py-3 bg-purple-50/50 border rounded-full outline-none transition-all text-gray-900",
+                  "w-full px-4 py-3 bg-[#F5F5F7] border rounded-full outline-none transition-colors text-[#1C1C1E]",
                   if(@errors["password"],
-                    do: "border-red-300 bg-red-50/50",
-                    else: "border-purple-100 focus:border-purple-400 focus:bg-white"
+                    do: "border-[#FF3B30]/40",
+                    else: "border-transparent focus:border-[#4CD964] focus:bg-white"
                   )
                 ]}
               />
-              <p :if={@errors["password"]} class="text-red-500 text-xs mt-1 font-medium">
+              <p :if={@errors["password"]} class="text-[#FF3B30] text-xs mt-1 font-medium">
                 {@errors["password"]}
               </p>
             </div>
 
             <%!-- Confirm Password --%>
             <div>
-              <label class="block text-sm font-semibold text-gray-700 mb-1">Confirm Password</label>
+              <label
+                for="reg-password-confirm"
+                class="block text-sm font-medium text-[#1C1C1E] mb-1.5"
+              >
+                Confirm password
+              </label>
               <input
+                id="reg-password-confirm"
                 type="password"
                 name="registration[password_confirmation]"
                 value={@form["password_confirmation"]}
-                placeholder="One more time!"
+                placeholder="One more time"
                 required
+                autocomplete="new-password"
                 class={[
-                  "w-full px-4 py-3 bg-purple-50/50 border rounded-full outline-none transition-all text-gray-900",
+                  "w-full px-4 py-3 bg-[#F5F5F7] border rounded-full outline-none transition-colors text-[#1C1C1E]",
                   if(@errors["password_confirmation"],
-                    do: "border-red-300 bg-red-50/50",
-                    else: "border-purple-100 focus:border-purple-400 focus:bg-white"
+                    do: "border-[#FF3B30]/40",
+                    else: "border-transparent focus:border-[#4CD964] focus:bg-white"
                   )
                 ]}
               />
-              <p :if={@errors["password_confirmation"]} class="text-red-500 text-xs mt-1 font-medium">
+              <p
+                :if={@errors["password_confirmation"]}
+                class="text-[#FF3B30] text-xs mt-1 font-medium"
+              >
                 {@errors["password_confirmation"]}
               </p>
             </div>
 
-            <%!-- Submit --%>
             <button
               type="submit"
               disabled={@loading}
-              class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold px-6 py-3 rounded-full shadow-lg shadow-purple-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed btn-bounce"
+              class="w-full bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 rounded-full shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {if @loading, do: "Creating... ⏳", else: "Let's Get Started! 🎉"}
+              {if @loading, do: "Creating…", else: "Create account 🎉"}
             </button>
           </form>
 
           <div class="mt-6 text-center">
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-[#8E8E93]">
               Already have an account?
-              <a href="/" class="text-purple-600 hover:text-purple-700 font-bold">
+              <.link
+                navigate={~p"/auth/login?role=#{@role}"}
+                class="text-[#4CD964] hover:text-[#3DBF55] font-semibold"
+              >
                 Sign in
-              </a>
+              </.link>
             </p>
           </div>
         </div>
 
-        <p class="text-center text-xs text-gray-400 mt-8">
-          Powered by Interactor 🔐
+        <p class="text-center text-xs text-[#8E8E93] mt-6">
+          Secured by Interactor 🔐
         </p>
       </div>
     </div>
+    """
+  end
+
+  attr :role, :string, required: true
+
+  defp role_selector(assigns) do
+    ~H"""
+    <div class="mb-5" role="radiogroup" aria-label="I'm registering as">
+      <p class="text-xs font-medium uppercase tracking-wide text-[#8E8E93] mb-2">
+        I'm registering as
+      </p>
+
+      <button
+        type="button"
+        role="radio"
+        aria-checked={@role == "student"}
+        phx-click="select_role"
+        phx-value-role="student"
+        class={[
+          "w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-colors text-left",
+          if(@role == "student",
+            do: "border-[#4CD964] bg-[#E8F8EB]",
+            else: "border-[#E5E5EA] bg-white hover:border-[#4CD964]/40"
+          )
+        ]}
+      >
+        <div class="flex items-center justify-center w-12 h-12 rounded-2xl bg-white shadow-sm text-3xl">
+          🎒
+        </div>
+        <div class="flex-1">
+          <div class="text-base font-semibold text-[#1C1C1E]">Student</div>
+          <div class="text-xs text-[#8E8E93]">The full learning experience</div>
+        </div>
+        <div
+          :if={@role == "student"}
+          aria-hidden="true"
+          class="w-6 h-6 rounded-full bg-[#4CD964] flex items-center justify-center text-white text-sm"
+        >
+          ✓
+        </div>
+      </button>
+
+      <div class="mt-2 flex items-center justify-center gap-2">
+        <span class="text-xs text-[#8E8E93]">or</span>
+        <.role_chip role={@role} value="teacher" label="Teacher" emoji="🎓" />
+        <.role_chip role={@role} value="parent" label="Parent" emoji="👨‍👩‍👧" />
+      </div>
+    </div>
+    """
+  end
+
+  defp google_icon(assigns) do
+    ~H"""
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.98.66-2.23 1.06-3.72 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A10.99 10.99 0 0 0 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.84 14.11A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.11V7.05H2.18A10.99 10.99 0 0 0 1 12c0 1.78.43 3.47 1.18 4.95l3.66-2.84z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 5.38c1.62 0 3.06.56 4.2 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.05l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"
+      />
+    </svg>
+    """
+  end
+
+  attr :role, :string, required: true
+  attr :value, :string, required: true
+  attr :label, :string, required: true
+  attr :emoji, :string, required: true
+
+  defp role_chip(assigns) do
+    ~H"""
+    <button
+      type="button"
+      role="radio"
+      aria-checked={@role == @value}
+      phx-click="select_role"
+      phx-value-role={@value}
+      class={[
+        "inline-flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded-full border text-sm font-medium transition-colors",
+        if(@role == @value,
+          do: "border-[#4CD964] bg-[#E8F8EB] text-[#1C1C1E]",
+          else: "border-[#E5E5EA] bg-white text-[#8E8E93] hover:border-[#4CD964]/40"
+        )
+      ]}
+    >
+      <span aria-hidden="true">{@emoji}</span>
+      <span>{@label}</span>
+    </button>
     """
   end
 end

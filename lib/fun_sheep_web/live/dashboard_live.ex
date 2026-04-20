@@ -37,16 +37,46 @@ defmodule FunSheepWeb.DashboardLive do
     primary_test = List.first(upcoming_tests)
     other_tests = Enum.drop(upcoming_tests, 1)
 
-    {:ok,
-     assign(socket,
-       page_title: "Learn",
-       primary_test: primary_test,
-       other_tests: other_tests,
-       gamification: gamification,
-       course_count: course_count,
-       review_stats: review_stats,
-       daily_summary: daily_summary
-     )}
+    socket =
+      socket
+      |> assign(
+        page_title: "Learn",
+        primary_test: primary_test,
+        other_tests: other_tests,
+        gamification: gamification,
+        course_count: course_count,
+        review_stats: review_stats,
+        daily_summary: daily_summary
+      )
+      |> FunSheepWeb.LiveHelpers.assign_tutorial(
+        key: "dashboard",
+        title: "Welcome to FunSheep!",
+        subtitle: "Here's a quick tour of your home base.",
+        steps: [
+          %{
+            emoji: "📚",
+            title: "Courses",
+            body: "Browse or create courses tailored to what you're studying."
+          },
+          %{
+            emoji: "⚡",
+            title: "Practice",
+            body: "Quick-fire flashcards that adapt to what you've mastered."
+          },
+          %{
+            emoji: "📅",
+            title: "Tests",
+            body: "Track upcoming tests and see your readiness score."
+          },
+          %{
+            emoji: "🔥",
+            title: "Streak + XP",
+            body: "Show up daily to grow your streak and climb the flock."
+          }
+        ]
+      )
+
+    {:ok, socket}
   end
 
   @impl true

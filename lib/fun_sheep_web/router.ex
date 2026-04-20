@@ -27,7 +27,19 @@ defmodule FunSheepWeb.Router do
     get "/register", AuthController, :register
   end
 
-  # OAuth callback routes (regular controller, not LiveView)
+  # Public auth LiveView routes (login/register/password recovery)
+  live_session :public_auth, layout: false do
+    scope "/auth", FunSheepWeb do
+      pipe_through :browser
+
+      live "/login", LoginLive, :index
+      live "/register", RegisterLive, :index
+      live "/forgot-password", ForgotPasswordLive, :index
+      live "/reset-password/:token", ResetPasswordLive, :index
+    end
+  end
+
+  # OAuth callback and session routes (regular controller, not LiveView)
   scope "/auth", FunSheepWeb do
     pipe_through :browser
 

@@ -28,14 +28,39 @@ defmodule FunSheepWeb.ParentDashboardLive do
         [] -> nil
       end
 
-    {:ok,
-     assign(socket,
-       page_title: "Parent Dashboard",
-       user_role: user_role,
-       students: students,
-       selected_id: selected_id,
-       shared_student_id: nil
-     )}
+    socket =
+      socket
+      |> assign(
+        page_title: "Parent Dashboard",
+        user_role: user_role,
+        students: students,
+        selected_id: selected_id,
+        shared_student_id: nil
+      )
+      |> FunSheepWeb.LiveHelpers.assign_tutorial(
+        key: "parent_dashboard",
+        title: "Welcome, grown-up!",
+        subtitle: "Here's what you can do from the parent dashboard.",
+        steps: [
+          %{
+            emoji: "👋",
+            title: "Link a student",
+            body: "Add your child via Guardians to see their progress."
+          },
+          %{
+            emoji: "📊",
+            title: "Track readiness",
+            body: "See upcoming tests and how prepared each student is."
+          },
+          %{
+            emoji: "💬",
+            title: "Share progress",
+            body: "Celebrate wins — share a proof card with family or teachers."
+          }
+        ]
+      )
+
+    {:ok, socket}
   end
 
   @impl true

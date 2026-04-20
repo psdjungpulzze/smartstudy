@@ -78,6 +78,80 @@ defmodule FunSheep.ContentTest do
       assert length(materials) == 1
       assert hd(materials).id == material.id
     end
+
+    test "create_uploaded_material/1 defaults material_kind to :textbook" do
+      material = create_uploaded_material()
+      assert material.material_kind == :textbook
+    end
+
+    test "create_uploaded_material/1 accepts a valid material_kind" do
+      user_role = create_user_role()
+      course = create_course()
+
+      attrs = %{
+        file_path: "test/sample.pdf",
+        file_name: "sample.pdf",
+        file_type: "application/pdf",
+        file_size: 1024,
+        material_kind: :sample_questions,
+        user_role_id: user_role.id,
+        course_id: course.id
+      }
+
+      assert {:ok, material} = Content.create_uploaded_material(attrs)
+      assert material.material_kind == :sample_questions
+    end
+
+    test "create_uploaded_material/1 rejects an unknown material_kind" do
+      user_role = create_user_role()
+      course = create_course()
+
+      attrs = %{
+        file_path: "test/x.pdf",
+        file_name: "x.pdf",
+        file_type: "application/pdf",
+        file_size: 1,
+        material_kind: :not_a_real_kind,
+        user_role_id: user_role.id,
+        course_id: course.id
+      }
+
+      assert {:error, changeset} = Content.create_uploaded_material(attrs)
+      assert %{material_kind: [_ | _]} = errors_on(changeset)
+    end
+
+    test "list_materials_by_course_and_kind/2 filters by a single kind" do
+      course = create_course()
+      textbook = create_uploaded_material(%{course: course, material_kind: :textbook})
+
+      _notes =
+        create_uploaded_material(%{course: course, material_kind: :lecture_notes})
+
+      results = Content.list_materials_by_course_and_kind(course.id, :textbook)
+      assert Enum.map(results, & &1.id) == [textbook.id]
+    end
+
+    test "list_materials_by_course_and_kind/2 filters by a list of kinds" do
+      course = create_course()
+      tb = create_uploaded_material(%{course: course, material_kind: :textbook})
+      sup = create_uploaded_material(%{course: course, material_kind: :supplementary_book})
+      _notes = create_uploaded_material(%{course: course, material_kind: :lecture_notes})
+
+      results =
+        Content.list_materials_by_course_and_kind(course.id, [:textbook, :supplementary_book])
+
+      assert Enum.sort(Enum.map(results, & &1.id)) == Enum.sort([tb.id, sup.id])
+    end
+
+    test "course_material_kinds/1 returns distinct kinds present for a course" do
+      course = create_course()
+      create_uploaded_material(%{course: course, material_kind: :textbook})
+      create_uploaded_material(%{course: course, material_kind: :textbook})
+      create_uploaded_material(%{course: course, material_kind: :sample_questions})
+
+      kinds = Content.course_material_kinds(course.id)
+      assert Enum.sort(kinds) == [:sample_questions, :textbook]
+    end
   end
 
   describe "ocr_pages" do
@@ -162,4 +236,5 @@ defmodule FunSheep.ContentTest do
       assert_raise Ecto.NoResultsError, fn -> Content.get_ocr_page!(page.id) end
     end
   end
+
 end

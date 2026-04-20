@@ -23,6 +23,12 @@ function resetUploadState() {
   uploadState.inFlight = 0
 }
 
+function readMaterialKind(container) {
+  const select = container.querySelector("[data-material-kind-select]")
+  if (select && select.value) return select.value
+  return container.dataset.defaultMaterialKind || "textbook"
+}
+
 function pushUploadState(hook) {
   hook.pushEvent("upload_progress", {
     completed: uploadState.completed,
@@ -32,7 +38,7 @@ function pushUploadState(hook) {
   })
 }
 
-function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfToken) {
+function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfToken, materialKind) {
   uploadState.total += files.length
   uploadState.inFlight += files.length
   let queue = [...files]
@@ -51,6 +57,7 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
     formData.append("batch_id", batchId)
     formData.append("user_role_id", userRoleId)
     formData.append("folder_name", folderMap[file.name] || "")
+    formData.append("material_kind", materialKind || "textbook")
 
     fetch("/api/upload", {
       method: "POST",
@@ -481,13 +488,14 @@ const Hooks = {
       if (!container) return
       const batchId = container.dataset.batchId
       const userRoleId = container.dataset.userRoleId
+      const materialKind = readMaterialKind(container)
       const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
       // Filter hidden files
       const validFiles = files.filter(f => !f.name.startsWith(".") && !IGNORED_PATTERN.test(f.name))
       if (validFiles.length === 0) return
 
-      const uploader = createDirectUploader(this, validFiles, folderMap, batchId, userRoleId, csrf)
+      const uploader = createDirectUploader(this, validFiles, folderMap, batchId, userRoleId, csrf, materialKind)
       // Store on parent DirectUploader hook if available
       const uploaderEl = document.querySelector("[phx-hook='DirectUploader']")
       if (uploaderEl && uploaderEl._liveHook) {
@@ -524,12 +532,13 @@ const Hooks = {
           if (!container) return
           const batchId = container.dataset.batchId
           const userRoleId = container.dataset.userRoleId
+          const materialKind = readMaterialKind(container)
           const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
           // Send folder metadata to LiveView
           this.pushEvent("folder_metadata", { folders: folderMap })
 
-          const uploader = createDirectUploader(this, validFiles, folderMap, batchId, userRoleId, csrf)
+          const uploader = createDirectUploader(this, validFiles, folderMap, batchId, userRoleId, csrf, materialKind)
           const uploaderEl = document.querySelector("[phx-hook='DirectUploader']")
           if (uploaderEl && uploaderEl._liveHook) {
             uploaderEl._liveHook.uploaders.push(uploader)
