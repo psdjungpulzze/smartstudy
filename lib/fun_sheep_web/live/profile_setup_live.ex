@@ -1,6 +1,9 @@
 defmodule FunSheepWeb.ProfileSetupLive do
   use FunSheepWeb, :live_view
 
+  require Logger
+
+  alias FunSheep.Accounts
   alias FunSheep.Geo
   alias FunSheep.Learning
 
@@ -31,6 +34,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
   @impl true
   def mount(_params, _session, socket) do
     countries = Geo.list_countries()
+    existing = load_existing_profile(socket.assigns.current_user)
 
     socket =
       socket
@@ -39,26 +43,102 @@ defmodule FunSheepWeb.ProfileSetupLive do
         step: 1,
         # Step 1 fields
         countries: countries,
-        states: [],
-        districts: [],
-        schools: [],
+        states: existing.states,
+        districts: existing.districts,
+        schools: existing.schools,
         grade_options: @grade_options,
         gender_options: @gender_options,
-        selected_country_id: nil,
-        selected_state_id: nil,
-        selected_district_id: nil,
-        selected_school_id: nil,
-        selected_grade: nil,
-        selected_gender: nil,
-        ethnicity: "",
+        selected_country_id: existing.country_id,
+        selected_state_id: existing.state_id,
+        selected_district_id: existing.district_id,
+        selected_school_id: existing.school_id,
+        selected_grade: existing.grade,
+        selected_gender: existing.gender,
+        ethnicity: existing.ethnicity || "",
         step1_errors: %{},
         # Step 2 fields
-        hobbies: [],
-        selected_hobby_ids: MapSet.new(),
-        hobby_interests: %{}
+        hobbies: Learning.list_hobbies(),
+        selected_hobby_ids: existing.hobby_ids,
+        hobby_interests: existing.hobby_interests
       )
 
     {:ok, socket}
+  end
+
+  defp load_existing_profile(current_user) do
+    empty = %{
+      grade: nil,
+      gender: nil,
+      ethnicity: nil,
+      school_id: nil,
+      country_id: nil,
+      state_id: nil,
+      district_id: nil,
+      states: [],
+      districts: [],
+      schools: [],
+      hobby_ids: MapSet.new(),
+      hobby_interests: %{}
+    }
+
+    interactor_id = current_user && current_user["interactor_user_id"]
+
+    case interactor_id && Accounts.get_user_role_by_interactor_id(interactor_id) do
+      %Accounts.UserRole{} = user_role ->
+        location = rebuild_location_cascades(user_role.school_id)
+
+        student_hobbies = Learning.list_hobbies_for_user(user_role.id)
+
+        hobby_ids =
+          student_hobbies
+          |> Enum.map(& &1.hobby_id)
+          |> MapSet.new()
+
+        hobby_interests =
+          Map.new(student_hobbies, fn sh ->
+            {sh.hobby_id, get_in(sh.specific_interests, ["text"]) || ""}
+          end)
+
+        Map.merge(empty, %{
+          grade: user_role.grade,
+          gender: user_role.gender,
+          ethnicity: user_role.ethnicity,
+          school_id: user_role.school_id,
+          country_id: location.country_id,
+          state_id: location.state_id,
+          district_id: location.district_id,
+          states: location.states,
+          districts: location.districts,
+          schools: location.schools,
+          hobby_ids: hobby_ids,
+          hobby_interests: hobby_interests
+        })
+
+      _ ->
+        empty
+    end
+  end
+
+  defp rebuild_location_cascades(nil) do
+    %{country_id: nil, state_id: nil, district_id: nil, states: [], districts: [], schools: []}
+  end
+
+  defp rebuild_location_cascades(school_id) do
+    with %FunSheep.Geo.School{district_id: district_id} <- Geo.get_school(school_id),
+         %FunSheep.Geo.District{state_id: state_id} = district <- Geo.get_district(district_id),
+         %FunSheep.Geo.State{country_id: country_id} <- Geo.get_state(state_id) do
+      %{
+        country_id: country_id,
+        state_id: state_id,
+        district_id: district_id,
+        states: Geo.list_states_by_country(country_id),
+        districts: Geo.list_districts_by_state(state_id),
+        schools: Geo.list_schools_by_district(district.id)
+      }
+    else
+      _ ->
+        %{country_id: nil, state_id: nil, district_id: nil, states: [], districts: [], schools: []}
+    end
   end
 
   @impl true
@@ -151,10 +231,19 @@ defmodule FunSheepWeb.ProfileSetupLive do
     errors = validate_step1(socket.assigns)
 
     if map_size(errors) == 0 do
-      # Save profile immediately so data persists even if user abandons flow
-      save_profile_now(socket.assigns)
-      hobbies = Learning.list_hobbies()
-      {:noreply, assign(socket, step: 2, hobbies: hobbies, step1_errors: %{})}
+      case save_profile_now(socket.assigns) do
+        {:ok, _user_role} ->
+          hobbies = Learning.list_hobbies()
+          {:noreply, assign(socket, step: 2, hobbies: hobbies, step1_errors: %{})}
+
+        {:error, reason} ->
+          Logger.error("ProfileSetupLive demographics save failed: #{inspect(reason)}")
+
+          {:noreply,
+           socket
+           |> put_flash(:error, "Could not save profile: #{format_save_error(reason)}")
+           |> assign(step1_errors: %{})}
+      end
     else
       {:noreply, assign(socket, step1_errors: errors)}
     end
@@ -162,28 +251,27 @@ defmodule FunSheepWeb.ProfileSetupLive do
 
   def handle_event("complete_hobbies", _params, socket) do
     assigns = socket.assigns
-    user = assigns.current_user
-    interactor_id = user["interactor_user_id"]
 
-    # Save hobbies
-    if interactor_id do
-      case FunSheep.Accounts.get_user_role_by_interactor_id(interactor_id) do
-        %FunSheep.Accounts.UserRole{} = user_role ->
-          save_hobbies(
-            user_role.id,
-            assigns.selected_hobby_ids,
-            assigns.hobby_interests
-          )
+    # Safety net: re-save profile in case step 1's save was missed
+    # (e.g. user landed directly on step 2 via back/forward, or earlier save silently failed).
+    with {:ok, user_role} <- save_profile_now(assigns),
+         :ok <-
+           save_hobbies(
+             user_role.id,
+             assigns.selected_hobby_ids,
+             assigns.hobby_interests
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Profile setup complete!")
+       |> redirect(to: "/dashboard")}
+    else
+      {:error, reason} ->
+        Logger.error("ProfileSetupLive complete_hobbies save failed: #{inspect(reason)}")
 
-        _ ->
-          :ok
-      end
+        {:noreply,
+         put_flash(socket, :error, "Could not save profile: #{format_save_error(reason)}")}
     end
-
-    {:noreply,
-     socket
-     |> put_flash(:info, "Profile setup complete!")
-     |> redirect(to: "/dashboard")}
   end
 
   def handle_event("prev_step", _params, %{assigns: %{step: step}} = socket) when step > 1 do
@@ -593,40 +681,62 @@ defmodule FunSheepWeb.ProfileSetupLive do
 
   defp save_profile_now(assigns) do
     user = assigns.current_user
-    interactor_id = user["interactor_user_id"]
+    interactor_id = user && user["interactor_user_id"]
 
-    if interactor_id do
-      FunSheep.Accounts.upsert_user_profile(interactor_id, %{
-        role: user["role"] || "student",
-        email: user["email"] || "unknown@example.com",
-        display_name: user["display_name"],
-        grade: assigns.selected_grade,
-        gender: assigns.selected_gender,
-        ethnicity: assigns.ethnicity,
-        school_id: non_empty(assigns.selected_school_id)
-      })
+    cond do
+      is_nil(interactor_id) or interactor_id == "" ->
+        {:error, :missing_interactor_user_id}
+
+      true ->
+        Accounts.upsert_user_profile(interactor_id, %{
+          role: user["role"] || "student",
+          email: user["email"] || "unknown@example.com",
+          display_name: user["display_name"],
+          grade: assigns.selected_grade,
+          gender: assigns.selected_gender,
+          ethnicity: assigns.ethnicity,
+          school_id: non_empty(assigns.selected_school_id)
+        })
     end
   end
 
   defp save_hobbies(user_role_id, selected_ids, interests) do
-    existing = FunSheep.Learning.list_hobbies_for_user(user_role_id)
+    existing = Learning.list_hobbies_for_user(user_role_id)
 
-    for sh <- existing do
+    Enum.each(existing, fn sh ->
       unless MapSet.member?(selected_ids, sh.hobby_id) do
-        FunSheep.Learning.delete_student_hobby(sh)
+        Learning.delete_student_hobby(sh)
       end
-    end
+    end)
 
     existing_hobby_ids = MapSet.new(existing, & &1.hobby_id)
 
-    for hobby_id <- selected_ids do
-      unless MapSet.member?(existing_hobby_ids, hobby_id) do
-        FunSheep.Learning.create_student_hobby(%{
-          user_role_id: user_role_id,
-          hobby_id: hobby_id,
-          specific_interests: %{"text" => Map.get(interests, hobby_id, "")}
-        })
+    selected_ids
+    |> Enum.reject(&MapSet.member?(existing_hobby_ids, &1))
+    |> Enum.reduce_while(:ok, fn hobby_id, :ok ->
+      case Learning.create_student_hobby(%{
+             user_role_id: user_role_id,
+             hobby_id: hobby_id,
+             specific_interests: %{"text" => Map.get(interests, hobby_id, "")}
+           }) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, changeset} -> {:halt, {:error, changeset}}
       end
-    end
+    end)
   end
+
+  defp format_save_error(%Ecto.Changeset{} = changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {k, v}, acc ->
+        String.replace(acc, "%{#{k}}", to_string(v))
+      end)
+    end)
+    |> Enum.map_join("; ", fn {field, errors} -> "#{field} #{Enum.join(errors, ", ")}" end)
+  end
+
+  defp format_save_error(:missing_interactor_user_id),
+    do: "you're not logged in. Please sign in again."
+
+  defp format_save_error(other), do: inspect(other)
 end

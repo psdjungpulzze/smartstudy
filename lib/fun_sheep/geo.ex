@@ -50,6 +50,8 @@ defmodule FunSheep.Geo do
 
   def get_state!(id), do: Repo.get!(State, id)
 
+  def get_state(id), do: Repo.get(State, id)
+
   def create_state(attrs \\ %{}) do
     %State{}
     |> State.changeset(attrs)
@@ -83,6 +85,8 @@ defmodule FunSheep.Geo do
 
   def get_district!(id), do: Repo.get!(District, id)
 
+  def get_district(id), do: Repo.get(District, id)
+
   def create_district(attrs \\ %{}) do
     %District{}
     |> District.changeset(attrs)
@@ -115,6 +119,8 @@ defmodule FunSheep.Geo do
   end
 
   def get_school!(id), do: Repo.get!(School, id)
+
+  def get_school(id), do: Repo.get(School, id)
 
   def create_school(attrs \\ %{}) do
     %School{}

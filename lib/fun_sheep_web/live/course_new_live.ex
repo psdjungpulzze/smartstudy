@@ -195,7 +195,7 @@ defmodule FunSheepWeb.CourseNewLive do
   def handle_event("no_textbook", _params, socket) do
     {:noreply,
      assign(socket,
-       textbook_mode: :none,
+       textbook_mode: :skipped,
        selected_textbook: nil,
        custom_textbook_name: ""
      )}
@@ -511,6 +511,23 @@ defmodule FunSheepWeb.CourseNewLive do
         </button>
       </div>
 
+      <%!-- No-textbook confirmation --%>
+      <div
+        :if={@textbook_mode == :skipped}
+        class="flex items-center justify-between gap-4 p-4 border border-gray-200 bg-gray-50 rounded-2xl"
+      >
+        <p class="text-sm text-gray-700">
+          Proceeding without a textbook. We'll search the web for study materials.
+        </p>
+        <button
+          type="button"
+          phx-click="back_to_textbook_list"
+          class="text-sm font-medium text-purple-600 hover:text-purple-800 shrink-0"
+        >
+          Change
+        </button>
+      </div>
+
       <%!-- Custom textbook name input --%>
       <div :if={@textbook_mode == :custom}>
         <input
@@ -566,7 +583,7 @@ defmodule FunSheepWeb.CourseNewLive do
           class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 max-h-72 overflow-y-auto"
         >
           <button
-            :for={textbook <- Enum.take(@textbooks, 8)}
+            :for={textbook <- Enum.take(@textbooks, 24)}
             type="button"
             phx-click="select_textbook"
             phx-value-key={textbook_field(textbook, :openlibrary_key)}

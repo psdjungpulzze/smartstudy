@@ -23,7 +23,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   require Logger
 
-  @max_sources_per_run 10
+  @max_sources_per_run 50
   @max_page_size 100_000
 
   @impl Oban.Worker

@@ -48,7 +48,7 @@ defmodule FunSheep.Courses.TextbookSearch do
             "q" => search_term,
             "fields" =>
               "key,title,author_name,publisher,edition_count,isbn,cover_i,first_publish_year,subject",
-            "limit" => "8",
+            "limit" => "24",
             "lang" => "en"
           })
 

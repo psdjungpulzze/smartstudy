@@ -244,6 +244,20 @@ defmodule FunSheep.Content do
     }
   end
 
+  @doc """
+  Resets all failed discovered sources back to "discovered" so they can be retried.
+  Returns the number of sources reset.
+  """
+  def reset_failed_sources(course_id) do
+    {count, _} =
+      from(ds in DiscoveredSource,
+        where: ds.course_id == ^course_id and ds.status == "failed"
+      )
+      |> Repo.update_all(set: [status: "discovered"])
+
+    count
+  end
+
   def get_discovered_source!(id), do: Repo.get!(DiscoveredSource, id)
 
   def create_discovered_source(attrs) do

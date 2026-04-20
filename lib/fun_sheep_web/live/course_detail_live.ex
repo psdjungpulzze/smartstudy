@@ -237,6 +237,35 @@ defmodule FunSheepWeb.CourseDetailLive do
     {:noreply, assign(socket, show_sources: !socket.assigns.show_sources)}
   end
 
+  def handle_event("retry_failed_sources", _params, socket) do
+    course_id = socket.assigns.course.id
+    reset_count = Content.reset_failed_sources(course_id)
+
+    if reset_count > 0 do
+      # Re-run the scraper to process the reset sources
+      FunSheep.Workers.WebQuestionScraperWorker.enqueue(course_id)
+    end
+
+    # Refresh sources list
+    discovered_sources = Content.list_discovered_sources(course_id)
+
+    {:noreply,
+     socket
+     |> assign(discovered_sources: discovered_sources)
+     |> put_flash(:info, "Retrying #{reset_count} failed sources...")}
+  end
+
+  def handle_event("process_remaining_sources", _params, socket) do
+    course_id = socket.assigns.course.id
+
+    # Re-run the scraper — it picks up sources with status "discovered"
+    FunSheep.Workers.WebQuestionScraperWorker.enqueue(course_id)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Processing remaining sources...")}
+  end
+
   @impl true
   def handle_event("toggle_chapter", %{"id" => chapter_id}, socket) do
     expanded = socket.assigns.expanded_chapters
@@ -595,6 +624,7 @@ defmodule FunSheepWeb.CourseDetailLive do
             @course.processing_step != ""
         }
         step={@course.processing_step}
+        course={@course}
       />
 
       <%!-- ═══ DISCOVERED SOURCES (only when processing complete) ═══ --%>
@@ -1145,7 +1175,7 @@ defmodule FunSheepWeb.CourseDetailLive do
           state={@step3_state}
           icon="hero-document-text"
           title="Processing uploaded materials"
-          subtitle={"#{@course.ocr_completed_count} of #{@course.ocr_total_count} files processed"}
+          subtitle={"#{min(@course.ocr_completed_count, @course.ocr_total_count)} of #{@course.ocr_total_count} files processed"}
         />
 
         <%!-- OCR progress bar --%>
@@ -1153,7 +1183,7 @@ defmodule FunSheepWeb.CourseDetailLive do
           <div class="w-full bg-[#F5F5F7] rounded-full h-1.5">
             <div
               class="bg-[#4CD964] h-1.5 rounded-full transition-all duration-500"
-              style={"width: #{if @course.ocr_total_count > 0, do: round(@course.ocr_completed_count / @course.ocr_total_count * 100), else: 0}%"}
+              style={"width: #{if @course.ocr_total_count > 0, do: min(round(@course.ocr_completed_count / @course.ocr_total_count * 100), 100), else: 0}%"}
             />
           </div>
         </div>
@@ -1337,22 +1367,40 @@ defmodule FunSheepWeb.CourseDetailLive do
   end
 
   attr :step, :string, required: true
+  attr :course, :map, required: true
 
   defp ready_banner(assigns) do
     ~H"""
-    <div class="bg-green-50 border border-green-200 rounded-2xl p-4 mb-6">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <.icon name="hero-check-circle" class="w-5 h-5 text-green-600 shrink-0" />
-          <p class="text-sm font-medium text-green-700">{@step}</p>
+    <div class="bg-green-50 border border-green-200 rounded-2xl p-5 mb-6">
+      <div class="flex items-start justify-between">
+        <div class="flex items-start gap-3">
+          <.icon name="hero-check-circle" class="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+          <div>
+            <p class="text-sm font-semibold text-green-700">Course ready!</p>
+            <p class="text-xs text-green-600 mt-0.5">{@step}</p>
+          </div>
         </div>
         <button
           phx-click="reprocess_course"
           data-confirm="This will delete all existing chapters, questions, and OCR data, then reprocess everything from scratch. Continue?"
-          class="text-xs font-bold text-purple-600 hover:text-purple-800 px-3 py-1.5 rounded-full border border-purple-200 hover:bg-purple-50 transition-colors"
+          class="text-xs font-medium text-[#8E8E93] hover:text-[#FF3B30] px-3 py-1.5 rounded-full border border-[#E5E5EA] hover:border-red-200 hover:bg-red-50 transition-colors shrink-0"
         >
           Reprocess
         </button>
+      </div>
+      <div class="flex items-center gap-2 mt-3 ml-8">
+        <.link
+          navigate={~p"/courses/#{@course.id}/practice"}
+          class="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-[#4CD964] hover:bg-[#3DBF55] px-4 py-2 rounded-full shadow-sm transition-colors"
+        >
+          <.icon name="hero-bolt" class="w-3.5 h-3.5" /> Start Practicing
+        </.link>
+        <.link
+          navigate={~p"/courses/#{@course.id}/questions"}
+          class="inline-flex items-center gap-1.5 text-xs font-medium text-[#007AFF] hover:text-blue-700 px-3 py-2 rounded-full border border-blue-200 hover:bg-blue-50 transition-colors"
+        >
+          <.icon name="hero-rectangle-stack" class="w-3.5 h-3.5" /> View Question Bank
+        </.link>
       </div>
     </div>
     """
@@ -1612,12 +1660,16 @@ defmodule FunSheepWeb.CourseDetailLive do
     by_type = Enum.group_by(assigns.sources, & &1.source_type)
     total_questions = assigns.sources |> Enum.map(& &1.questions_extracted) |> Enum.sum()
     processed = Enum.count(assigns.sources, &(&1.status == "processed"))
+    failed = Enum.count(assigns.sources, &(&1.status == "failed"))
+    found = Enum.count(assigns.sources, &(&1.status == "discovered"))
 
     assigns =
       assign(assigns,
         by_type: by_type,
         total_questions: total_questions,
-        processed_count: processed
+        processed_count: processed,
+        failed_count: failed,
+        found_count: found
       )
 
     ~H"""
@@ -1649,6 +1701,29 @@ defmodule FunSheepWeb.CourseDetailLive do
       </button>
 
       <div :if={@show_sources} class="mt-3 space-y-3">
+        <%!-- Action bar for failed/remaining sources --%>
+        <div :if={@failed_count > 0 || @found_count > 0} class="flex items-center gap-2 px-1">
+          <button
+            :if={@failed_count > 0}
+            phx-click="retry_failed_sources"
+            class="inline-flex items-center gap-1.5 text-xs font-medium text-[#FF3B30] hover:text-red-700 px-3 py-1.5 rounded-full border border-red-200 hover:bg-red-50 transition-colors"
+          >
+            <.icon name="hero-arrow-path" class="w-3.5 h-3.5" />
+            Retry {@failed_count} failed
+          </button>
+          <button
+            :if={@found_count > 0}
+            phx-click="process_remaining_sources"
+            class="inline-flex items-center gap-1.5 text-xs font-medium text-[#007AFF] hover:text-blue-700 px-3 py-1.5 rounded-full border border-blue-200 hover:bg-blue-50 transition-colors"
+          >
+            <.icon name="hero-play" class="w-3.5 h-3.5" />
+            Process {@found_count} remaining
+          </button>
+          <span class="text-xs text-[#8E8E93] ml-auto">
+            {@processed_count} done · {@failed_count} failed · {@found_count} pending
+          </span>
+        </div>
+
         <div
           :for={{type, sources} <- @by_type}
           class="bg-white rounded-2xl shadow-sm p-4"

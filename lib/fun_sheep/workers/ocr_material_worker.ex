@@ -44,7 +44,7 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
       course = Courses.get_course!(course_id)
 
       Courses.update_course(course, %{
-        processing_step: "OCR processing: #{new_count}/#{total} files..."
+        processing_step: "OCR processing: #{min(new_count, total)}/#{total} files..."
       })
     end
 

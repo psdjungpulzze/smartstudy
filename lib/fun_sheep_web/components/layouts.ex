@@ -116,10 +116,10 @@ defmodule FunSheepWeb.Layouts do
     case role do
       "student" ->
         [
-          %{label: "Practice", path: "/practice", icon: "hero-bolt"},
           %{label: "Learn", path: "/dashboard", icon: "hero-home"},
           %{label: "Courses", path: "/courses", icon: "hero-book-open"},
-          %{label: "Flock", path: "/leaderboard", icon: "hero-trophy"}
+          %{label: "Practice", path: "/practice", icon: "hero-bolt"},
+          %{label: "Flocks", path: "/leaderboard", icon: "hero-trophy"}
         ]
 
       "parent" ->
