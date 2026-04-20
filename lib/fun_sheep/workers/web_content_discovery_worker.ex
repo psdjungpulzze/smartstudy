@@ -106,7 +106,15 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
       all_results
       |> Enum.uniq_by(fn r -> r[:url] || r[:title] end)
 
-    broadcast(course_id, %{sub_step: "Saving #{length(unique_results)} unique sources..."})
+    broadcast(course_id, %{sub_step: "Validating #{length(unique_results)} URLs..."})
+
+    # The Interactor `web_search` agent is an LLM — it hallucinates URLs that
+    # look plausible but resolve to NXDOMAIN, 404, or 403 walls. Persisting
+    # these poisons the scraper queue (every retry hits the same dead URL).
+    # HEAD-prefilter so only URLs that actually exist make it to the DB.
+    unique_results = validate_urls(unique_results)
+
+    broadcast(course_id, %{sub_step: "Saving #{length(unique_results)} verified sources..."})
 
     # Store discovered sources
     stored_count =
@@ -350,6 +358,87 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
         Logger.error("[WebDiscovery] Failed to parse search response text")
         {:error, :parse_failed}
     end
+  end
+
+  # --- URL Validation ---
+
+  # HEAD-request each candidate URL in parallel; drop anything that doesn't
+  # resolve (NXDOMAIN, timeout, 4xx, 5xx). Some sites block HEAD with 405 —
+  # fall back to GET with Range:bytes=0-0 in that case so we don't lose
+  # legitimate sources.
+  defp validate_urls(results) do
+    results
+    |> Task.async_stream(
+      fn r ->
+        case probe_url(r[:url]) do
+          :ok -> {:keep, r}
+          {:drop, reason} -> {:drop, r, reason}
+        end
+      end,
+      max_concurrency: 20,
+      timeout: 10_000,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.flat_map(fn
+      {:ok, {:keep, r}} ->
+        [r]
+
+      {:ok, {:drop, r, reason}} ->
+        Logger.debug(
+          "[WebDiscovery] Dropped hallucinated URL #{inspect(r[:url])}: #{inspect(reason)}"
+        )
+
+        []
+
+      {:exit, _} ->
+        []
+    end)
+  end
+
+  defp probe_url(nil), do: {:drop, :no_url}
+  defp probe_url(""), do: {:drop, :empty_url}
+
+  defp probe_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        do_probe(url)
+
+      _ ->
+        {:drop, :malformed_url}
+    end
+  end
+
+  defp do_probe(url) do
+    case Req.head(url, receive_timeout: 5_000, max_redirects: 3, retry: false) do
+      {:ok, %{status: status}} when status in 200..399 ->
+        :ok
+
+      # Some sites reject HEAD with 405/501 but accept GET — try a tiny GET.
+      {:ok, %{status: status}} when status in [405, 501] ->
+        case Req.get(url,
+               receive_timeout: 5_000,
+               max_redirects: 3,
+               retry: false,
+               headers: [{"range", "bytes=0-0"}]
+             ) do
+          {:ok, %{status: s}} when s in 200..399 -> :ok
+          {:ok, %{status: s}} -> {:drop, {:http_status, s}}
+          {:error, reason} -> {:drop, reason}
+        end
+
+      {:ok, %{status: status}} ->
+        {:drop, {:http_status, status}}
+
+      {:error, %Req.TransportError{reason: reason}} ->
+        {:drop, {:transport, reason}}
+
+      {:error, reason} ->
+        {:drop, reason}
+    end
+  rescue
+    _ -> {:drop, :exception}
   end
 
   # --- Known Textbook Discovery ---

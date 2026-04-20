@@ -142,9 +142,16 @@ if config_env() == :prod do
   # is free to scale to zero. The dedicated funsheep-worker service runs
   # with RUN_OBAN_WORKERS=true and min-instances=1 to process background jobs.
   # Lifeline auto-recovers jobs orphaned by any unexpected container death.
+  #
+  # Concurrency tuning: ocr=15 lets a 1000-image textbook drain in ~70s of
+  # wall clock instead of ~6min. Vision quota default is 1800 req/min, so
+  # 15 concurrent at ~1s each (15 req/sec) stays well under the ceiling.
+  # ai=5 covers question generation + content discovery without saturating
+  # the OpenAI rate limit on the Interactor agent endpoint.
+  # POOL_SIZE on the worker container must be >= sum of these queues.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      [default: 10, ocr: 3, ai: 2, ingest: 1]
+      [default: 10, ocr: 15, ai: 5, ingest: 1]
     else
       false
     end

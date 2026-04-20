@@ -269,12 +269,43 @@ else
   ok "Public /health: 200"
 fi
 
+# --- Promote worker service in lockstep ---------------------------------
+# funsheep-worker drains the Oban queue using the same image as funsheep-api
+# but with RUN_OBAN_WORKERS=true. Without this step, the worker would keep
+# running stale code (and missing newly added secrets) after every deploy —
+# which is exactly how production silently failed for ~5 hours after the
+# Vision API key fix shipped to the api but not the worker.
+WORKER_SERVICE="funsheep-worker"
+if gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" >/dev/null 2>&1; then
+  NEW_IMAGE=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" \
+    --format='value(spec.template.spec.containers[0].image)')
+
+  info "Promoting $WORKER_SERVICE to image $NEW_IMAGE"
+  # POOL_SIZE must cover the sum of Oban queue concurrencies in runtime.exs
+  # (default=10 + ocr=15 + ai=5 + ingest=1 = 31) plus a small headroom for
+  # Lifeline / Pruner plugins. Setting it to 35 leaves 4 slots of slack.
+  gcloud run services update "$WORKER_SERVICE" \
+    --region="$GCP_REGION" \
+    --image="$NEW_IMAGE" \
+    --update-env-vars="POOL_SIZE=35" \
+    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest" \
+    --quiet >/dev/null
+
+  WORKER_REVISION=$(gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" \
+    --format='value(status.latestReadyRevisionName)')
+  ok "Worker promoted: $WORKER_REVISION"
+else
+  warn "$WORKER_SERVICE service not found in $GCP_REGION — Oban jobs will not drain. Create it before next deploy."
+fi
+
 echo ""
 echo "${GREEN}====================================================${NC}"
 echo "${GREEN} Deploy succeeded${NC}"
 echo "${GREEN}====================================================${NC}"
-echo "  Revision: $NEW_REVISION"
-echo "  URL:      https://$PHX_HOST"
+echo "  API Revision:    $NEW_REVISION"
+echo "  Worker Revision: ${WORKER_REVISION:-<not deployed>}"
+echo "  URL:             https://$PHX_HOST"
 echo ""
 echo "  Tail logs:  gcloud run services logs tail $CLOUD_RUN_SERVICE --region=$GCP_REGION"
+echo "  Tail worker: gcloud run services logs tail $WORKER_SERVICE --region=$GCP_REGION"
 echo "  Rollback:   gcloud run services update-traffic $CLOUD_RUN_SERVICE --region=$GCP_REGION --to-revisions=${PREV_REVISION:-PREV}=100"
