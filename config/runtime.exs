@@ -75,13 +75,22 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  config :fun_sheep, FunSheep.Repo,
-    # ssl: true,
+  base_repo_config = [
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
     socket_options: maybe_ipv6
+  ]
+
+  # When deployed on Cloud Run with Cloud SQL via Unix socket,
+  # DB_SOCKET_DIR is set (e.g. /cloudsql/PROJECT:REGION:INSTANCE)
+  # and Postgrex uses the socket instead of the URL's host.
+  repo_config =
+    case System.get_env("DB_SOCKET_DIR") do
+      nil -> base_repo_config
+      socket_dir -> Keyword.put(base_repo_config, :socket_dir, socket_dir)
+    end
+
+  config :fun_sheep, FunSheep.Repo, repo_config
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
@@ -99,6 +108,8 @@ if config_env() == :prod do
 
   config :fun_sheep, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
   config :fun_sheep, FunSheepWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
@@ -106,9 +117,49 @@ if config_env() == :prod do
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      ip: {0, 0, 0, 0, 0, 0, 0, 0},
+      port: port
     ],
     secret_key_base: secret_key_base
+
+  # Oban: split architecture for Cloud Run.
+  # The web service (funsheep-api) runs with RUN_OBAN_WORKERS unset —
+  # Oban still accepts job inserts but processes no queues, so the container
+  # is free to scale to zero. The dedicated funsheep-worker service runs
+  # with RUN_OBAN_WORKERS=true and min-instances=1 to process background jobs.
+  # Lifeline auto-recovers jobs orphaned by any unexpected container death.
+  oban_queues =
+    if System.get_env("RUN_OBAN_WORKERS") == "true" do
+      [default: 10, ocr: 3, ai: 2]
+    else
+      false
+    end
+
+  config :fun_sheep, Oban,
+    repo: FunSheep.Repo,
+    queues: oban_queues,
+    plugins: [
+      Oban.Plugins.Pruner,
+      {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(10)}
+    ]
+
+  interactor_client_id =
+    System.get_env("INTERACTOR_CLIENT_ID") ||
+      raise "environment variable INTERACTOR_CLIENT_ID is missing."
+
+  interactor_client_secret =
+    System.get_env("INTERACTOR_CLIENT_SECRET") ||
+      raise "environment variable INTERACTOR_CLIENT_SECRET is missing."
+
+  config :fun_sheep,
+    interactor_mock: false,
+    interactor_url: System.get_env("INTERACTOR_URL", "https://auth.interactor.com"),
+    interactor_core_url: System.get_env("INTERACTOR_CORE_URL", "https://core.interactor.com"),
+    interactor_ukb_url: System.get_env("INTERACTOR_UKB_URL", "https://ukb.interactor.com"),
+    interactor_udb_url: System.get_env("INTERACTOR_UDB_URL", "https://udb.interactor.com"),
+    interactor_org_name: System.get_env("INTERACTOR_ORG_NAME", "studysmart"),
+    interactor_client_id: interactor_client_id,
+    interactor_client_secret: interactor_client_secret
 
   # ## SSL Support
   #
