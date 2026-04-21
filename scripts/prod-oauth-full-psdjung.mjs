@@ -3,13 +3,16 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
+import { loadCredentials } from './lib/load-credentials.mjs';
+
+const env = loadCredentials(['TEST_ACCOUNT_PASSWORD', 'TEST_PARENT1_EMAIL', 'TEST_PARENT1_USERNAME']);
 
 const BASE = '/home/pulzze/Documents/GitHub/personal/funsheep/screenshots';
 const TASK_DIR = 'prod-oauth-full-psdjung';
 const ACCOUNT = {
-  email: 'psdjung@gmail.com',
-  username: 'psdjung',
-  password: 'Abcdef123456#',
+  email: env.TEST_PARENT1_EMAIL,
+  username: env.TEST_PARENT1_USERNAME,
+  password: env.TEST_ACCOUNT_PASSWORD,
   expectedRole: 'parent',
 };
 

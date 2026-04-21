@@ -5,15 +5,21 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const { loadCredentials } = require('./lib/load-credentials.cjs');
+
+const env = loadCredentials([
+  'TEST_ACCOUNT_PASSWORD',
+  'TEST_STUDENT_EMAIL', 'TEST_PARENT1_EMAIL', 'TEST_PARENT2_EMAIL',
+]);
 
 const BASE = 'https://funsheep.com';
-const PASSWORD = 'Abcdef123456#';
+const PASSWORD = env.TEST_ACCOUNT_PASSWORD;
 const SCREENSHOTS_ROOT = '/home/pulzze/Documents/GitHub/personal/funsheep/screenshots';
 
 const ACCOUNTS = [
-  { role: 'student', email: 'clairehyj@gmail.com', label: 'Student' },
-  { role: 'parent', email: 'psdjung@gmail.com', label: 'Parent' },
-  { role: 'parent', email: 'jasminhhr@hotmail.com', label: 'Parent' },
+  { role: 'student', email: env.TEST_STUDENT_EMAIL, label: 'Student' },
+  { role: 'parent', email: env.TEST_PARENT1_EMAIL, label: 'Parent' },
+  { role: 'parent', email: env.TEST_PARENT2_EMAIL, label: 'Parent' },
 ];
 
 const results = {

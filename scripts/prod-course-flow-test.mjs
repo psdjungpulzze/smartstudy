@@ -11,12 +11,15 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
+import { loadCredentials } from './lib/load-credentials.mjs';
+
+const env = loadCredentials(['TEST_ACCOUNT_PASSWORD', 'TEST_STUDENT_EMAIL', 'TEST_STUDENT_USERNAME']);
 
 const SCREENSHOT_DIR = '/home/pulzze/Documents/GitHub/personal/funsheep/screenshots/prod-course-flow-test';
 const ACCOUNT = {
-  email: 'clairehyj@gmail.com',
-  username: 'clairehyj',
-  password: 'Abcdef123456#',
+  email: env.TEST_STUDENT_EMAIL,
+  username: env.TEST_STUDENT_USERNAME,
+  password: env.TEST_ACCOUNT_PASSWORD,
 };
 
 const results = {

@@ -6,9 +6,12 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const { loadCredentials } = require('./lib/load-credentials.cjs');
+
+const env = loadCredentials(['TEST_ACCOUNT_PASSWORD']);
 
 const BASE = 'https://funsheep.com';
-const PASSWORD = 'Abcdef123456#';
+const PASSWORD = env.TEST_ACCOUNT_PASSWORD;
 const SCREENSHOTS_ROOT = '/home/pulzze/Documents/GitHub/personal/funsheep/screenshots';
 
 function shot(page, dir, name) {
