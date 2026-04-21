@@ -13,21 +13,22 @@ defmodule FunSheep.Application do
         FunSheep.Repo,
         {DNSCluster, query: Application.get_env(:fun_sheep, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: FunSheep.PubSub},
-        # Dedicated Finch pool for Google Vision OCR. Using Req's default
-        # pool under concurrent OCR load produced `:closed` + `sndbuf :einval`
-        # storms because sockets were recycled across many destinations and
-        # hit invalid states between HTTP/2 upgrade attempts and keep-alive
-        # idling. A per-host pool with short idle timeouts and HTTP/1.1
-        # pinned keeps sockets predictable.
+        # Dedicated Finch pool for Google Vision OCR. HTTP/2 multiplexes
+        # many concurrent requests over a single connection with built-in
+        # ping/keepalive, which dodges the `sndbuf :einval` error we hit
+        # when Finch reused HTTP/1 sockets that Cloud Run's egress NAT
+        # had already silently closed. Small `size` is intentional: HTTP/2
+        # lets one connection carry many streams, so more sockets just
+        # invites the same close-race we're trying to avoid.
         {Finch,
          name: FunSheep.VisionFinch,
          pools: %{
            :default => [size: 5, count: 1],
            "https://vision.googleapis.com" => [
-             size: 20,
-             count: 4,
-             conn_max_idle_time: :timer.seconds(30),
-             protocols: [:http1]
+             size: 1,
+             count: 8,
+             conn_max_idle_time: :timer.seconds(10),
+             protocols: [:http2]
            ]
          }},
         # Interactor Auth token cache (caches App JWT for M2M calls)
