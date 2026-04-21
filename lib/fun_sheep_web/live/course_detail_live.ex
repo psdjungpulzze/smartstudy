@@ -2,12 +2,13 @@ defmodule FunSheepWeb.CourseDetailLive do
   use FunSheepWeb, :live_view
 
   import FunSheepWeb.ShareButton
+  import FunSheepWeb.TextbookBanner
 
   alias FunSheep.{Assessments, Content, Courses, Questions}
   alias FunSheep.Courses.{Chapter, Section}
 
   @impl true
-  def mount(%{"id" => course_id}, _session, socket) do
+  def mount(%{"id" => course_id} = params, _session, socket) do
     course = Courses.get_course_with_chapters!(course_id)
     user_role_id = socket.assigns.current_user && socket.assigns.current_user["user_role_id"]
 
@@ -32,6 +33,16 @@ defmodule FunSheepWeb.CourseDetailLive do
         {[], false}
       end
 
+    textbook_status = Courses.textbook_status(course_id)
+
+    # Auto-open upload panel when user came in via a "?upload=1" link (from the
+    # course listing banner) or when there are pending materials or when there
+    # is no textbook at all — so the main call to action is always visible.
+    auto_upload =
+      has_pending or
+        params["upload"] in ["1", "true"] or
+        textbook_status.status == :missing
+
     {:ok,
      assign(socket,
        page_title: course.name,
@@ -52,11 +63,12 @@ defmodule FunSheepWeb.CourseDetailLive do
        # Real-time sub-step progress (Claude Code-style)
        processing_sub_step: nil,
        # Upload state — auto-show when there are pending materials
-       show_upload: has_pending,
+       show_upload: auto_upload,
        upload_batch_id: Ecto.UUID.generate(),
        uploaded_materials: materials,
        upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0},
-       upload_default_kind: :textbook
+       upload_default_kind: :textbook,
+       textbook_status: textbook_status
      )}
   end
 
@@ -121,13 +133,15 @@ defmodule FunSheepWeb.CourseDetailLive do
     course = Courses.get_course_with_chapters!(socket.assigns.course.id)
     discovered_sources = Content.list_discovered_sources(course.id)
     question_count = Questions.count_questions_by_course(course.id)
+    textbook_status = Courses.textbook_status(course.id)
     # Clear sub_step when a major step completes
     {:noreply,
      assign(socket,
        course: course,
        discovered_sources: discovered_sources,
        question_count: question_count,
-       processing_sub_step: nil
+       processing_sub_step: nil,
+       textbook_status: textbook_status
      )}
   end
 
@@ -200,7 +214,11 @@ defmodule FunSheepWeb.CourseDetailLive do
         # Combine: course-linked materials + new batch materials (deduplicated)
         existing_ids = MapSet.new(course_materials, & &1.id)
         new_batch = Enum.reject(batch_materials, fn m -> MapSet.member?(existing_ids, m.id) end)
-        assign(socket, uploaded_materials: course_materials ++ new_batch)
+
+        assign(socket,
+          uploaded_materials: course_materials ++ new_batch,
+          textbook_status: Courses.textbook_status(socket.assigns.course.id)
+        )
       else
         socket
       end
@@ -668,6 +686,13 @@ defmodule FunSheepWeb.CourseDetailLive do
           </div>
         </div>
       </div>
+
+      <%!-- ═══ TEXTBOOK COMPLETENESS BANNER ═══ --%>
+      <.full_banner
+        :if={@textbook_status.status != :complete}
+        status={@textbook_status}
+        course_id={@course.id}
+      />
 
       <%!-- ═══ UPLOAD MATERIALS PANEL ═══ --%>
       <.upload_panel

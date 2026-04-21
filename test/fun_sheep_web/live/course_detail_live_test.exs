@@ -96,5 +96,41 @@ defmodule FunSheepWeb.CourseDetailLiveTest do
 
       refute html =~ "To Delete"
     end
+
+    test "renders textbook missing banner when no textbook is attached", %{conn: conn} do
+      course = create_course()
+      conn = auth_conn(conn)
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.id}")
+
+      assert html =~ "Upload the textbook to power this course",
+             "Expected the missing-textbook banner to render on the detail page"
+
+      assert html =~ "Upload Textbook"
+    end
+
+    test "hides textbook banner when a :complete textbook is attached", %{conn: conn} do
+      course = create_course()
+      user_role = FunSheep.ContentFixtures.create_user_role()
+
+      {:ok, _material} =
+        %FunSheep.Content.UploadedMaterial{}
+        |> FunSheep.Content.UploadedMaterial.changeset(%{
+          file_path: "tmp/x.pdf",
+          file_name: "book.pdf",
+          file_type: "application/pdf",
+          file_size: 100,
+          user_role_id: user_role.id,
+          course_id: course.id,
+          material_kind: :textbook,
+          ocr_status: :completed,
+          completeness_score: 0.95
+        })
+        |> FunSheep.Repo.insert()
+
+      conn = auth_conn(conn)
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.id}")
+
+      refute html =~ "Upload the textbook to power this course"
+    end
   end
 end

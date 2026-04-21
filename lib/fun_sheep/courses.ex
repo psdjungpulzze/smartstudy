@@ -267,6 +267,124 @@ defmodule FunSheep.Courses do
     {:ok, course}
   end
 
+  @completeness_threshold 0.85
+
+  @doc """
+  Returns the completeness threshold (0.0–1.0) at which a textbook is
+  considered complete.
+  """
+  def completeness_threshold, do: @completeness_threshold
+
+  @doc """
+  Reports the textbook completeness status for a course.
+
+  Inspects the course's uploaded `:textbook` materials and, among those that
+  finished OCR, picks the "most complete" one — ranked by
+  `completeness_score` first, OCR page count as the tiebreaker. The chosen
+  material is returned so the UI can surface its name, score, and notes.
+
+  Statuses:
+    * `:missing`    — no textbook uploaded
+    * `:processing` — textbook uploaded, OCR not finished
+    * `:partial`    — OCR done but completeness score below threshold
+                      (or `ocr_status == :partial`)
+    * `:complete`   — OCR done and completeness score ≥ threshold
+                      (or score not yet measured, OCR fully `:completed`)
+
+  Accepts either a course struct or a course id.
+  """
+  @spec textbook_status(Course.t() | Ecto.UUID.t()) :: %{
+          status: :missing | :processing | :partial | :complete,
+          material: FunSheep.Content.UploadedMaterial.t() | nil,
+          completeness_score: float() | nil,
+          notes: String.t() | nil,
+          candidate_count: non_neg_integer()
+        }
+  def textbook_status(%Course{id: id}), do: textbook_status(id)
+
+  def textbook_status(course_id) when is_binary(course_id) do
+    materials = textbook_materials_with_counts(course_id)
+
+    case materials do
+      [] ->
+        empty_status(:missing, 0)
+
+      _ ->
+        best = pick_most_complete(materials)
+        status = classify(best)
+
+        %{
+          status: status,
+          material: best.material,
+          completeness_score: best.material.completeness_score,
+          notes: best.material.completeness_notes,
+          candidate_count: length(materials)
+        }
+    end
+  end
+
+  defp empty_status(status, count) do
+    %{
+      status: status,
+      material: nil,
+      completeness_score: nil,
+      notes: nil,
+      candidate_count: count
+    }
+  end
+
+  defp textbook_materials_with_counts(course_id) do
+    from(m in FunSheep.Content.UploadedMaterial,
+      left_join: p in FunSheep.Content.OcrPage,
+      on: p.material_id == m.id,
+      where: m.course_id == ^course_id and m.material_kind == :textbook,
+      group_by: m.id,
+      select: %{material: m, page_count: count(p.id)}
+    )
+    |> Repo.all()
+  end
+
+  defp pick_most_complete(materials) do
+    Enum.max_by(materials, fn %{material: m, page_count: pages} ->
+      score = m.completeness_score || 0.0
+      # Treat completed-but-unscored as "pretty good" so the user-uploaded
+      # full book beats a :pending one when scores are missing.
+      baseline =
+        case m.ocr_status do
+          :completed -> 0.5
+          :partial -> 0.2
+          _ -> 0.0
+        end
+
+      {max(score, baseline), pages}
+    end)
+  end
+
+  defp classify(%{material: m}) do
+    cond do
+      m.ocr_status in [:pending, :processing] ->
+        :processing
+
+      m.ocr_status == :failed ->
+        :missing
+
+      is_float(m.completeness_score) and m.completeness_score >= @completeness_threshold ->
+        :complete
+
+      is_float(m.completeness_score) ->
+        :partial
+
+      m.ocr_status == :partial ->
+        :partial
+
+      m.ocr_status == :completed ->
+        :complete
+
+      true ->
+        :processing
+    end
+  end
+
   @doc "Atomically increment ocr_completed_count and return the new count + total."
   def increment_ocr_completed(course_id) do
     {1, [result]} =

@@ -1,6 +1,8 @@
 defmodule FunSheepWeb.CourseSearchLive do
   use FunSheepWeb, :live_view
 
+  import FunSheepWeb.TextbookBanner
+
   alias FunSheep.{Accounts, Courses, Assessments}
   alias FunSheep.Geo
 
@@ -20,6 +22,8 @@ defmodule FunSheepWeb.CourseSearchLive do
         _ -> {[], [], nil, nil, %{}}
       end
 
+    textbook_statuses = Map.new(my_courses, &{&1.id, Courses.textbook_status(&1)})
+
     socket =
       socket
       |> assign(
@@ -30,6 +34,7 @@ defmodule FunSheepWeb.CourseSearchLive do
         schools: schools,
         my_courses: my_courses,
         nearby_courses: nearby_courses,
+        textbook_statuses: textbook_statuses,
         user_grade: user_grade,
         user_school_id: user_school_id,
         tests_by_course: tests_by_course,
@@ -187,6 +192,7 @@ defmodule FunSheepWeb.CourseSearchLive do
             expanded={MapSet.member?(@expanded_courses, course.id)}
             tests={Map.get(@tests_by_course, course.id, [])}
             confirm_delete={@confirm_delete}
+            textbook_status={Map.get(@textbook_statuses, course.id)}
           />
         </div>
       </div>
@@ -326,6 +332,7 @@ defmodule FunSheepWeb.CourseSearchLive do
   attr :expanded, :boolean, required: true
   attr :tests, :list, default: []
   attr :confirm_delete, :string, default: nil
+  attr :textbook_status, :map, default: nil
 
   defp expandable_course_row(assigns) do
     test_count = length(assigns.tests)
@@ -389,6 +396,7 @@ defmodule FunSheepWeb.CourseSearchLive do
             >
               {@test_count} test{if @test_count != 1, do: "s"}
             </span>
+            <.compact_badge :if={@textbook_status} status={@textbook_status} />
           </div>
         </div>
         <div class="flex items-center shrink-0">
@@ -404,6 +412,15 @@ defmodule FunSheepWeb.CourseSearchLive do
         :if={@expanded}
         class="border-t border-gray-100 bg-gray-50 px-3 sm:px-4 py-3 animate-slide-up"
       >
+        <%!-- Textbook banner (only when not complete) --%>
+        <.full_banner
+          :if={@textbook_status && @textbook_status.status != :complete}
+          status={@textbook_status}
+          course_id={@course.id}
+          cta_navigate={~p"/courses/#{@course.id}?upload=1"}
+          class="!mb-3"
+        />
+
         <%!-- Upcoming tests --%>
         <div :if={@tests != []} class="space-y-2 mb-3">
           <.test_row :for={entry <- @tests} entry={entry} course_id={@course.id} />
