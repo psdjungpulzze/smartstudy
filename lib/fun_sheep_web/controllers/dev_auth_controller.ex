@@ -42,11 +42,13 @@ defmodule FunSheepWeb.DevAuthController do
   end
 
   defp ensure_user_role(interactor_id, role, email, display_name) do
-    # The user_roles table only supports student/parent/teacher roles.
-    # Admin is a special dev-only role that maps to "student" in the DB.
-    db_role = if role in ~w(student parent teacher), do: role, else: "student"
+    db_role = if role in ~w(student parent teacher admin), do: role, else: "student"
 
-    case Accounts.get_user_role_by_interactor_id(interactor_id) do
+    # Match on (interactor_user_id, role) so the dev admin gets a real admin
+    # row instead of being coerced to an existing student row. Otherwise
+    # `Admin.start_impersonation/2` — which pattern-matches on
+    # `%UserRole{role: :admin}` — rejects the dev admin.
+    case Accounts.get_user_role_by_interactor_id_and_role(interactor_id, db_role) do
       nil ->
         {:ok, ur} =
           Accounts.create_user_role(%{
