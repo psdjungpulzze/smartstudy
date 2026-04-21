@@ -14,15 +14,15 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
 
   require Logger
 
-  # Exponential backoff with jitter so retries spread out — a thundering
-  # herd of transient failures retrying in lockstep just recreates the
-  # Finch pool storm that caused them. Caps around 3 min so we don't leave
-  # materials languishing when the upstream issue has already cleared.
+  # Short backoff with jitter — transient failures (socket closed, connect
+  # errors) typically clear within seconds, so we don't want to leave
+  # materials idle for minutes. Caps at 30s. Per-attempt delays: ~5s, 10s,
+  # 20s, 30s, 30s across 5 Oban attempts.
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}) do
     base = :math.pow(2, attempt) |> round()
-    jitter = :rand.uniform(10)
-    min(base * 10 + jitter, 180)
+    jitter = :rand.uniform(3)
+    min(base * 2 + jitter, 30)
   end
 
   @impl Oban.Worker
@@ -60,9 +60,7 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
           {:snooze, backoff(job)}
         else
           # Exhausted retries on a transient error — mark it terminal now.
-          Logger.error(
-            "[OCR] Exhausted retries for material #{material_id}: #{inspect(reason)}"
-          )
+          Logger.error("[OCR] Exhausted retries for material #{material_id}: #{inspect(reason)}")
 
           FunSheep.Content.update_uploaded_material(
             FunSheep.Content.get_uploaded_material!(material_id),

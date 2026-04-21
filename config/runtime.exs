@@ -154,7 +154,12 @@ if config_env() == :prod do
   # POOL_SIZE on the worker container must be >= sum of these queues.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      [default: 10, ocr: 8, ai: 5, ingest: 1]
+      # ocr: 4 — fewer concurrent SSL handshakes to vision.googleapis.com.
+      # Cloud Run's kernel rejects `sndbuf` as an SSL socket option when
+      # too many connections are created at once, so we keep outbound
+      # concurrency low and let in-process Req retries + Oban snooze
+      # handle transient blips instead.
+      [default: 10, ocr: 4, ai: 5, ingest: 1]
     else
       false
     end

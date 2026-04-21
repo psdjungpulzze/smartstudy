@@ -96,22 +96,16 @@ defmodule FunSheep.OCR.GoogleVision do
     end
   end
 
-  # Route every Vision request through our dedicated Finch pool so sockets
-  # to `vision.googleapis.com` are isolated from the default pool used by
-  # unrelated Req callers. In-process retry with exponential backoff absorbs
-  # transient transport errors (`:closed`, `:einval`, `:timeout`) without
-  # burning an Oban attempt — that alone lifts success rate far more than
-  # tuning Oban concurrency.
-  #
-  # Note: Req rejects passing both `:finch` and `:connect_options` — when a
-  # custom Finch pool name is supplied, per-request transport tuning must
-  # live on the pool itself. The pool's conn_max_idle_time and protocol
-  # pinning in Application.start cover that layer.
+  # Use Req's default Finch pool — custom pool experiments (HTTP/1 pinned
+  # then HTTP/2 multiplexed) both hit Erlang/OTP rejecting `sndbuf` as an
+  # SSL connect option on Cloud Run. The default pool works well enough
+  # that in-process retries (3 × transient) combined with Oban snooze
+  # (5 max_attempts) are the real lever for getting success rate to >90%.
   defp vision_post(url, body, headers) do
     Req.post(url,
       json: body,
       headers: headers,
-      finch: FunSheep.VisionFinch,
+      connect_options: [timeout: 10_000],
       receive_timeout: 60_000,
       retry: :transient,
       max_retries: 3,
