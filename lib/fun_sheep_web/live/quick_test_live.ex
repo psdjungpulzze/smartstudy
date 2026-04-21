@@ -3,8 +3,10 @@ defmodule FunSheepWeb.QuickTestLive do
 
   import FunSheepWeb.BillingComponents
 
-  alias FunSheep.{Billing, Courses, Questions, Tutor}
+  alias FunSheep.{Billing, Courses, Engagement, Gamification, Questions, Tutor}
   alias FunSheep.Assessments.QuickTestEngine
+
+  @xp_per_correct 10
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do
@@ -421,6 +423,7 @@ defmodule FunSheepWeb.QuickTestLive do
 
       {:complete, new_state} ->
         summary = QuickTestEngine.summary(new_state)
+        finalize_session(socket)
 
         assign(socket,
           engine_state: new_state,
@@ -429,6 +432,17 @@ defmodule FunSheepWeb.QuickTestLive do
           summary: summary
         )
     end
+  end
+
+  defp finalize_session(socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    course_id = socket.assigns.course_id
+
+    if user_role_id && course_id do
+      Engagement.after_session(user_role_id, course_id)
+    end
+
+    :ok
   end
 
   defp check_answer(question, answer) do
@@ -446,6 +460,12 @@ defmodule FunSheepWeb.QuickTestLive do
         is_correct: is_correct,
         difficulty_at_attempt: to_string(question.difficulty)
       })
+
+      if is_correct do
+        Gamification.award_xp(user_role_id, @xp_per_correct, "quick_test", source_id: question.id)
+      end
+
+      Gamification.record_activity(user_role_id)
     end
   end
 
