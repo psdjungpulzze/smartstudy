@@ -38,6 +38,7 @@ defmodule FunSheep.OCR.FigureExtractorTest do
 
     test "handles 'Fig. N' abbreviation" do
       blocks = [%{text: "Fig. 7: overview", bounding_box: %{}}]
+
       assert [%{figure_type: :figure, figure_number: "7"}] =
                FigureExtractor.detect_candidates(blocks, 1)
     end

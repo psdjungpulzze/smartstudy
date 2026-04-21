@@ -109,7 +109,9 @@ defmodule FunSheep.OCR.FigureExtractor do
       |> Enum.with_index()
       |> Enum.reduce([], fn {cand, idx}, acc ->
         case crop_and_upload(page, cand, page_image_binary, idx) do
-          {:ok, figure} -> [figure | acc]
+          {:ok, figure} ->
+            [figure | acc]
+
           {:error, reason} ->
             Logger.warning(
               "[FigureExtractor] Skipped #{cand.figure_type} #{cand.figure_number} on page #{page.page_number}: #{inspect(reason)}"

@@ -1289,7 +1289,7 @@ defmodule FunSheepWeb.CourseDetailLive do
     step4_state =
       cond do
         status == "ready" -> :done
-        status in ["extracting", "generating"] -> :active
+        status in ["extracting", "generating", "validating"] -> :active
         true -> :pending
       end
 

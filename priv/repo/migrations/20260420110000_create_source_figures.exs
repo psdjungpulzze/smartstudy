@@ -32,8 +32,9 @@ defmodule FunSheep.Repo.Migrations.CreateSourceFigures do
       add :question_id, references(:questions, type: :binary_id, on_delete: :delete_all),
         null: false
 
-      add :source_figure_id, references(:source_figures, type: :binary_id, on_delete: :delete_all),
-        null: false
+      add :source_figure_id,
+          references(:source_figures, type: :binary_id, on_delete: :delete_all),
+          null: false
 
       add :position, :integer, default: 0, null: false
 

@@ -22,7 +22,8 @@ defmodule FunSheepWeb.TextbookBannerTest do
 
   describe "full_banner/1" do
     test "renders upload CTA for :missing status" do
-      html = render_component(&TextbookBanner.full_banner/1, %{status: status(), course_id: @course_id})
+      html =
+        render_component(&TextbookBanner.full_banner/1, %{status: status(), course_id: @course_id})
 
       assert html =~ "Upload the textbook"
       assert html =~ "Upload Textbook"
