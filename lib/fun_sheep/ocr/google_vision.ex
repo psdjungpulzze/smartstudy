@@ -102,12 +102,16 @@ defmodule FunSheep.OCR.GoogleVision do
   # transient transport errors (`:closed`, `:einval`, `:timeout`) without
   # burning an Oban attempt — that alone lifts success rate far more than
   # tuning Oban concurrency.
+  #
+  # Note: Req rejects passing both `:finch` and `:connect_options` — when a
+  # custom Finch pool name is supplied, per-request transport tuning must
+  # live on the pool itself. The pool's conn_max_idle_time and protocol
+  # pinning in Application.start cover that layer.
   defp vision_post(url, body, headers) do
     Req.post(url,
       json: body,
       headers: headers,
       finch: FunSheep.VisionFinch,
-      connect_options: [timeout: 10_000],
       receive_timeout: 60_000,
       retry: :transient,
       max_retries: 3,
