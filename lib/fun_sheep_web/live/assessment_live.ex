@@ -761,13 +761,13 @@ defmodule FunSheepWeb.AssessmentLive do
 
       <div class="flex justify-center gap-4">
         <.link
-          navigate={~p"/courses/#{@course_id}/tests"}
+          navigate={~p"/courses/#{@schedule.course_id}/tests"}
           class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
         >
           Back to Tests
         </.link>
         <.link
-          navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
+          navigate={~p"/courses/#{@schedule.course_id}/tests/#{@schedule.id}/assess"}
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
         >
           Retake Assessment

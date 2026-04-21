@@ -138,5 +138,38 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       # Should show question 2
       assert html =~ "Question 2"
     end
+
+    test "renders summary without crashing when no questions match scope", %{
+      conn: conn,
+      user_role: ur,
+      course: course
+    } do
+      # Schedule scoped to a chapter that has no questions — exercises the
+      # `{:complete, state}` branch that previously crashed with
+      # `KeyError: :course_id` in render_summary/1.
+      {:ok, empty_chapter} =
+        FunSheep.Courses.create_chapter(%{
+          name: "Empty Chapter",
+          position: 99,
+          course_id: course.id
+        })
+
+      {:ok, empty_schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Empty Scope",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [empty_chapter.id]},
+          user_role_id: ur.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, ur)
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{empty_schedule.course_id}/tests/#{empty_schedule.id}/assess")
+
+      assert html =~ "Assessment Complete"
+      assert html =~ ~s|href="/courses/#{course.id}/tests"|
+    end
   end
 end
