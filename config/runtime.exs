@@ -159,7 +159,7 @@ if config_env() == :prod do
       # too many connections are created at once, so we keep outbound
       # concurrency low and let in-process Req retries + Oban snooze
       # handle transient blips instead.
-      [default: 10, ocr: 4, ai: 5, ingest: 1]
+      [default: 10, ocr: 4, ai: 5, pdf_ocr: 3, ingest: 1]
     else
       false
     end

@@ -85,10 +85,13 @@ defmodule FunSheep.ContentFixtures do
     user_role = Map.get_lazy(attrs, :user_role, fn -> create_user_role() end)
     course = Map.get_lazy(attrs, :course, fn -> create_course() end)
 
+    # Default to an image type so tests that invoke the OCR pipeline hit
+    # the synchronous single-page path; PDF tests explicitly override
+    # file_type to "application/pdf" to exercise the async dispatch path.
     defaults = %{
-      file_path: "test/#{Ecto.UUID.generate()}.pdf",
-      file_name: "test_document.pdf",
-      file_type: "application/pdf",
+      file_path: "test/#{Ecto.UUID.generate()}.jpg",
+      file_name: "test_image.jpg",
+      file_type: "image/jpeg",
       file_size: 1024,
       ocr_status: :pending,
       user_role_id: user_role.id,

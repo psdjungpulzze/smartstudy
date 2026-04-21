@@ -39,6 +39,13 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
 
   defp do_process(material_id, course_id, job) do
     case Pipeline.process(material_id) do
+      {:ok, :dispatched} ->
+        # PDF path: PdfOcrDispatchWorker + per-chunk pollers are now running.
+        # The final poller will trigger course-advancement and relevance/
+        # completeness enqueues once all chunks finish. Nothing else to do
+        # here — returning :ok marks this Oban job successful.
+        :ok
+
       {:ok, _pages} ->
         # Check if this material matches the course subject/topic
         FunSheep.Workers.MaterialRelevanceWorker.enqueue(material_id)

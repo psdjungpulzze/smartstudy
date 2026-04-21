@@ -40,6 +40,21 @@ defmodule FunSheep.Content.UploadedMaterial do
 
     field :ocr_error, :string
 
+    # Async PDF OCR tracking. One material splits into N chunks; each chunk
+    # becomes one Vision `files:asyncBatchAnnotate` long-running operation.
+    # Shape: %{"chunks" => [%{"name" => "operations/...", "start_page" => 1,
+    #                          "page_count" => 200, "output_prefix" => "...",
+    #                          "status" => "running" | "done" | "failed",
+    #                          "error" => nil | String.t()}]}
+    field :ocr_operations, :map, default: %{}
+
+    # Set by the dispatch worker once the PDF is page-counted. OcrPage rows
+    # are upserted into ocr_pages; the chunk pollers atomically
+    # increment :ocr_pages_completed so the parent can decide when all
+    # chunks have finished without scanning the full array.
+    field :ocr_pages_expected, :integer
+    field :ocr_pages_completed, :integer, default: 0
+
     field :relevance_status, :string, default: "pending"
     field :relevance_score, :float
     field :relevance_notes, :string
@@ -71,6 +86,9 @@ defmodule FunSheep.Content.UploadedMaterial do
       :material_kind,
       :ocr_status,
       :ocr_error,
+      :ocr_operations,
+      :ocr_pages_expected,
+      :ocr_pages_completed,
       :relevance_status,
       :relevance_score,
       :relevance_notes,

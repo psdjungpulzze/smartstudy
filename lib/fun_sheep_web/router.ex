@@ -103,6 +103,19 @@ defmodule FunSheepWeb.Router do
     pipe_through [:browser, FunSheepWeb.Plugs.DevAuth]
 
     post "/upload", UploadController, :create
+
+    # Direct-to-storage (resumable) flow. Clients call sign to get an
+    # upload URL, PUT the file body to it, then call finalize. This keeps
+    # the web tier out of the upload path so 200-500 MB PDFs don't hit
+    # Cloud Run's ingress limit or the BEAM heap.
+    post "/uploads/sign", UploadController, :sign
+    post "/uploads/finalize", UploadController, :finalize
+
+    # Local-backend PUT receiver — only active when storage_backend is
+    # FunSheep.Storage.Local (dev/test). In prod the Local module isn't
+    # used; the handler itself also guards on this. `*key` matches the
+    # whole remaining path so staging/.../file.pdf stays intact.
+    put "/uploads/local/:token/*key", UploadController, :local_put
   end
 
   # Export routes (file downloads, outside live_session)

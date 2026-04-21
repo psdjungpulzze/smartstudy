@@ -27,54 +27,85 @@ defmodule FunSheep.OCR.Pipeline do
     # worker crash that happened *after* the OCR page was stored. Redoing
     # Vision calls for already-good text wastes Vision quota and pool
     # capacity that the remaining backlog needs.
-    if material.ocr_status == :completed do
-      {:ok, :already_completed}
-    else
-      Content.update_uploaded_material(material, %{ocr_status: :processing, ocr_error: nil})
+    cond do
+      material.ocr_status == :completed ->
+        {:ok, :already_completed}
 
-      # Single-page model today: every retry rewrites the page record(s) from
-      # scratch. When PDF splitting lands, switch to per-page upserts keyed on
-      # (material_id, page_number) so already-completed pages aren't redone.
-      Content.delete_ocr_pages_for_material(material.id)
+      pdf?(material) ->
+        # Async PDF path: dispatch worker takes over. It may split a large
+        # PDF into 200-page chunks, submit each as its own Vision LRO, and
+        # enqueue pollers. The OCR worker that invoked us returns early
+        # without advancing the course counter — that's done by the final
+        # chunk poller.
+        #
+        # We do NOT delete existing OcrPage rows for PDFs: chunks upsert
+        # on (material_id, page_number), so partial progress from an
+        # earlier attempt survives a retry.
+        Content.update_uploaded_material(material, %{ocr_status: :processing, ocr_error: nil})
 
-      case do_process(material) do
-        {:ok, pages} ->
-          material_status = derive_material_status(pages)
-          material_error = aggregate_error(pages)
+        %{material_id: material.id}
+        |> FunSheep.Workers.PdfOcrDispatchWorker.new()
+        |> Oban.insert()
 
-          Content.update_uploaded_material(material, %{
-            ocr_status: material_status,
-            ocr_error: material_error
+        {:ok, :dispatched}
+
+      true ->
+        Content.update_uploaded_material(material, %{ocr_status: :processing, ocr_error: nil})
+
+        # Image / single-page path: every retry rewrites the page record(s)
+        # from scratch. Safe because there's only ever one page.
+        Content.delete_ocr_pages_for_material(material.id)
+
+        do_and_handle(material)
+    end
+  end
+
+  defp pdf?(%{file_type: "application/pdf"}), do: true
+  defp pdf?(%{file_type: "application/x-pdf"}), do: true
+
+  defp pdf?(%{file_name: name}) when is_binary(name),
+    do: String.ends_with?(String.downcase(name), ".pdf")
+
+  defp pdf?(_), do: false
+
+  defp do_and_handle(material) do
+    case do_process(material) do
+      {:ok, pages} ->
+        material_status = derive_material_status(pages)
+        material_error = aggregate_error(pages)
+
+        Content.update_uploaded_material(material, %{
+          ocr_status: material_status,
+          ocr_error: material_error
+        })
+
+        {:ok, pages}
+
+      {:error, reason} ->
+        formatted = format_error(reason)
+        error_class = classify_error(reason)
+
+        # Record the failure as a page so per-page UI has something to surface
+        # and the unique-constraint slot is consumed (next retry deletes it).
+        {:ok, _failed_page} =
+          Content.create_ocr_page(%{
+            material_id: material.id,
+            page_number: 1,
+            status: :failed,
+            error: formatted
           })
 
-          {:ok, pages}
+        # For transient errors keep material `:processing` so the next Oban
+        # attempt can retry without overwriting a real `:failed` terminal
+        # state. Only mark `:failed` on fatal errors or exhausted retries.
+        next_status = if error_class == :transient, do: :processing, else: :failed
 
-        {:error, reason} ->
-          formatted = format_error(reason)
-          error_class = classify_error(reason)
+        Content.update_uploaded_material(material, %{
+          ocr_status: next_status,
+          ocr_error: formatted
+        })
 
-          # Record the failure as a page so per-page UI has something to surface
-          # and the unique-constraint slot is consumed (next retry deletes it).
-          {:ok, _failed_page} =
-            Content.create_ocr_page(%{
-              material_id: material.id,
-              page_number: 1,
-              status: :failed,
-              error: formatted
-            })
-
-          # For transient errors keep material `:processing` so the next Oban
-          # attempt can retry without overwriting a real `:failed` terminal
-          # state. Only mark `:failed` on fatal errors or exhausted retries.
-          next_status = if error_class == :transient, do: :processing, else: :failed
-
-          Content.update_uploaded_material(material, %{
-            ocr_status: next_status,
-            ocr_error: formatted
-          })
-
-          {:error, {error_class, reason}}
-      end
+        {:error, {error_class, reason}}
     end
   end
 

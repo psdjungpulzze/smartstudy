@@ -125,4 +125,105 @@ defmodule FunSheep.OCR.GoogleVisionTest do
       assert is_binary(result.text)
     end
   end
+
+  describe "start_pdf_async/2 (mock mode)" do
+    test "returns a deterministic mock operation name" do
+      {:ok, op1} =
+        GoogleVision.start_pdf_async("gs://bucket/a.pdf", output_prefix: "gs://bucket/out/")
+
+      {:ok, op2} =
+        GoogleVision.start_pdf_async("gs://bucket/a.pdf", output_prefix: "gs://bucket/out/")
+
+      assert op1 == op2
+      assert String.starts_with?(op1, "operations/mock-")
+
+      {:ok, op3} =
+        GoogleVision.start_pdf_async("gs://bucket/b.pdf", output_prefix: "gs://bucket/out/")
+
+      refute op1 == op3
+    end
+
+    test "remembers operation metadata for later lookup" do
+      {:ok, op} =
+        GoogleVision.start_pdf_async("gs://bucket/x.pdf", output_prefix: "gs://bucket/out/x/")
+
+      info = GoogleVision.mock_operation_info(op)
+      assert info.gcs_uri == "gs://bucket/x.pdf"
+      assert info.output_prefix == "gs://bucket/out/x/"
+    end
+  end
+
+  describe "fetch_operation/1 (mock mode)" do
+    test "reports done for any mock operation name" do
+      {:ok, op} =
+        GoogleVision.start_pdf_async("gs://bucket/y.pdf", output_prefix: "gs://bucket/out/")
+
+      assert {:ok, :done} = GoogleVision.fetch_operation(op)
+    end
+  end
+
+  describe "parse_async_output/1" do
+    test "parses multi-page fullTextAnnotation output with per-page text" do
+      raw = %{
+        "responses" => [
+          %{
+            "context" => %{"pageNumber" => 1},
+            "fullTextAnnotation" => %{
+              "text" => "Page one text",
+              "pages" => [
+                %{
+                  "width" => 612,
+                  "height" => 792,
+                  "blocks" => [
+                    %{
+                      "blockType" => "TEXT",
+                      "confidence" => 0.9,
+                      "paragraphs" => [
+                        %{
+                          "words" => [%{"symbols" => [%{"text" => "P"}, %{"text" => "1"}]}]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          %{
+            "context" => %{"pageNumber" => 2},
+            "fullTextAnnotation" => %{
+              "text" => "Page two text",
+              "pages" => []
+            }
+          },
+          %{
+            "context" => %{"pageNumber" => 3},
+            "error" => %{"code" => 3, "message" => "bad image"}
+          }
+        ]
+      }
+
+      results = GoogleVision.parse_async_output(raw)
+      assert length(results) == 3
+      [p1, p2, p3] = results
+
+      assert p1.page_number == 1
+      assert p1.text == "Page one text"
+      assert p3.page_number == 3
+      assert p3.error =~ "bad image"
+      # Error pages carry no text so the poller marks them :failed.
+      assert p3.text == ""
+      assert p2.page_number == 2
+      assert p2.text == "Page two text"
+    end
+
+    test "accepts raw JSON binary input" do
+      raw_json =
+        ~s({"responses":[{"context":{"pageNumber":42},"fullTextAnnotation":{"text":"hi","pages":[]}}]})
+
+      [entry] = GoogleVision.parse_async_output(raw_json)
+      assert entry.page_number == 42
+      assert entry.text == "hi"
+    end
+  end
 end
