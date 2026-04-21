@@ -143,15 +143,18 @@ if config_env() == :prod do
   # with RUN_OBAN_WORKERS=true and min-instances=1 to process background jobs.
   # Lifeline auto-recovers jobs orphaned by any unexpected container death.
   #
-  # Concurrency tuning: ocr=15 lets a 1000-image textbook drain in ~70s of
-  # wall clock instead of ~6min. Vision quota default is 1800 req/min, so
-  # 15 concurrent at ~1s each (15 req/sec) stays well under the ceiling.
+  # Concurrency tuning: ocr=8 balances throughput against the combined
+  # pressure of Finch connection pools (GCS fetch + Vision OCR), DB
+  # connection pool, and BEAM scheduler time. At ocr=15 under pool
+  # pressure, the worker's own Oban.Peer/Notifier GenServer calls started
+  # timing out at 5s, which cascaded into socket_closed failures across
+  # all HTTP clients — the exact storm that killed OCR in April 2026.
   # ai=5 covers question generation + content discovery without saturating
   # the OpenAI rate limit on the Interactor agent endpoint.
   # POOL_SIZE on the worker container must be >= sum of these queues.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      [default: 10, ocr: 15, ai: 5, ingest: 1]
+      [default: 10, ocr: 8, ai: 5, ingest: 1]
     else
       false
     end
