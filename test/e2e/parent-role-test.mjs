@@ -1,8 +1,11 @@
 import { chromium } from 'playwright';
+import { loadCredentials } from '../../scripts/lib/load-credentials.mjs';
+
+const env = loadCredentials(['TEST_ACCOUNT_PASSWORD', 'TEST_PARENT1_EMAIL']);
 
 const SCREENSHOT_DIR = '/home/pulzze/Documents/GitHub/personal/funsheep/screenshots/parent-role-routing';
-const EMAIL = 'psdjung@gmail.com';
-const PASSWORD = 'Abcdef123456#';
+const EMAIL = env.TEST_PARENT1_EMAIL;
+const PASSWORD = env.TEST_ACCOUNT_PASSWORD;
 
 (async () => {
   const browser = await chromium.launch({ headless: true });

@@ -3,13 +3,21 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
+import { loadCredentials } from './lib/load-credentials.mjs';
+
+const env = loadCredentials([
+  'TEST_ACCOUNT_PASSWORD',
+  'TEST_STUDENT_EMAIL', 'TEST_STUDENT_USERNAME', 'TEST_STUDENT_NAME',
+  'TEST_PARENT1_EMAIL', 'TEST_PARENT1_USERNAME', 'TEST_PARENT1_NAME',
+  'TEST_PARENT2_EMAIL', 'TEST_PARENT2_USERNAME', 'TEST_PARENT2_NAME',
+]);
 
 const BASE = '/home/pulzze/Documents/GitHub/personal/funsheep/screenshots';
 
 const ACCOUNTS = [
-  { role: 'student', email: 'clairehyj@gmail.com', password: 'Abcdef123456#', name: 'Claire Hyj', username: 'clairehyj' },
-  { role: 'parent1', email: 'psdjung@gmail.com', password: 'Abcdef123456#', name: 'PSD Jung', username: 'psdjung' },
-  { role: 'parent2', email: 'jasminhhr@hotmail.com', password: 'Abcdef123456#', name: 'Jasmin HHR', username: 'jasminhhr' },
+  { role: 'student', email: env.TEST_STUDENT_EMAIL, password: env.TEST_ACCOUNT_PASSWORD, name: env.TEST_STUDENT_NAME, username: env.TEST_STUDENT_USERNAME },
+  { role: 'parent1', email: env.TEST_PARENT1_EMAIL, password: env.TEST_ACCOUNT_PASSWORD, name: env.TEST_PARENT1_NAME, username: env.TEST_PARENT1_USERNAME },
+  { role: 'parent2', email: env.TEST_PARENT2_EMAIL, password: env.TEST_ACCOUNT_PASSWORD, name: env.TEST_PARENT2_NAME, username: env.TEST_PARENT2_USERNAME },
 ];
 
 const results = {
