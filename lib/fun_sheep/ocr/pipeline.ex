@@ -9,8 +9,7 @@ defmodule FunSheep.OCR.Pipeline do
   """
 
   alias FunSheep.Content
-  alias FunSheep.OCR.{FigureExtractor, GoogleVision}
-  alias FunSheep.Storage
+  alias FunSheep.OCR.GoogleVision
   alias FunSheep.Storage.GCS
 
   require Logger
@@ -142,53 +141,15 @@ defmodule FunSheep.OCR.Pipeline do
     end
   end
 
-  # Lazily fetch the page image only when there are actual figure
-  # candidates to crop. Most pages have zero candidates, so we save the
-  # download on the happy path. When figures ARE present, one GCS GET
-  # per page is still much cheaper than the unconditional fetch we used
-  # to do for every OCR call.
-  defp maybe_extract_figures(material, page, blocks) do
-    case FigureExtractor.detect_candidates(blocks, page.page_number) do
-      [] ->
-        :ok
-
-      _candidates ->
-        case Storage.get(material.file_path) do
-          {:ok, binary} ->
-            run_figure_extraction(page, blocks, binary)
-
-          {:error, reason} ->
-            Logger.warning(
-              "[OCR] Skipping figure extraction for material #{material.id}: #{inspect(reason)}"
-            )
-
-            :ok
-        end
-    end
-  end
-
-  defp run_figure_extraction(page, blocks, binary) do
-    case FigureExtractor.extract_and_store(page, blocks, binary) do
-      {:ok, figures} when figures != [] ->
-        Logger.info(
-          "[OCR] Extracted #{length(figures)} figure(s) from material #{page.material_id} page #{page.page_number}"
-        )
-
-        :ok
-
-      _ ->
-        :ok
-    end
-  rescue
-    # Figure extraction is best-effort — don't fail the whole OCR run if it
-    # blows up. We already stored the text, which is the primary goal.
-    e ->
-      Logger.warning(
-        "[OCR] Figure extraction failed for material #{page.material_id}: #{inspect(e)}"
-      )
-
-      :ok
-  end
+  # TEMPORARILY DISABLED 2026-04-20 while stabilizing OCR throughput.
+  # For a textbook where nearly every page has a "Figure N" caption, the
+  # previous implementation still fired a 2 MB GCS GET per page, which —
+  # combined with 8 concurrent Vision POSTs — produced a Finch socket
+  # storm (:sndbuf :einval, :closed) that tanked OCR success rate.
+  # The OCR text extraction is the primary goal; figure cropping is a
+  # nice-to-have that can run later in a separate low-concurrency pass.
+  # Re-enable once we give FigureExtractor its own Finch pool.
+  defp maybe_extract_figures(_material, _page, _blocks), do: :ok
 
   defp create_ocr_page(material, page_number, ocr_result) do
     attrs = %{
