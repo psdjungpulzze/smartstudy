@@ -21,6 +21,27 @@ defmodule FunSheep.OCR.GoogleVision do
   end
 
   @doc """
+  Detect text from an object already in Cloud Storage.
+
+  Sends only the `gs://` URI — Vision reads the object server-side via
+  Google's internal network. The request body is a few hundred bytes
+  instead of several MB of base64, which eliminates Finch socket pressure
+  when many OCR jobs run concurrently.
+
+  Authenticates with OAuth (Goth/metadata server) rather than the API key
+  used by `detect_text/2`, because `gcsImageUri` on a private bucket
+  requires the caller's identity to have `storage.objects.get` on the
+  bucket — API-key callers are treated as anonymous and would 403.
+  """
+  def detect_text_from_gcs(gcs_uri) when is_binary(gcs_uri) do
+    if Application.get_env(:fun_sheep, :ocr_mock, false) do
+      mock_detect_text(gcs_uri)
+    else
+      call_vision_api_gcs(gcs_uri, "DOCUMENT_TEXT_DETECTION")
+    end
+  end
+
+  @doc """
   Detect text from a file on disk. Reads and base64-encodes the file
   before sending to the Vision API.
   """
@@ -46,6 +67,41 @@ defmodule FunSheep.OCR.GoogleVision do
     case Req.post("#{@base_url}/images:annotate?key=#{api_key}", json: body) do
       {:ok, %{status: 200, body: resp}} -> parse_response(resp)
       {:ok, %{status: status, body: resp_body}} -> {:error, {status, resp_body}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp call_vision_api_gcs(gcs_uri, feature_type) do
+    body = %{
+      "requests" => [
+        %{
+          "image" => %{"source" => %{"gcsImageUri" => gcs_uri}},
+          "features" => [%{"type" => feature_type}]
+        }
+      ]
+    }
+
+    case fetch_oauth_token() do
+      {:ok, token} ->
+        headers = [{"authorization", "Bearer #{token}"}]
+
+        case Req.post("#{@base_url}/images:annotate", json: body, headers: headers) do
+          {:ok, %{status: 200, body: resp}} -> parse_response(resp)
+          {:ok, %{status: status, body: resp_body}} -> {:error, {status, resp_body}}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, {:oauth_token_error, reason}}
+    end
+  end
+
+  defp fetch_oauth_token do
+    goth_name =
+      Application.get_env(:fun_sheep, FunSheep.Storage.GCS)[:goth_name] || FunSheep.Goth
+
+    case Goth.fetch(goth_name) do
+      {:ok, %{token: token}} -> {:ok, token}
       {:error, reason} -> {:error, reason}
     end
   end

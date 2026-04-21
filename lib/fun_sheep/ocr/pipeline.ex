@@ -11,6 +11,7 @@ defmodule FunSheep.OCR.Pipeline do
   alias FunSheep.Content
   alias FunSheep.OCR.{FigureExtractor, GoogleVision}
   alias FunSheep.Storage
+  alias FunSheep.Storage.GCS
 
   require Logger
 
@@ -122,25 +123,52 @@ defmodule FunSheep.OCR.Pipeline do
   defp do_process(material) do
     # For now, treat everything as a single "page"
     # In production, PDFs would be split into individual page images
-    case Storage.get(material.file_path) do
-      {:ok, content} ->
-        case GoogleVision.detect_text(Base.encode64(content)) do
-          {:ok, result} ->
-            page = create_ocr_page(material, 1, result)
-            maybe_extract_figures(page, result.blocks, content)
-            {:ok, [page]}
+    #
+    # Send only the gs:// URI to Vision — it reads the bytes server-side
+    # via Google's backbone, so our worker never has to base64-encode
+    # a multi-MB image into a JSON body. That shrinks the Vision request
+    # from ~3 MB to a few hundred bytes and removes the Finch socket
+    # pressure that was causing :closed/:timeout cascades under concurrency.
+    gcs_uri = GCS.gcs_uri(material.file_path)
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+    case GoogleVision.detect_text_from_gcs(gcs_uri) do
+      {:ok, result} ->
+        page = create_ocr_page(material, 1, result)
+        maybe_extract_figures(material, page, result.blocks)
+        {:ok, [page]}
 
       {:error, reason} ->
-        {:error, {:file_read_error, reason}}
+        {:error, reason}
     end
   end
 
-  defp maybe_extract_figures(page, blocks, page_image_binary) do
-    case FigureExtractor.extract_and_store(page, blocks, page_image_binary) do
+  # Lazily fetch the page image only when there are actual figure
+  # candidates to crop. Most pages have zero candidates, so we save the
+  # download on the happy path. When figures ARE present, one GCS GET
+  # per page is still much cheaper than the unconditional fetch we used
+  # to do for every OCR call.
+  defp maybe_extract_figures(material, page, blocks) do
+    case FigureExtractor.detect_candidates(blocks, page.page_number) do
+      [] ->
+        :ok
+
+      _candidates ->
+        case Storage.get(material.file_path) do
+          {:ok, binary} ->
+            run_figure_extraction(page, blocks, binary)
+
+          {:error, reason} ->
+            Logger.warning(
+              "[OCR] Skipping figure extraction for material #{material.id}: #{inspect(reason)}"
+            )
+
+            :ok
+        end
+    end
+  end
+
+  defp run_figure_extraction(page, blocks, binary) do
+    case FigureExtractor.extract_and_store(page, blocks, binary) do
       {:ok, figures} when figures != [] ->
         Logger.info(
           "[OCR] Extracted #{length(figures)} figure(s) from material #{page.material_id} page #{page.page_number}"

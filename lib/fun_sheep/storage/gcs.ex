@@ -88,6 +88,14 @@ defmodule FunSheep.Storage.GCS do
     "/uploads/#{normalize_key(key)}"
   end
 
+  @doc """
+  Returns the `gs://bucket/key` URI for a stored object. Used by Vision OCR
+  to read the image server-side via `gcsImageUri`, avoiding a base64 upload.
+  """
+  def gcs_uri(key) do
+    "gs://#{bucket()}/#{normalize_key(key)}"
+  end
+
   defp request(method, url, opts \\ []) do
     headers =
       [{"authorization", "Bearer #{fetch_token!()}"}] ++
