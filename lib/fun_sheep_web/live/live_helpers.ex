@@ -10,28 +10,42 @@ defmodule FunSheepWeb.LiveHelpers do
 
   def on_mount(:require_auth, _params, session, socket) do
     case get_user_from_session(session) do
-      {:ok, user} ->
-        user = normalize_user(user)
-        {streak_count, total_xp, due_reviews} = load_gamification_stats(user["user_role_id"])
+      {:ok, raw_user} ->
+        raw_user = normalize_user(raw_user)
+        {user, impersonation} = maybe_impersonate(raw_user, session)
 
-        profile_gaps = compute_profile_gaps(user)
+        if suspended?(user) do
+          socket =
+            socket
+            |> put_flash(:error, "Your account has been suspended. Contact support.")
+            |> redirect(to: "/auth/logout")
 
-        socket =
-          socket
-          |> assign(:current_user, user)
-          |> assign(:current_role, user["role"])
-          |> assign(:current_path, nil)
-          |> assign(:streak_count, streak_count)
-          |> assign(:total_xp, total_xp)
-          |> assign(:due_reviews, due_reviews)
-          |> assign(:profile_gaps, profile_gaps)
-          |> attach_hook(:save_request_path, :handle_params, &save_request_path/3)
-          |> attach_hook(:gate_onboarding, :handle_params, &gate_onboarding/3)
-          |> attach_hook(:tutorial_events, :handle_event, &handle_tutorial_event/3)
-          |> assign(:show_tutorial, false)
-          |> assign(:tutorial_config, nil)
+          {:halt, socket}
+        else
+          {streak_count, total_xp, due_reviews} = load_gamification_stats(user["user_role_id"])
+          profile_gaps = compute_profile_gaps(user)
 
-        {:cont, socket}
+          socket =
+            socket
+            |> assign(:current_user, user)
+            |> assign(:current_role, user["role"])
+            |> assign(:current_path, nil)
+            |> assign(:streak_count, streak_count)
+            |> assign(:total_xp, total_xp)
+            |> assign(:due_reviews, due_reviews)
+            |> assign(:profile_gaps, profile_gaps)
+            |> assign(:streak_summary, nil)
+            |> assign(:fp_summary, nil)
+            |> assign(:impersonation, impersonation)
+            |> attach_hook(:save_request_path, :handle_params, &save_request_path/3)
+            |> attach_hook(:gate_onboarding, :handle_params, &gate_onboarding/3)
+            |> attach_hook(:tutorial_events, :handle_event, &handle_tutorial_event/3)
+            |> attach_hook(:gamification_modal_events, :handle_event, &handle_gamification_event/3)
+            |> assign(:show_tutorial, false)
+            |> assign(:tutorial_config, nil)
+
+          {:cont, socket}
+        end
 
       :not_authenticated ->
         socket =
@@ -57,23 +71,64 @@ defmodule FunSheepWeb.LiveHelpers do
 
         {:cont, socket}
 
-      {:ok, _user} ->
-        socket =
-          socket
-          |> put_flash(:error, "You do not have admin access.")
-          |> redirect(to: "/dashboard")
-
-        {:halt, socket}
-
-      :not_authenticated ->
-        socket =
-          socket
-          |> put_flash(:error, "You must log in to access this page.")
-          |> redirect(to: login_path())
-
-        {:halt, socket}
+      # Authenticated but not admin, OR unauthenticated: render as 404 so
+      # /admin is indistinguishable from a non-existent route. Anything else
+      # (flash + redirect, 403) leaks that /admin exists.
+      _ ->
+        raise FunSheepWeb.NotFoundError
     end
   end
+
+  defp suspended?(%{"user_role_id" => id}) when is_binary(id) and id != "" do
+    case Accounts.get_user_role(id) do
+      %Accounts.UserRole{suspended_at: nil} -> false
+      %Accounts.UserRole{suspended_at: _ts} -> true
+      _ -> false
+    end
+  end
+
+  defp suspended?(_), do: false
+
+  # If the session carries a non-expired impersonation grant, swap in the
+  # target user but carry the real admin's id so every audited action
+  # attributes to the admin.
+  defp maybe_impersonate(raw_user, %{
+         "impersonated_user_role_id" => target_id,
+         "real_admin_user_role_id" => admin_id,
+         "impersonation_expires_at" => expires_iso
+       })
+       when is_binary(target_id) and is_binary(admin_id) do
+    if FunSheep.Admin.impersonation_expired?(expires_iso) do
+      {raw_user, nil}
+    else
+      case Accounts.get_user_role(target_id) do
+        %Accounts.UserRole{} = target ->
+          impersonated_user = %{
+            "id" => target.id,
+            "user_role_id" => target.id,
+            "interactor_user_id" => target.interactor_user_id,
+            "email" => target.email,
+            "display_name" => target.display_name,
+            "role" => Atom.to_string(target.role)
+          }
+
+          impersonation = %{
+            target_id: target.id,
+            target_email: target.email,
+            target_display_name: target.display_name,
+            real_admin_user_role_id: admin_id,
+            expires_at: expires_iso
+          }
+
+          {impersonated_user, impersonation}
+
+        nil ->
+          {raw_user, nil}
+      end
+    end
+  end
+
+  defp maybe_impersonate(raw_user, _session), do: {raw_user, nil}
 
   # Patches legacy session shapes: older sessions stored `user["id"]` as the
   # Interactor sub and had no `user_role_id`. Re-resolve the local user_role
@@ -183,6 +238,34 @@ defmodule FunSheepWeb.LiveHelpers do
   end
 
   defp handle_tutorial_event(_event, _params, socket), do: {:cont, socket}
+
+  defp handle_gamification_event("open_streak_detail", _params, socket) do
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+
+    summary =
+      if valid_uuid?(user_role_id) do
+        FunSheep.Gamification.streak_summary(user_role_id)
+      else
+        nil
+      end
+
+    {:halt, assign(socket, :streak_summary, summary)}
+  end
+
+  defp handle_gamification_event("open_fp_detail", _params, socket) do
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+
+    summary =
+      if valid_uuid?(user_role_id) do
+        FunSheep.Gamification.fp_summary(user_role_id)
+      else
+        nil
+      end
+
+    {:halt, assign(socket, :fp_summary, summary)}
+  end
+
+  defp handle_gamification_event(_event, _params, socket), do: {:cont, socket}
 
   # Redirects first-time students (missing grade or hobbies) to /profile/setup.
   # Teachers and parents are exempt — the gap fields (grade, hobbies) are

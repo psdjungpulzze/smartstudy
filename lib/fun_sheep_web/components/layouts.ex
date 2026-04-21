@@ -5,6 +5,8 @@ defmodule FunSheepWeb.Layouts do
   """
   use FunSheepWeb, :html
 
+  import FunSheepWeb.GamificationModals
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -141,9 +143,11 @@ defmodule FunSheepWeb.Layouts do
         [
           %{label: "Home", path: "/admin", icon: "hero-home"},
           %{label: "Users", path: "/admin/users", icon: "hero-users"},
-          %{label: "Schools", path: "/admin/schools", icon: "hero-building-library"},
           %{label: "Courses", path: "/admin/courses", icon: "hero-book-open"},
-          %{label: "Settings", path: "/admin/settings", icon: "hero-cog-6-tooth"}
+          %{label: "Materials", path: "/admin/materials", icon: "hero-document-text"},
+          %{label: "Review", path: "/admin/questions/review", icon: "hero-clipboard-document-check"},
+          %{label: "Jobs", path: "/admin/jobs", icon: "hero-bolt"},
+          %{label: "Audit", path: "/admin/audit-log", icon: "hero-cog-6-tooth"}
         ]
 
       _ ->

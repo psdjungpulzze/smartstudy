@@ -5,8 +5,9 @@ defmodule FunSheepWeb.AssessmentLive do
 
   alias FunSheep.{Assessments, Billing, Engagement, Gamification, Questions}
   alias FunSheep.Assessments.{Engine, StateCache}
+  alias FunSheep.Gamification.FpEconomy
 
-  @xp_per_correct 10
+  @xp_per_correct FpEconomy.xp_per_correct()
 
   @impl true
   def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
@@ -207,7 +208,9 @@ defmodule FunSheepWeb.AssessmentLive do
         })
 
         if is_correct do
-          Gamification.award_xp(user_role_id, @xp_per_correct, "assessment", source_id: question.id)
+          Gamification.award_xp(user_role_id, @xp_per_correct, "assessment",
+            source_id: question.id
+          )
         end
 
         Gamification.record_activity(user_role_id)

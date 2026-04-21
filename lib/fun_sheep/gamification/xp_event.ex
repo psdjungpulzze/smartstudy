@@ -11,7 +11,7 @@ defmodule FunSheep.Gamification.XpEvent do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @valid_sources ~w(assessment practice quick_test streak_bonus daily_challenge study_guide achievement)
+  @valid_sources ~w(assessment practice quick_test streak_bonus daily_challenge study_guide achievement review study_session)
 
   schema "xp_events" do
     field :amount, :integer

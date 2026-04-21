@@ -5,8 +5,9 @@ defmodule FunSheepWeb.QuickTestLive do
 
   alias FunSheep.{Billing, Courses, Engagement, Gamification, Questions, Tutor}
   alias FunSheep.Assessments.QuickTestEngine
+  alias FunSheep.Gamification.FpEconomy
 
-  @xp_per_correct 10
+  @xp_per_correct FpEconomy.xp_per_correct()
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do
