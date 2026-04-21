@@ -44,6 +44,11 @@ defmodule FunSheep.Content.UploadedMaterial do
     field :relevance_score, :float
     field :relevance_notes, :string
 
+    field :completeness_score, :float
+    field :completeness_notes, :string
+    field :toc_detected, :boolean, default: false
+    field :completeness_checked_at, :utc_datetime
+
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :course, FunSheep.Courses.Course
 
@@ -69,6 +74,10 @@ defmodule FunSheep.Content.UploadedMaterial do
       :relevance_status,
       :relevance_score,
       :relevance_notes,
+      :completeness_score,
+      :completeness_notes,
+      :toc_detected,
+      :completeness_checked_at,
       :user_role_id,
       :course_id
     ])

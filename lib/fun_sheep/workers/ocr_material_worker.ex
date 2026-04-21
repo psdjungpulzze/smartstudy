@@ -32,6 +32,9 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
         # Check if this material matches the course subject/topic
         FunSheep.Workers.MaterialRelevanceWorker.enqueue(material_id)
 
+        # Verify textbook completeness — worker no-ops on non-textbook kinds.
+        FunSheep.Workers.TextbookCompletenessWorker.enqueue(material_id)
+
       {:error, reason} ->
         Logger.error("[OCR] Failed material #{material_id}: #{inspect(reason)}")
         :ok

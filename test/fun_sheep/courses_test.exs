@@ -106,6 +106,144 @@ defmodule FunSheep.CoursesTest do
     end
   end
 
+  describe "textbook_status/1" do
+    alias FunSheep.ContentFixtures
+
+    defp material_for_course(course, attrs) do
+      user_role = ContentFixtures.create_user_role()
+
+      attrs =
+        Map.merge(
+          %{
+            material_kind: :textbook,
+            file_name: "book.pdf",
+            course_id: course.id,
+            user_role_id: user_role.id
+          },
+          attrs
+        )
+
+      {:ok, material} =
+        %FunSheep.Content.UploadedMaterial{}
+        |> FunSheep.Content.UploadedMaterial.changeset(
+          Map.merge(
+            %{
+              file_path: "tmp/#{Ecto.UUID.generate()}.pdf",
+              file_type: "application/pdf",
+              file_size: 2048
+            },
+            attrs
+          )
+        )
+        |> FunSheep.Repo.insert()
+
+      material
+    end
+
+    test ":missing when no materials exist" do
+      course = create_course()
+
+      assert %{status: :missing, material: nil, candidate_count: 0} =
+               Courses.textbook_status(course)
+    end
+
+    test ":missing when only non-textbook materials exist" do
+      course = create_course()
+
+      material_for_course(course, %{material_kind: :lecture_notes, ocr_status: :completed})
+
+      assert %{status: :missing} = Courses.textbook_status(course)
+    end
+
+    test ":processing while OCR is pending" do
+      course = create_course()
+      material_for_course(course, %{ocr_status: :pending})
+
+      assert %{status: :processing} = Courses.textbook_status(course)
+    end
+
+    test ":complete when OCR finished and no score set (pre-phase-2 baseline)" do
+      course = create_course()
+      material_for_course(course, %{ocr_status: :completed})
+
+      assert %{status: :complete} = Courses.textbook_status(course)
+    end
+
+    test ":partial when completeness_score is below threshold" do
+      course = create_course()
+
+      material_for_course(course, %{
+        ocr_status: :completed,
+        completeness_score: 0.4,
+        completeness_notes: "Missing chapters 7–12"
+      })
+
+      assert %{status: :partial, completeness_score: 0.4, notes: "Missing chapters 7–12"} =
+               Courses.textbook_status(course)
+    end
+
+    test ":complete when completeness_score ≥ threshold" do
+      course = create_course()
+
+      material_for_course(course, %{
+        ocr_status: :completed,
+        completeness_score: 0.95
+      })
+
+      assert %{status: :complete, completeness_score: 0.95} = Courses.textbook_status(course)
+    end
+
+    test "picks the most complete among multiple textbooks" do
+      course = create_course()
+
+      material_for_course(course, %{
+        ocr_status: :completed,
+        completeness_score: 0.4,
+        file_name: "partial.pdf"
+      })
+
+      winner =
+        material_for_course(course, %{
+          ocr_status: :completed,
+          completeness_score: 0.95,
+          file_name: "full.pdf"
+        })
+
+      assert %{status: :complete, material: %{id: winner_id}} = Courses.textbook_status(course)
+      assert winner_id == winner.id
+    end
+
+    test "falls back to page count when scores are missing" do
+      course = create_course()
+      {:ok, [low, high]} = create_textbooks_with_pages(course, [1, 10])
+
+      assert %{status: :complete, material: %{id: winner_id}} = Courses.textbook_status(course)
+      assert winner_id == high.id
+      refute winner_id == low.id
+    end
+
+    defp create_textbooks_with_pages(course, page_counts) do
+      materials =
+        Enum.map(page_counts, fn n ->
+          material = material_for_course(course, %{ocr_status: :completed})
+
+          for i <- 1..n do
+            %FunSheep.Content.OcrPage{}
+            |> FunSheep.Content.OcrPage.changeset(%{
+              page_number: i,
+              extracted_text: "page #{i}",
+              material_id: material.id
+            })
+            |> FunSheep.Repo.insert!()
+          end
+
+          material
+        end)
+
+      {:ok, materials}
+    end
+  end
+
   describe "chapter CRUD" do
     test "create_chapter/1 with valid attrs" do
       course = create_course()
