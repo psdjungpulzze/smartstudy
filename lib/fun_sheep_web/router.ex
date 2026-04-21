@@ -114,6 +114,8 @@ defmodule FunSheepWeb.Router do
   end
 
   # Admin LiveView routes
+  import Oban.Web.Router
+
   live_session :admin,
     layout: {FunSheepWeb.Layouts, :app},
     on_mount: [{FunSheepWeb.LiveHelpers, :require_admin}] do
@@ -121,8 +123,29 @@ defmodule FunSheepWeb.Router do
       pipe_through [:browser, FunSheepWeb.Plugs.DevAuth]
 
       live "/", AdminDashboardLive, :index
+      live "/users", AdminUsersLive, :index
+      live "/courses", AdminCoursesLive, :index
+      live "/materials", AdminMaterialsLive, :index
       live "/questions/review", AdminQuestionReviewLive, :index
+      live "/audit-log", AdminAuditLogLive, :index
+      live "/settings/mfa", AdminMfaSettingsLive, :index
     end
+  end
+
+  # Admin controller routes (impersonation start/stop) — plug-guarded.
+  scope "/admin", FunSheepWeb do
+    pipe_through [:browser, FunSheepWeb.Plugs.DevAuth, FunSheepWeb.Plugs.RequireAdmin]
+
+    post "/impersonate/:user_id", AdminImpersonationController, :create
+    delete "/impersonate", AdminImpersonationController, :delete
+  end
+
+  # Oban Web dashboard — lives in its own live_session (the macro manages it),
+  # so we guard via a plug pipeline rather than an on_mount hook.
+  scope "/admin" do
+    pipe_through [:browser, FunSheepWeb.Plugs.DevAuth, FunSheepWeb.Plugs.RequireAdmin]
+
+    oban_dashboard("/jobs")
   end
 
   # Public proof card sharing (no auth required)

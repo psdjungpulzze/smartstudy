@@ -70,6 +70,9 @@ defmodule FunSheep.MixProject do
       {:bandit, "~> 1.5"},
       # Background jobs
       {:oban, "~> 2.17"},
+      # Oban Web — dashboard mounted at /admin/jobs. Free and open-source
+      # since Oban 2.18; no license needed.
+      {:oban_web, "~> 2.11"},
       # Streaming CSV parser for ingestion pipelines (NCES, IPEDS, NEIS, GIAS, ACARA)
       {:nimble_csv, "~> 1.2"},
       # JWT verification (for Interactor auth)

@@ -60,6 +60,16 @@ defmodule FunSheep.AccountsTest do
       }
 
       assert {:ok, _} = Accounts.create_user_role(teacher_attrs)
+
+      admin_attrs = %{
+        attrs
+        | interactor_user_id: Ecto.UUID.generate(),
+          role: :admin,
+          email: "admin@test.com"
+      }
+
+      assert {:ok, admin_role} = Accounts.create_user_role(admin_attrs)
+      assert admin_role.role == :admin
     end
 
     test "rejects invalid role" do

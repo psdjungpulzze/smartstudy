@@ -14,13 +14,14 @@ defmodule FunSheep.Accounts.UserRole do
 
   schema "user_roles" do
     field :interactor_user_id, :string
-    field :role, Ecto.Enum, values: [:student, :parent, :teacher]
+    field :role, Ecto.Enum, values: [:student, :parent, :teacher, :admin]
     field :email, :string
     field :display_name, :string
     field :grade, :string
     field :gender, :string
     field :ethnicity, :string
     field :metadata, :map, default: %{}
+    field :suspended_at, :utc_datetime
 
     belongs_to :school, FunSheep.Geo.School
 
@@ -47,7 +48,8 @@ defmodule FunSheep.Accounts.UserRole do
       :gender,
       :ethnicity,
       :metadata,
-      :school_id
+      :school_id,
+      :suspended_at
     ])
     |> validate_required([:interactor_user_id, :role, :email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/)
@@ -57,4 +59,7 @@ defmodule FunSheep.Accounts.UserRole do
     )
     |> foreign_key_constraint(:school_id)
   end
+
+  @doc "Returns true if the account has been suspended."
+  def suspended?(%__MODULE__{suspended_at: ts}), do: not is_nil(ts)
 end

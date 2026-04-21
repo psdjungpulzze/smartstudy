@@ -39,6 +39,22 @@ defmodule FunSheep.Questions do
     |> Repo.aggregate(:count)
   end
 
+  @doc """
+  Batched count of questions per course_id. Returns `%{course_id => count}`.
+  Used by the admin course table to avoid N+1 queries.
+  """
+  def count_all_by_courses([]), do: %{}
+
+  def count_all_by_courses(course_ids) when is_list(course_ids) do
+    from(q in Question,
+      where: q.course_id in ^course_ids,
+      group_by: q.course_id,
+      select: {q.course_id, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   def list_questions_by_course(course_id, filters \\ %{}) do
     Question
     |> where([q], q.course_id == ^course_id)

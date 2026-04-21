@@ -1,0 +1,208 @@
+defmodule FunSheepWeb.AdminCoursesLive do
+  @moduledoc """
+  Admin-wide course browser. Lists courses across every user with owner,
+  processing status, and a delete action.
+  """
+  use FunSheepWeb, :live_view
+
+  alias FunSheep.{Admin, Courses, Questions}
+
+  @page_size 25
+
+  @impl true
+  def mount(_params, _session, socket) do
+    {:ok,
+     socket
+     |> assign(:page_title, "Courses · Admin")
+     |> assign(:search, "")
+     |> assign(:page, 0)
+     |> load_courses()}
+  end
+
+  @impl true
+  def handle_event("search", %{"search" => term}, socket) do
+    {:noreply,
+     socket
+     |> assign(:search, term)
+     |> assign(:page, 0)
+     |> load_courses()}
+  end
+
+  def handle_event("prev_page", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:page, max(socket.assigns.page - 1, 0))
+     |> load_courses()}
+  end
+
+  def handle_event("next_page", _, socket) do
+    next = socket.assigns.page + 1
+
+    if next * @page_size >= socket.assigns.total do
+      {:noreply, socket}
+    else
+      {:noreply, socket |> assign(:page, next) |> load_courses()}
+    end
+  end
+
+  def handle_event("delete", %{"id" => id}, socket) do
+    course = Courses.get_course!(id)
+
+    case Admin.delete_course(course, socket.assigns.current_user) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Course deleted.")
+         |> load_courses()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete course.")}
+    end
+  end
+
+  defp load_courses(socket) do
+    opts = [
+      search: socket.assigns.search,
+      limit: @page_size,
+      offset: socket.assigns.page * @page_size
+    ]
+
+    courses = Courses.list_courses_for_admin(opts)
+    total = Courses.count_courses_for_admin(Keyword.take(opts, [:search]))
+
+    course_ids = Enum.map(courses, & &1.id)
+    question_counts = Questions.count_all_by_courses(course_ids)
+
+    socket
+    |> assign(:courses, courses)
+    |> assign(:question_counts, question_counts)
+    |> assign(:total, total)
+    |> assign(:page_size, @page_size)
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div class="p-6 max-w-7xl mx-auto">
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-[#1C1C1E]">Courses</h1>
+        <div class="text-sm text-[#8E8E93]">{@total} total</div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-md p-4 mb-4">
+        <form phx-change="search">
+          <input
+            type="text"
+            name="search"
+            value={@search}
+            placeholder="Search by name or subject…"
+            phx-debounce="300"
+            class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+          />
+        </form>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
+            <tr>
+              <th class="text-left px-4 py-3">Name</th>
+              <th class="text-left px-4 py-3">Subject</th>
+              <th class="text-left px-4 py-3">Owner</th>
+              <th class="text-left px-4 py-3">Status</th>
+              <th class="text-right px-4 py-3">Questions</th>
+              <th class="text-left px-4 py-3">Created</th>
+              <th class="text-right px-4 py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={c <- @courses} class="border-t border-[#F5F5F7]">
+              <td class="px-4 py-3 font-medium text-[#1C1C1E]">{c.name}</td>
+              <td class="px-4 py-3 text-[#1C1C1E]">{c.subject || "—"}</td>
+              <td class="px-4 py-3 text-[#8E8E93]">
+                <%= if c.created_by do %>
+                  {c.created_by.email}
+                <% else %>
+                  —
+                <% end %>
+              </td>
+              <td class="px-4 py-3">
+                <.status_badge status={c.processing_status} />
+              </td>
+              <td class="px-4 py-3 text-right text-[#1C1C1E]">
+                {Map.get(@question_counts, c.id, 0)}
+              </td>
+              <td class="px-4 py-3 text-[#8E8E93]">
+                {Calendar.strftime(c.inserted_at, "%Y-%m-%d")}
+              </td>
+              <td class="px-4 py-3 text-right">
+                <.link
+                  navigate={~p"/courses/#{c.id}"}
+                  class="px-3 py-1 rounded-full text-xs font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7] mr-2"
+                >
+                  View
+                </.link>
+                <button
+                  type="button"
+                  phx-click="delete"
+                  phx-value-id={c.id}
+                  data-confirm="Delete this course and ALL its questions, materials, and tests? This cannot be undone."
+                  class="px-3 py-1 rounded-full text-xs font-medium text-[#FF3B30] border border-[#FF3B30]/30 hover:bg-[#FFE5E3]"
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+            <tr :if={@courses == []}>
+              <td colspan="7" class="px-4 py-10 text-center text-[#8E8E93]">No courses match.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 flex items-center justify-between text-sm text-[#8E8E93]">
+        <div>Page {@page + 1} of {max(div(@total - 1, @page_size) + 1, 1)}</div>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            phx-click="prev_page"
+            disabled={@page == 0}
+            class="px-4 py-2 rounded-full border border-[#E5E5EA] bg-white disabled:opacity-40"
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            phx-click="next_page"
+            disabled={(@page + 1) * @page_size >= @total}
+            class="px-4 py-2 rounded-full border border-[#E5E5EA] bg-white disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :status, :any, required: true
+
+  defp status_badge(assigns) do
+    {label, class} =
+      case to_string(assigns.status) do
+        "ready" -> {"Ready", "bg-[#E8F8EB] text-[#1C1C1E]"}
+        "processing" -> {"Processing", "bg-[#FFF4CC] text-[#1C1C1E]"}
+        "failed" -> {"Failed", "bg-[#FFE5E3] text-[#FF3B30]"}
+        "" -> {"—", "bg-[#F5F5F7] text-[#8E8E93]"}
+        other -> {other, "bg-[#F5F5F7] text-[#1C1C1E]"}
+      end
+
+    assigns = assign(assigns, label: label, badge_class: class)
+
+    ~H"""
+    <span class={["inline-block px-2 py-0.5 rounded-full text-xs font-medium", @badge_class]}>
+      {@label}
+    </span>
+    """
+  end
+end

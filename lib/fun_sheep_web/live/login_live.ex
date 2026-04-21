@@ -24,15 +24,20 @@ defmodule FunSheepWeb.LoginLive do
       role = user["role"] || @default_role
       {:ok, redirect(socket, to: redirect_path(role))}
     else
+      admin_mode = socket.assigns[:live_action] == :admin
       initial_role = normalize_role(params["role"]) || @default_role
 
       {:ok,
        socket
-       |> assign(:page_title, "Sign in")
+       |> assign(:page_title, if(admin_mode, do: "Sign in", else: "Sign in"))
+       |> assign(:admin_mode, admin_mode)
        |> assign(:role, initial_role)
        |> assign(:form, %{"username" => "", "password" => ""})
        |> assign(:error, nil)
-       |> assign(:loading, false), layout: false}
+       |> assign(:loading, false)
+       |> assign(:step, :credentials)
+       |> assign(:mfa_session_token, nil)
+       |> assign(:mfa_code, ""), layout: false}
     end
   end
 
@@ -54,13 +59,17 @@ defmodule FunSheepWeb.LoginLive do
     socket = assign(socket, loading: true, error: nil)
 
     case authenticate(params["username"], params["password"]) do
-      {:ok, _user, tokens} ->
-        role = socket.assigns.role
+      {:ok, :tokens, tokens} ->
+        finish_login(socket, tokens)
 
+      {:ok, :mfa_required, session_token} ->
         {:noreply,
          socket
          |> assign(:loading, false)
-         |> redirect(to: "/auth/session?token=#{tokens["access_token"]}&role=#{role}")}
+         |> assign(:step, :mfa)
+         |> assign(:mfa_session_token, session_token)
+         |> assign(:mfa_code, "")
+         |> assign(:error, nil)}
 
       {:error, message} ->
         {:noreply,
@@ -68,6 +77,54 @@ defmodule FunSheepWeb.LoginLive do
          |> assign(:loading, false)
          |> assign(:error, message)}
     end
+  end
+
+  def handle_event("mfa_validate", %{"mfa" => %{"code" => code}}, socket) do
+    {:noreply, assign(socket, mfa_code: code, error: nil)}
+  end
+
+  def handle_event("mfa_submit", %{"mfa" => %{"code" => code}}, socket) do
+    socket = assign(socket, loading: true, error: nil)
+
+    case verify_mfa(socket.assigns.mfa_session_token, code) do
+      {:ok, tokens} ->
+        finish_login(socket, tokens)
+
+      {:error, message} ->
+        {:noreply,
+         socket
+         |> assign(:loading, false)
+         |> assign(:mfa_code, "")
+         |> assign(:error, message)}
+    end
+  end
+
+  def handle_event("mfa_cancel", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:step, :credentials)
+     |> assign(:mfa_session_token, nil)
+     |> assign(:mfa_code, "")
+     |> assign(:error, nil)
+     |> assign(:loading, false)}
+  end
+
+  # In admin mode we intentionally omit the `role` query param so the session
+  # endpoint derives the role from the Interactor profile's `metadata.role`
+  # claim. Non-admin users who land on /admin/login simply get their default
+  # role and are redirected to /dashboard.
+  defp finish_login(socket, tokens) do
+    redirect_url =
+      if socket.assigns.admin_mode do
+        "/auth/session?token=#{tokens["access_token"]}"
+      else
+        "/auth/session?token=#{tokens["access_token"]}&role=#{socket.assigns.role}"
+      end
+
+    {:noreply,
+     socket
+     |> assign(:loading, false)
+     |> redirect(to: redirect_url)}
   end
 
   defp authenticate(username, password) do
@@ -80,8 +137,11 @@ defmodule FunSheepWeb.LoginLive do
     }
 
     case Req.post(url, json: body) do
+      {:ok, %{status: 200, body: %{"mfa_required" => true, "session_token" => token}}} ->
+        {:ok, :mfa_required, token}
+
       {:ok, %{status: 200, body: tokens}} ->
-        {:ok, %{}, tokens}
+        {:ok, :tokens, tokens}
 
       {:ok, %{status: status, body: %{"error" => error}}} when status in [401, 403] ->
         {:error, friendly_auth_error(error)}
@@ -97,6 +157,32 @@ defmodule FunSheepWeb.LoginLive do
 
       {:error, reason} ->
         Logger.error("Login failed: #{inspect(reason)}")
+        {:error, "Connection error. Please try again."}
+    end
+  end
+
+  defp verify_mfa(session_token, code) do
+    url = "#{interactor_url()}/api/v1/users/login/mfa"
+    body = %{session_token: session_token, code: code}
+
+    case Req.post(url, json: body) do
+      {:ok, %{status: 200, body: tokens}} ->
+        {:ok, tokens}
+
+      {:ok, %{status: 401}} ->
+        {:error, "Invalid code. Please try again."}
+
+      {:ok, %{status: _, body: %{"error" => error}}} ->
+        {:error, error}
+
+      {:ok, %{status: status}} ->
+        {:error, "Verification failed (#{status})"}
+
+      {:error, %Req.TransportError{reason: :econnrefused}} ->
+        {:error, "Authentication service unavailable. Please try again later."}
+
+      {:error, reason} ->
+        Logger.error("MFA verification failed: #{inspect(reason)}")
         {:error, "Connection error. Please try again."}
     end
   end
@@ -136,11 +222,13 @@ defmodule FunSheepWeb.LoginLive do
         <%!-- Card --%>
         <div class="bg-white rounded-2xl shadow-md p-6 sm:p-8 border border-[#E5E5EA]">
           <h2 class="text-xl font-semibold text-[#1C1C1E] text-center mb-5">
-            Welcome back!
+            <span :if={@step == :credentials}>Welcome back!</span>
+            <span :if={@step == :mfa}>Enter your code</span>
           </h2>
 
-          <%!-- Google SSO --%>
+          <%!-- Google SSO (only visible on credentials step) --%>
           <a
+            :if={@step == :credentials}
             href={~p"/auth/login/redirect?idp_hint=google"}
             class="w-full inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-full border border-[#E5E5EA] bg-white hover:bg-[#F5F5F7] text-[#1C1C1E] font-medium shadow-sm transition-colors mb-4"
             data-google-sso
@@ -149,7 +237,7 @@ defmodule FunSheepWeb.LoginLive do
             <span>Continue with Google</span>
           </a>
 
-          <div class="relative mb-4">
+          <div :if={@step == :credentials} class="relative mb-4">
             <div class="absolute inset-0 flex items-center" aria-hidden="true">
               <div class="w-full border-t border-[#E5E5EA]"></div>
             </div>
@@ -167,7 +255,59 @@ defmodule FunSheepWeb.LoginLive do
             <span aria-hidden="true">⚠️</span> {@error}
           </div>
 
-          <form phx-change="validate" phx-submit="login" class="space-y-4">
+          <%!-- MFA step --%>
+          <form
+            :if={@step == :mfa}
+            phx-change="mfa_validate"
+            phx-submit="mfa_submit"
+            class="space-y-4"
+          >
+            <p class="text-sm text-[#8E8E93] text-center">
+              Open your authenticator app and enter the 6-digit code.
+            </p>
+
+            <div>
+              <label for="mfa-code" class="sr-only">Authentication code</label>
+              <input
+                id="mfa-code"
+                type="text"
+                name="mfa[code]"
+                value={@mfa_code}
+                placeholder="123456"
+                required
+                autofocus
+                inputmode="numeric"
+                pattern="[0-9]*"
+                autocomplete="one-time-code"
+                maxlength="8"
+                class="w-full text-center tracking-[0.5em] text-xl font-mono px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors text-[#1C1C1E]"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={@loading}
+              class="w-full bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 rounded-full shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {if @loading, do: "Verifying…", else: "Verify"}
+            </button>
+
+            <button
+              type="button"
+              phx-click="mfa_cancel"
+              class="w-full text-sm text-[#8E8E93] hover:text-[#1C1C1E] font-medium"
+            >
+              Back to sign in
+            </button>
+          </form>
+
+          <%!-- Credentials step --%>
+          <form
+            :if={@step == :credentials}
+            phx-change="validate"
+            phx-submit="login"
+            class="space-y-4"
+          >
             <%!-- Username --%>
             <div>
               <label
@@ -214,8 +354,10 @@ defmodule FunSheepWeb.LoginLive do
               />
             </div>
 
-            <%!-- Role Selector (below password per UX: login is primary, role is a context switch) --%>
-            <.role_selector role={@role} />
+            <%!-- Role Selector (below password per UX: login is primary, role is a context switch).
+                 Hidden in admin mode — the admin role is derived server-side from the
+                 Interactor profile's metadata.role claim. --%>
+            <.role_selector :if={not @admin_mode} role={@role} />
 
             <%!-- Submit --%>
             <button
@@ -227,7 +369,7 @@ defmodule FunSheepWeb.LoginLive do
             </button>
           </form>
 
-          <div class="mt-6 text-center">
+          <div :if={not @admin_mode and @step == :credentials} class="mt-6 text-center">
             <p class="text-sm text-[#8E8E93]">
               New here?
               <.link

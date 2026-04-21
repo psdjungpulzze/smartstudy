@@ -19,6 +19,45 @@ defmodule FunSheep.Courses do
   def get_course!(id), do: Repo.get!(Course, id)
 
   @doc """
+  Admin-facing paginated course list. Preloads school and creator
+  (user_role). Supports optional `:search` on name/subject.
+  """
+  def list_courses_for_admin(opts \\ []) do
+    opts
+    |> admin_courses_query()
+    |> order_by([c], desc: c.inserted_at)
+    |> limit(^Keyword.get(opts, :limit, 25))
+    |> offset(^Keyword.get(opts, :offset, 0))
+    |> preload([:school, :created_by])
+    |> Repo.all()
+  end
+
+  @doc "Counts courses matching the same filters used by `list_courses_for_admin/1`."
+  def count_courses_for_admin(opts \\ []) do
+    opts
+    |> admin_courses_query()
+    |> select([c], count(c.id))
+    |> Repo.one()
+  end
+
+  defp admin_courses_query(opts) do
+    search = Keyword.get(opts, :search)
+    query = from(c in Course)
+
+    case search do
+      nil ->
+        query
+
+      "" ->
+        query
+
+      term when is_binary(term) ->
+        pattern = "%#{term}%"
+        from(c in query, where: ilike(c.name, ^pattern) or ilike(c.subject, ^pattern))
+    end
+  end
+
+  @doc """
   Gets a course with chapters and sections preloaded, ordered by position.
   """
   def get_course_with_chapters!(id) do
