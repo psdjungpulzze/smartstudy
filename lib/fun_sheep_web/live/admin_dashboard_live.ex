@@ -3,7 +3,8 @@ defmodule FunSheepWeb.AdminDashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "Admin Dashboard")}
+    review_count = FunSheep.Questions.count_questions_needing_review()
+    {:ok, assign(socket, page_title: "Admin Dashboard", review_count: review_count)}
   end
 
   @impl true
@@ -40,6 +41,23 @@ defmodule FunSheepWeb.AdminDashboardLive do
           <p class="text-3xl font-bold text-[#4CD964]">0</p>
           <p class="text-sm text-[#8E8E93] mt-1">Active courses</p>
         </div>
+
+        <.link
+          navigate={~p"/admin/questions/review"}
+          class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
+        >
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold text-[#1C1C1E]">Question Review</h3>
+            <.icon name="hero-clipboard-document-check" class="w-5 h-5 text-[#8E8E93]" />
+          </div>
+          <p class={[
+            "text-3xl font-bold",
+            if(@review_count > 0, do: "text-[#FFCC00]", else: "text-[#4CD964]")
+          ]}>
+            {@review_count}
+          </p>
+          <p class="text-sm text-[#8E8E93] mt-1">Flagged for review</p>
+        </.link>
 
         <div class="bg-white rounded-2xl shadow-md p-6">
           <div class="flex items-center justify-between mb-4">

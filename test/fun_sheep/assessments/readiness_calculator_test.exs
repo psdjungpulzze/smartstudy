@@ -57,6 +57,7 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
 
       {:ok, q1} =
         FunSheep.Questions.create_question(%{
+          validation_status: :passed,
           content: "Q1",
           answer: "A",
           question_type: :short_answer,
@@ -75,6 +76,7 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
 
       {:ok, q2} =
         FunSheep.Questions.create_question(%{
+          validation_status: :passed,
           content: "Q2",
           answer: "B",
           question_type: :short_answer,
@@ -110,6 +112,7 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
       # Chapter 1: 1 correct out of 1 = 100%
       {:ok, q1} =
         FunSheep.Questions.create_question(%{
+          validation_status: :passed,
           content: "Q1",
           answer: "A",
           question_type: :short_answer,
@@ -128,6 +131,7 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
       # Chapter 2: 1 correct out of 2 = 50%
       {:ok, q2} =
         FunSheep.Questions.create_question(%{
+          validation_status: :passed,
           content: "Q2",
           answer: "B",
           question_type: :short_answer,

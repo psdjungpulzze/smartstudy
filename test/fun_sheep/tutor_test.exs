@@ -19,7 +19,8 @@ defmodule FunSheep.TutorTest do
       question_type: :multiple_choice,
       difficulty: :medium,
       course_id: course.id,
-      options: %{"A" => "1", "B" => "2", "C" => "3", "D" => "4"}
+      options: %{"A" => "1", "B" => "2", "C" => "3", "D" => "4"},
+      validation_status: :passed
     }
 
     {:ok, question} = Questions.create_question(Map.merge(defaults, attrs))

@@ -32,6 +32,7 @@ defmodule FunSheepWeb.AssessmentLiveTest do
 
     {:ok, _q1} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "What is the powerhouse of the cell?",
         answer: "A",
         question_type: :multiple_choice,
@@ -43,6 +44,7 @@ defmodule FunSheepWeb.AssessmentLiveTest do
 
     {:ok, _q2} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "DNA stands for?",
         answer: "B",
         question_type: :multiple_choice,
@@ -59,6 +61,7 @@ defmodule FunSheepWeb.AssessmentLiveTest do
 
     {:ok, _q3} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "Cells divide via?",
         answer: "A",
         question_type: :multiple_choice,

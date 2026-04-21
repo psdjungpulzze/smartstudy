@@ -9,7 +9,7 @@
 #   1. Required Interactor env vars are populated (no XXXX placeholders)
 #   2. /oauth/jwks is publicly reachable on INTERACTOR_URL
 #   3. OAuth client_credentials grant returns a token
-#   4. /api/v1/agents/assistants responds with all 4 required assistants
+#   4. /api/v1/agents/assistants responds with all 5 required assistants
 #
 # Usage:
 #   ./scripts/deploy/verify-interactor.sh
@@ -21,7 +21,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 ENV_FILE="${1:-$ROOT/.env.prod}"
 
-REQUIRED_ASSISTANTS=(course_discovery web_search question_gen question_extract)
+REQUIRED_ASSISTANTS=(course_discovery web_search question_gen question_extract question_validator)
 
 # --- Colors ---------------------------------------------------------------
 if [ -t 1 ]; then
@@ -144,7 +144,7 @@ if [ ${#MISSING[@]} -ne 0 ]; then
   echo "       Register them on the prod Interactor before deploying." >&2
   exit 1
 fi
-ok "All 4 required assistants present"
+ok "All ${#REQUIRED_ASSISTANTS[@]} required assistants present"
 
 # --- Summary --------------------------------------------------------------
 echo ""

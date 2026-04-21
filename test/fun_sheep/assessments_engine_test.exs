@@ -25,6 +25,7 @@ defmodule FunSheep.Assessments.EngineTest do
     # Create questions for chapter 1
     {:ok, q1} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 2+2?",
         answer: "4",
         question_type: :short_answer,
@@ -35,6 +36,7 @@ defmodule FunSheep.Assessments.EngineTest do
 
     {:ok, q2} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 3+3?",
         answer: "6",
         question_type: :short_answer,
@@ -45,6 +47,7 @@ defmodule FunSheep.Assessments.EngineTest do
 
     {:ok, q3} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 5+5?",
         answer: "10",
         question_type: :short_answer,
@@ -56,6 +59,7 @@ defmodule FunSheep.Assessments.EngineTest do
     # Create questions for chapter 2
     {:ok, q4} =
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 1+1?",
         answer: "2",
         question_type: :short_answer,

@@ -16,13 +16,47 @@ defmodule FunSheep.Questions do
     Repo.all(Question)
   end
 
+  # Questions that are safe to show students: fully validated. Pending and
+  # needs_review are hidden so students never see an unvetted question; failed
+  # are hidden for obvious reasons. Admin queries should use the `_all`
+  # variants below.
+  @student_visible [:passed]
+
   def count_questions_by_course(course_id) do
+    Question
+    |> where([q], q.course_id == ^course_id)
+    |> where([q], q.validation_status in ^@student_visible)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Counts ALL questions regardless of validation state. For progress UI during
+  the generate→validate pipeline.
+  """
+  def count_all_questions_by_course(course_id) do
     Question
     |> where([q], q.course_id == ^course_id)
     |> Repo.aggregate(:count)
   end
 
   def list_questions_by_course(course_id, filters \\ %{}) do
+    Question
+    |> where([q], q.course_id == ^course_id)
+    |> where([q], q.validation_status in ^@student_visible)
+    |> maybe_filter_chapter(filters)
+    |> maybe_filter_section(filters)
+    |> maybe_filter_difficulty(filters)
+    |> maybe_filter_question_type(filters)
+    |> order_by([q], desc: q.inserted_at)
+    |> preload([:chapter, :section])
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists every question for a course regardless of validation state. Used by
+  admin / review dashboards only — never by student-facing LiveViews.
+  """
+  def list_all_questions_by_course(course_id, filters \\ %{}) do
     Question
     |> where([q], q.course_id == ^course_id)
     |> maybe_filter_chapter(filters)
@@ -32,6 +66,112 @@ defmodule FunSheep.Questions do
     |> order_by([q], desc: q.inserted_at)
     |> preload([:chapter, :section])
     |> Repo.all()
+  end
+
+  @doc """
+  Lists questions flagged for manual review. Used by the admin review queue.
+  """
+  def list_questions_needing_review(course_id) do
+    Question
+    |> where([q], q.course_id == ^course_id and q.validation_status == :needs_review)
+    |> order_by([q], desc: q.inserted_at)
+    |> preload([:chapter, :section])
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists every question flagged for review across all courses. For the global
+  admin review queue.
+  """
+  def list_all_questions_needing_review do
+    Question
+    |> where([q], q.validation_status == :needs_review)
+    |> order_by([q], desc: q.inserted_at)
+    |> preload([:chapter, :section, :course])
+    |> Repo.all()
+  end
+
+  @doc """
+  Counts questions needing review across all courses.
+  """
+  def count_questions_needing_review do
+    Question
+    |> where([q], q.validation_status == :needs_review)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Admin override — marks a reviewed question as passed so students can see
+  it. Records who approved it in validation_report.
+  """
+  def admin_approve_question(%Question{} = question, reviewer_id \\ nil) do
+    report =
+      (question.validation_report || %{})
+      |> Map.put("admin_decision", %{
+        "action" => "approve",
+        "reviewer_id" => reviewer_id,
+        "at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
+    question
+    |> Question.changeset(%{
+      validation_status: :passed,
+      validation_report: report,
+      validated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Admin override — marks a reviewed question as failed so students never
+  see it. Records who rejected it in validation_report.
+  """
+  def admin_reject_question(%Question{} = question, reviewer_id \\ nil) do
+    report =
+      (question.validation_report || %{})
+      |> Map.put("admin_decision", %{
+        "action" => "reject",
+        "reviewer_id" => reviewer_id,
+        "at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
+    question
+    |> Question.changeset(%{
+      validation_status: :failed,
+      validation_report: report,
+      validated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Admin edit — updates question content/answer/explanation/options and marks
+  it passed. Used when the admin fixes the validator's complaints directly.
+  """
+  def admin_edit_and_approve(%Question{} = question, attrs, reviewer_id \\ nil) do
+    report =
+      (question.validation_report || %{})
+      |> Map.put("admin_decision", %{
+        "action" => "edit_and_approve",
+        "reviewer_id" => reviewer_id,
+        "at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
+    merged =
+      attrs
+      |> Map.new(fn
+        {k, v} when is_atom(k) -> {k, v}
+        {k, v} when is_binary(k) -> {String.to_existing_atom(k), v}
+      end)
+      |> Map.merge(%{
+        validation_status: :passed,
+        validation_report: report,
+        validated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+
+    question
+    |> Question.changeset(merged)
+    |> Repo.update()
   end
 
   defp maybe_filter_chapter(query, %{"chapter_id" => chapter_id}) when chapter_id != "" do
@@ -71,7 +211,9 @@ defmodule FunSheep.Questions do
   defp maybe_filter_question_type(query, _), do: query
 
   def list_questions_by_chapter(chapter_id) do
-    from(q in Question, where: q.chapter_id == ^chapter_id)
+    from(q in Question,
+      where: q.chapter_id == ^chapter_id and q.validation_status in ^@student_visible
+    )
     |> Repo.all()
   end
 
@@ -160,6 +302,7 @@ defmodule FunSheep.Questions do
       where:
         qa.user_role_id == ^user_role_id and
           q.chapter_id == ^chapter_id and
+          q.validation_status in ^@student_visible and
           qa.is_correct == false,
       distinct: q.id,
       select: q
@@ -189,6 +332,7 @@ defmodule FunSheep.Questions do
         on: cq.question_id == q.id,
         where:
           q.course_id == ^course_id and
+            q.validation_status in ^@student_visible and
             qa.user_role_id == ^user_role_id and
             qa.is_correct == false,
         group_by: [q.id, cq.question_id],
@@ -225,6 +369,7 @@ defmodule FunSheep.Questions do
       from(q in Question,
         left_join: qa in QuestionAttempt,
         on: qa.question_id == q.id and qa.user_role_id == ^user_role_id,
+        where: q.validation_status in ^@student_visible,
         group_by: q.id,
         order_by: [
           # Wrong answers first (0), then unseen (1), then correct (2)
@@ -308,6 +453,20 @@ defmodule FunSheep.Questions do
     from(qa in QuestionAttempt,
       join: q in assoc(qa, :question),
       where: qa.user_role_id == ^user_role_id and q.chapter_id == ^chapter_id,
+      select: count(qa.id)
+    )
+    |> Repo.one()
+  end
+
+  @doc """
+  Counts attempts for a user across multiple chapters in a single query.
+  """
+  def count_attempts_in_chapters(_user_role_id, []), do: 0
+
+  def count_attempts_in_chapters(user_role_id, chapter_ids) when is_list(chapter_ids) do
+    from(qa in QuestionAttempt,
+      join: q in assoc(qa, :question),
+      where: qa.user_role_id == ^user_role_id and q.chapter_id in ^chapter_ids,
       select: count(qa.id)
     )
     |> Repo.one()
@@ -415,6 +574,7 @@ defmodule FunSheep.Questions do
   def list_questions_with_stats(course_id, filters \\ %{}) do
     Question
     |> where([q], q.course_id == ^course_id)
+    |> where([q], q.validation_status in ^@student_visible)
     |> maybe_filter_chapter(filters)
     |> maybe_filter_difficulty(filters)
     |> maybe_filter_question_type(filters)

@@ -19,6 +19,7 @@ defmodule FunSheep.Assessments.FormatReplicatorTest do
     # Create questions of different types
     for i <- 1..5 do
       Questions.create_question(%{
+        validation_status: :passed,
         content: "MC Question #{i}",
         answer: "A",
         question_type: :multiple_choice,
@@ -31,6 +32,7 @@ defmodule FunSheep.Assessments.FormatReplicatorTest do
 
     for i <- 1..3 do
       Questions.create_question(%{
+        validation_status: :passed,
         content: "TF Question #{i}",
         answer: "True",
         question_type: :true_false,

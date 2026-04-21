@@ -164,13 +164,17 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         questions = extract_questions_from_text(text, course, source)
 
         # Insert questions
-        inserted =
-          Enum.reduce(questions, 0, fn q, count ->
+        {inserted, inserted_ids} =
+          Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
             case insert_question(q, course) do
-              {:ok, _} -> count + 1
-              {:error, _} -> count
+              {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
+              {:error, _} -> {count, ids}
             end
           end)
+
+        FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
+          course_id: course.id
+        )
 
         Content.update_discovered_source(source, %{
           status: "processed",

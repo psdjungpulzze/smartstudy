@@ -33,6 +33,7 @@ defmodule FunSheepWeb.FormatTestLiveTest do
     # Create some questions
     for i <- 1..3 do
       FunSheep.Questions.create_question(%{
+        validation_status: :passed,
         content: "Question #{i}",
         answer: "A",
         question_type: :multiple_choice,

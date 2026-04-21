@@ -18,6 +18,7 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
 
     {:ok, q1} =
       Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 2+2?",
         answer: "A",
         question_type: :multiple_choice,
@@ -29,6 +30,7 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
 
     {:ok, q2} =
       Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 3+3?",
         answer: "B",
         question_type: :multiple_choice,

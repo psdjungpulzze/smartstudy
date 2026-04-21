@@ -44,8 +44,8 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
       Logger.info("[Questions] Extracted #{length(questions)} questions for course #{course_id}")
 
       # Insert questions into DB
-      inserted =
-        Enum.reduce(questions, 0, fn q_attrs, count ->
+      {inserted, inserted_ids} =
+        Enum.reduce(questions, {0, []}, fn q_attrs, {count, ids} ->
           # Link to course and source material for question set filtering
           material_id = get_in(q_attrs, [:metadata, "material_id"])
 
@@ -58,10 +58,16 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
           attrs = maybe_assign_chapter(attrs, course.chapters)
 
           case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
-            {:ok, _} -> count + 1
-            {:error, _} -> count
+            {:ok, q} -> {count + 1, [q.id | ids]}
+            {:error, _} -> {count, ids}
           end
         end)
+
+      # Extracted questions come from real materials but still need validation —
+      # OCR misreads, formatting glitches, and partial captures are common.
+      FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
+        course_id: course_id
+      )
 
       # Don't finalize yet — AI generation will add more questions
       set_generating_status(course, inserted)

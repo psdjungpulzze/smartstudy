@@ -26,6 +26,15 @@ defmodule FunSheep.Questions.Question do
     field :hobby_context, :string
     field :difficulty, Ecto.Enum, values: [:easy, :medium, :hard]
     field :metadata, :map, default: %{}
+    field :explanation, :string
+
+    field :validation_status, Ecto.Enum,
+      values: [:pending, :passed, :needs_review, :failed],
+      default: :pending
+
+    field :validation_score, :float
+    field :validation_report, :map, default: %{}
+    field :validated_at, :utc_datetime
 
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :chapter, FunSheep.Courses.Chapter
@@ -58,6 +67,11 @@ defmodule FunSheep.Questions.Question do
       :hobby_context,
       :difficulty,
       :metadata,
+      :explanation,
+      :validation_status,
+      :validation_score,
+      :validation_report,
+      :validated_at,
       :course_id,
       :chapter_id,
       :section_id,

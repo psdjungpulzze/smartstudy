@@ -76,6 +76,7 @@ defmodule FunSheep.Learning.StudyGuideGeneratorTest do
       # Create a question and correct attempt for chapter1 (100%)
       {:ok, q} =
         FunSheep.Questions.create_question(%{
+          validation_status: :passed,
           content: "What is a cell?",
           answer: "Basic unit of life",
           question_type: :short_answer,
@@ -109,6 +110,7 @@ defmodule FunSheep.Learning.StudyGuideGeneratorTest do
 
       {:ok, q} =
         FunSheep.Questions.create_question(%{
+          validation_status: :passed,
           content: "What is mitosis?",
           answer: "Cell division",
           question_type: :short_answer,

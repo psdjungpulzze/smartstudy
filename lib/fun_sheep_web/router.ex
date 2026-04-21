@@ -37,6 +37,15 @@ defmodule FunSheepWeb.Router do
       live "/forgot-password", ForgotPasswordLive, :index
       live "/reset-password/:token", ResetPasswordLive, :index
     end
+
+    # Hidden admin login: same LoginLive without role chips. Admin role is
+    # derived server-side from the Interactor profile's `metadata.role`
+    # claim — a non-admin logging in here just ends up on /dashboard.
+    scope "/admin", FunSheepWeb do
+      pipe_through :browser
+
+      live "/login", LoginLive, :admin
+    end
   end
 
   # OAuth callback and session routes (regular controller, not LiveView)
@@ -112,6 +121,7 @@ defmodule FunSheepWeb.Router do
       pipe_through [:browser, FunSheepWeb.Plugs.DevAuth]
 
       live "/", AdminDashboardLive, :index
+      live "/questions/review", AdminQuestionReviewLive, :index
     end
   end
 

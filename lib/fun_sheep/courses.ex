@@ -168,6 +168,78 @@ defmodule FunSheep.Courses do
     |> Repo.update()
   end
 
+  @doc """
+  Called by `FunSheep.Workers.QuestionValidationWorker` once every pending
+  question for a course has a verdict. Flips the course to "ready" if at
+  least one question passed validation, or "failed" if none did.
+
+  This is the honest-failure path: if the validator rejected every generated
+  question, the user sees a failed status rather than a course full of bad
+  questions marked ready.
+  """
+  def finalize_after_validation(course_id) do
+    alias FunSheep.Questions.Question
+
+    course = get_course!(course_id)
+
+    counts =
+      from(q in Question,
+        where: q.course_id == ^course_id,
+        group_by: q.validation_status,
+        select: {q.validation_status, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    passed = Map.get(counts, :passed, 0)
+    needs_review = Map.get(counts, :needs_review, 0)
+    failed = Map.get(counts, :failed, 0)
+    pending = Map.get(counts, :pending, 0)
+
+    cond do
+      pending > 0 ->
+        # Still work to do — shouldn't usually reach here, worker guards it
+        {:ok, course}
+
+      passed > 0 ->
+        update_course(course, %{
+          processing_status: "ready",
+          processing_step:
+            "Processing complete! #{passed} questions validated and ready." <>
+              if(needs_review > 0, do: " (#{needs_review} flagged for review)", else: "")
+        })
+        |> tap(fn _ ->
+          broadcast_finalization(course_id, "ready", passed, needs_review, failed)
+        end)
+
+      true ->
+        update_course(course, %{
+          processing_status: "failed",
+          processing_step:
+            "Question validation failed — all generated questions were rejected. " <>
+              "Please try again or upload different materials."
+        })
+        |> tap(fn _ ->
+          broadcast_finalization(course_id, "failed", 0, 0, failed)
+        end)
+    end
+  end
+
+  defp broadcast_finalization(course_id, status, passed, needs_review, failed) do
+    Phoenix.PubSub.broadcast(
+      FunSheep.PubSub,
+      "course:#{course_id}",
+      {:processing_update,
+       %{
+         status: status,
+         step: "Validation complete",
+         questions_extracted: passed,
+         questions_needs_review: needs_review,
+         questions_failed: failed
+       }}
+    )
+  end
+
   def delete_course(%Course{} = course) do
     Repo.delete(course)
   end

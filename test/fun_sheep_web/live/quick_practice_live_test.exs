@@ -22,6 +22,7 @@ defmodule FunSheepWeb.QuickPracticeLiveTest do
   defp add_question(course_id, content) do
     {:ok, q} =
       Questions.create_question(%{
+        validation_status: :passed,
         content: content,
         answer: "A",
         question_type: :multiple_choice,

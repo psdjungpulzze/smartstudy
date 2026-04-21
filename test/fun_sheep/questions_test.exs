@@ -15,7 +15,10 @@ defmodule FunSheep.QuestionsTest do
       answer: "4",
       question_type: :multiple_choice,
       difficulty: :medium,
-      course_id: course.id
+      course_id: course.id,
+      # Default to :passed so existing listing tests see the question. Tests
+      # that need pending/failed explicitly override this.
+      validation_status: :passed
     }
 
     {:ok, question} = Questions.create_question(Map.merge(defaults, attrs))
@@ -146,6 +149,41 @@ defmodule FunSheep.QuestionsTest do
     test "returns empty list for course with no questions" do
       course = create_course()
       assert Questions.list_questions_by_course(course.id) == []
+    end
+
+    test "hides pending, needs_review, and failed questions from students" do
+      course = create_course()
+      create_question(course, %{content: "Passed", validation_status: :passed})
+      create_question(course, %{content: "Pending", validation_status: :pending})
+      create_question(course, %{content: "Review", validation_status: :needs_review})
+      create_question(course, %{content: "Failed", validation_status: :failed})
+
+      questions = Questions.list_questions_by_course(course.id)
+      assert length(questions) == 1
+      assert hd(questions).content == "Passed"
+    end
+
+    test "count_questions_by_course only counts passed questions" do
+      course = create_course()
+      create_question(course, %{content: "Passed", validation_status: :passed})
+      create_question(course, %{content: "Pending", validation_status: :pending})
+      create_question(course, %{content: "Failed", validation_status: :failed})
+
+      assert Questions.count_questions_by_course(course.id) == 1
+      assert Questions.count_all_questions_by_course(course.id) == 3
+    end
+  end
+
+  describe "list_questions_needing_review/1" do
+    test "returns only needs_review questions" do
+      course = create_course()
+      create_question(course, %{content: "Passed", validation_status: :passed})
+      create_question(course, %{content: "Review me", validation_status: :needs_review})
+      create_question(course, %{content: "Failed", validation_status: :failed})
+
+      results = Questions.list_questions_needing_review(course.id)
+      assert length(results) == 1
+      assert hd(results).content == "Review me"
     end
   end
 end

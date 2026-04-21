@@ -5,7 +5,9 @@ defmodule FunSheep.QuestionsFiguresTest do
   alias FunSheep.Questions.Question
 
   defp create_course do
-    {:ok, course} = FunSheep.Courses.create_course(%{name: "Bio", subject: "Biology", grade: "10"})
+    {:ok, course} =
+      FunSheep.Courses.create_course(%{name: "Bio", subject: "Biology", grade: "10"})
+
     course
   end
 
@@ -35,6 +37,7 @@ defmodule FunSheep.QuestionsFiguresTest do
 
       {:ok, question} =
         Questions.create_question(%{
+          validation_status: :passed,
           content: "Q",
           answer: "A",
           question_type: :short_answer,

@@ -386,45 +386,57 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   defp insert_questions(questions, course, chapter, available_figures) do
     available_figure_ids = MapSet.new(available_figures, & &1.id)
 
-    Enum.reduce(questions, 0, fn q_data, count ->
-      claimed_figure_ids = sanitize_figure_ids(q_data["figure_ids"], available_figure_ids)
-      table_spec = sanitize_table_spec(q_data["table_spec"])
-      has_visual = claimed_figure_ids != [] or table_spec != nil
+    {count, inserted_ids} =
+      Enum.reduce(questions, {0, []}, fn q_data, {count, ids} ->
+        claimed_figure_ids = sanitize_figure_ids(q_data["figure_ids"], available_figure_ids)
+        table_spec = sanitize_table_spec(q_data["table_spec"])
+        has_visual = claimed_figure_ids != [] or table_spec != nil
 
-      case validate_figure_dependency(q_data["content"], has_visual) do
-        :ok ->
-          attrs = %{
-            content: q_data["content"],
-            answer: q_data["answer"],
-            question_type: normalize_question_type(q_data["question_type"]),
-            options: q_data["options"],
-            difficulty: normalize_difficulty(q_data["difficulty"]),
-            is_generated: true,
-            course_id: course.id,
-            chapter_id: if(chapter, do: chapter.id),
-            metadata:
-              %{"source" => "ai_generation"}
-              |> maybe_put_meta("table_spec", table_spec)
-          }
+        case validate_figure_dependency(q_data["content"], has_visual) do
+          :ok ->
+            attrs = %{
+              content: q_data["content"],
+              answer: q_data["answer"],
+              question_type: normalize_question_type(q_data["question_type"]),
+              options: q_data["options"],
+              difficulty: normalize_difficulty(q_data["difficulty"]),
+              explanation: q_data["explanation"],
+              is_generated: true,
+              course_id: course.id,
+              chapter_id: if(chapter, do: chapter.id),
+              metadata:
+                %{"source" => "ai_generation"}
+                |> maybe_put_meta("table_spec", table_spec)
+            }
 
-          case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
-            {:ok, question} ->
-              attach_figures(question, claimed_figure_ids)
-              count + 1
+            case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
+              {:ok, question} ->
+                attach_figures(question, claimed_figure_ids)
+                {count + 1, [question.id | ids]}
 
-            {:error, changeset} ->
-              Logger.warning("[AIGen] Failed to insert question: #{inspect(changeset.errors)}")
-              count
-          end
+              {:error, changeset} ->
+                Logger.warning("[AIGen] Failed to insert question: #{inspect(changeset.errors)}")
+                {count, ids}
+            end
 
-        {:error, reason} ->
-          Logger.warning(
-            "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
-          )
+          {:error, reason} ->
+            Logger.warning(
+              "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
+            )
 
-          count
-      end
-    end)
+            {count, ids}
+        end
+      end)
+
+    enqueue_validation(inserted_ids, course.id)
+
+    count
+  end
+
+  defp enqueue_validation([], _course_id), do: :ok
+
+  defp enqueue_validation(ids, course_id) do
+    FunSheep.Workers.QuestionValidationWorker.enqueue(ids, course_id: course_id)
   end
 
   defp attach_figures(_question, []), do: :ok
@@ -499,14 +511,20 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     total = Questions.count_questions_by_course(course_id)
 
     {status, step} =
-      if total > 0 do
-        {"ready", "Processing complete! #{total} questions generated."}
-      else
-        Logger.error(
-          "[AIGen] Course #{course_id}: AI generation produced 0 questions (#{new_count} new)"
-        )
+      cond do
+        total == 0 ->
+          Logger.error(
+            "[AIGen] Course #{course_id}: AI generation produced 0 questions (#{new_count} new)"
+          )
 
-        {"failed", "Question generation failed — AI service unavailable. Please try again later."}
+          {"failed",
+           "Question generation failed — AI service unavailable. Please try again later."}
+
+        true ->
+          # Don't flip to ready yet — validation worker will do that once every
+          # pending question has a verdict. Stay in "validating" so the UI can
+          # reflect the extra step and the user isn't shown unvalidated data.
+          {"validating", "Validating #{total} generated questions..."}
       end
 
     Courses.update_course(course, %{

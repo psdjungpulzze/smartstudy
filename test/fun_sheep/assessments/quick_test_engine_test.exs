@@ -18,6 +18,7 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
 
     {:ok, q1} =
       Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 2+2?",
         answer: "A",
         question_type: :multiple_choice,
@@ -29,6 +30,7 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
 
     {:ok, q2} =
       Questions.create_question(%{
+        validation_status: :passed,
         content: "What is 3+3?",
         answer: "B",
         question_type: :multiple_choice,
@@ -40,6 +42,7 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
 
     {:ok, q3} =
       Questions.create_question(%{
+        validation_status: :passed,
         content: "Is the sky blue?",
         answer: "True",
         question_type: :true_false,
