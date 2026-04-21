@@ -74,7 +74,11 @@ FROM ${RUNNER_IMAGE}
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
+      poppler-utils qpdf \
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
+# poppler-utils provides `pdfinfo` (page count) and qpdf is used by the
+# PDF OCR dispatcher to split 1,000-page textbooks into 200-page chunks
+# before submitting each chunk to Vision's async annotate endpoint.
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen

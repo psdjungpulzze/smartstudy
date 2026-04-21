@@ -36,6 +36,13 @@ config :fun_sheep, interactor_mock: true
 # Storage backend
 config :fun_sheep, :storage_backend, FunSheep.Storage.Local
 
+# Synthetic GCS config for tests that touch the GCS backend indirectly
+# (e.g. OCR pipeline uses gcs_uri for bucket name). In mock mode no real
+# GCS call is made, so the bucket name just has to exist.
+config :fun_sheep, FunSheep.Storage.GCS,
+  bucket: "fun-sheep-test-bucket",
+  goth_name: FunSheep.Goth
+
 # Let LiveView tests hit feature pages without first walking through
 # /profile/setup. Real envs keep the gate on (defaults to true).
 config :fun_sheep, :onboarding_gate, false

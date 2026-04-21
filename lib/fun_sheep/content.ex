@@ -241,6 +241,28 @@ defmodule FunSheep.Content do
     |> Repo.update()
   end
 
+  @doc """
+  Atomically increments `ocr_pages_completed` for a material by `n`.
+
+  Chunk pollers for a single PDF run concurrently; a `get → update` round-trip
+  would race and lose increments. `UPDATE ... SET ocr_pages_completed =
+  ocr_pages_completed + n` is serialized by Postgres row lock.
+
+  Returns the new value of `ocr_pages_completed` after the increment, so
+  callers can decide whether this increment was the one that tipped the
+  material into `:completed`.
+  """
+  def increment_ocr_pages_completed(material_id, n) when is_integer(n) and n >= 0 do
+    {1, [new_count]} =
+      from(m in UploadedMaterial,
+        where: m.id == ^material_id,
+        select: m.ocr_pages_completed
+      )
+      |> Repo.update_all(inc: [ocr_pages_completed: n])
+
+    new_count
+  end
+
   def delete_uploaded_material(%UploadedMaterial{} = uploaded_material) do
     delete_materials([uploaded_material])
     Repo.delete(uploaded_material)
@@ -270,6 +292,33 @@ defmodule FunSheep.Content do
     %OcrPage{}
     |> OcrPage.changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc """
+  Inserts an OcrPage or updates the existing one for the same
+  (material_id, page_number). Used by the PDF chunk poller: a chunk may
+  be re-polled after a worker crash, and re-inserting would violate the
+  unique index. Returns {:inserted | :updated, %OcrPage{}}.
+  """
+  def upsert_ocr_page(attrs) do
+    changeset = OcrPage.changeset(%OcrPage{}, attrs)
+
+    case Repo.insert(changeset,
+           on_conflict:
+             {:replace, [:extracted_text, :bounding_boxes, :images, :status, :error, :updated_at]},
+           conflict_target: [:material_id, :page_number],
+           returning: [:id, :inserted_at, :updated_at]
+         ) do
+      {:ok, %OcrPage{} = page} ->
+        # When insert_at == updated_at (within 1 second) it's a fresh row.
+        # We use this to tell the chunk poller whether to bump the counter.
+        fresh? = DateTime.compare(page.inserted_at, page.updated_at) == :eq
+        tag = if fresh?, do: :inserted, else: :updated
+        {tag, page}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   def update_ocr_page(%OcrPage{} = ocr_page, attrs) do

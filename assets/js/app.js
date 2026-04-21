@@ -7,10 +7,19 @@ import {hooks as colocatedHooks} from "phoenix-colocated/fun_sheep"
 import topbar from "../vendor/topbar"
 
 // ── Direct File Uploader ────────────────────────────────────────────────────
-// Uploads files via parallel HTTP POST requests instead of LiveView WebSocket.
-// Communicates progress back to LiveView via pushEvent.
+// Uploads files directly to storage (GCS in prod, this-app-in-dev) via
+// pre-authorized resumable session URLs. The server never reads the file
+// bytes, so 1,000-page PDFs of 500 MB upload fine.
+//
+// Per-file flow:
+//   1. POST /api/uploads/sign  → { upload_url, object_key }
+//   2. PUT <upload_url> in 8 MB chunks with Content-Range for progress + retry
+//   3. POST /api/uploads/finalize → creates the UploadedMaterial row
+//
+// Reports aggregate progress back to LiveView via pushEvent("upload_progress").
 
-const CONCURRENT_UPLOADS = 6
+const CONCURRENT_UPLOADS = 4  // per-file concurrency; chunks within a file are sequential
+const CHUNK_SIZE = 8 * 1024 * 1024  // 8 MB — GCS requires chunks to be multiples of 256 KB
 const IGNORED_PATTERN = /^(\._|\.DS_Store|Thumbs\.db|desktop\.ini|\.gitkeep)$/i
 
 // Global upload state shared across all uploader instances
@@ -38,6 +47,98 @@ function pushUploadState(hook) {
   })
 }
 
+// Get a resumable upload URL for a file. Size/type go in the sign request
+// so GCS can enforce them on the PUT side.
+async function requestSignedUpload(file, folderName, batchId, userRoleId, csrfToken) {
+  const resp = await fetch("/api/uploads/sign", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-csrf-token": csrfToken,
+    },
+    body: JSON.stringify({
+      batch_id: batchId,
+      user_role_id: userRoleId,
+      folder_name: folderName || "",
+      file_name: file.name,
+      file_type: file.type || "application/octet-stream",
+      file_size: file.size,
+    }),
+  })
+  if (!resp.ok) throw new Error(`sign failed: HTTP ${resp.status}`)
+  return resp.json()
+}
+
+// PUT a file to the resumable session URL in 8 MB chunks. Returns when the
+// final chunk gets a 200/201. Failed chunks trigger an abort — GCS sessions
+// are retryable but we keep it simple here and fail the whole file; users
+// can retry via the "retry failed" button.
+async function putFileInChunks(uploadUrl, file, onProgress) {
+  const total = file.size
+
+  // Small files: one PUT, no Content-Range. GCS still accepts this against
+  // a resumable session — it treats it as a single-chunk upload.
+  if (total <= CHUNK_SIZE) {
+    const resp = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+      },
+      body: file,
+    })
+    if (!resp.ok) throw new Error(`PUT failed: HTTP ${resp.status}`)
+    if (onProgress) onProgress(total, total)
+    return
+  }
+
+  // Chunked upload: each PUT says which byte range it carries. GCS responds
+  // 308 (resume incomplete) for intermediate chunks and 200/201 for the last.
+  let offset = 0
+  while (offset < total) {
+    const end = Math.min(offset + CHUNK_SIZE, total)
+    const chunk = file.slice(offset, end)
+    const contentRange = `bytes ${offset}-${end - 1}/${total}`
+
+    const resp = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+        "content-range": contentRange,
+      },
+      body: chunk,
+    })
+
+    // 308 = more chunks expected. 200/201 = upload complete.
+    if (resp.status !== 308 && !resp.ok) {
+      throw new Error(`chunk PUT failed: HTTP ${resp.status}`)
+    }
+
+    offset = end
+    if (onProgress) onProgress(offset, total)
+  }
+}
+
+async function finalizeUpload(objectKey, file, folderName, batchId, userRoleId, materialKind, csrfToken) {
+  const resp = await fetch("/api/uploads/finalize", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-csrf-token": csrfToken,
+    },
+    body: JSON.stringify({
+      object_key: objectKey,
+      batch_id: batchId,
+      user_role_id: userRoleId,
+      folder_name: folderName || "",
+      file_name: file.name,
+      file_type: file.type || "application/octet-stream",
+      material_kind: materialKind || "textbook",
+    }),
+  })
+  if (!resp.ok) throw new Error(`finalize failed: HTTP ${resp.status}`)
+  return resp.json()
+}
+
 function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfToken, materialKind) {
   uploadState.total += files.length
   uploadState.inFlight += files.length
@@ -45,55 +146,54 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
   let active = 0
   let cancelled = false
 
-  function uploadNext() {
-    if (cancelled || queue.length === 0) return
-    if (active >= CONCURRENT_UPLOADS) return
+  async function uploadOne(file) {
+    try {
+      const folderName = folderMap[file.name] || ""
+      const { upload_url, object_key } =
+        await requestSignedUpload(file, folderName, batchId, userRoleId, csrfToken)
 
-    const file = queue.shift()
-    active++
+      if (cancelled) return
 
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("batch_id", batchId)
-    formData.append("user_role_id", userRoleId)
-    formData.append("folder_name", folderMap[file.name] || "")
-    formData.append("material_kind", materialKind || "textbook")
+      await putFileInChunks(upload_url, file, () => {
+        // Per-chunk tick: no-op for now; aggregate progress is per-file.
+        // Finer-grained progress could pushEvent here if needed later.
+      })
 
-    fetch("/api/upload", {
-      method: "POST",
-      headers: { "x-csrf-token": csrfToken },
-      body: formData,
-    })
-      .then(resp => {
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-        return resp.json()
-      })
-      .then(() => {
-        uploadState.completed++
-        uploadState.inFlight--
-        pushUploadState(hook)
-      })
-      .catch(err => {
-        uploadState.failed++
-        uploadState.inFlight--
-        console.error(`Upload failed: ${file.name}`, err)
-        pushUploadState(hook)
-      })
-      .finally(() => {
+      if (cancelled) return
+
+      await finalizeUpload(object_key, file, folderName, batchId, userRoleId, materialKind, csrfToken)
+
+      uploadState.completed++
+    } catch (err) {
+      uploadState.failed++
+      console.error(`Upload failed: ${file.name}`, err)
+    } finally {
+      uploadState.inFlight--
+      pushUploadState(hook)
+    }
+  }
+
+  function pump() {
+    if (cancelled) return
+    while (active < CONCURRENT_UPLOADS && queue.length > 0) {
+      const file = queue.shift()
+      active++
+      uploadOne(file).finally(() => {
         active--
-        uploadNext()
+        pump()
       })
-
-    // Start more concurrent uploads
-    uploadNext()
+    }
   }
 
-  // Kick off initial batch
-  for (let i = 0; i < CONCURRENT_UPLOADS && i < files.length; i++) {
-    uploadNext()
-  }
+  pump()
 
-  return { cancel: () => { cancelled = true; uploadState.inFlight -= queue.length; queue = [] } }
+  return {
+    cancel: () => {
+      cancelled = true
+      uploadState.inFlight -= queue.length
+      queue = []
+    },
+  }
 }
 
 // ── SwipeCard Hook ──────────────────────────────────────────────────────────
