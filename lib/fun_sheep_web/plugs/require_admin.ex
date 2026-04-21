@@ -1,21 +1,18 @@
 defmodule FunSheepWeb.Plugs.RequireAdmin do
   @moduledoc """
   Requires the current user to have the admin role.
-  Redirects to dashboard if not an admin.
-  """
-  import Plug.Conn
-  import Phoenix.Controller
 
+  Raises `FunSheepWeb.NotFoundError` when the current user is not an admin,
+  so that admin routes are indistinguishable from non-existent routes to
+  unauthorized users. This avoids fingerprinting the admin surface.
+  """
   def init(opts), do: opts
 
   def call(conn, _opts) do
     if conn.assigns[:current_role] == "admin" do
       conn
     else
-      conn
-      |> put_flash(:error, "You do not have admin access.")
-      |> redirect(to: "/dashboard")
-      |> halt()
+      raise FunSheepWeb.NotFoundError
     end
   end
 end

@@ -139,15 +139,16 @@ defmodule FunSheepWeb.Layouts do
           %{label: "Reports", path: "/teacher/reports", icon: "hero-chart-bar"}
         ]
 
+      # Primary nav is capped at 5 items so it fits the mobile bottom-tab
+      # bar and the tablet header without overflow. Jobs + Audit + MFA
+      # settings are reachable from the dashboard tiles instead.
       "admin" ->
         [
           %{label: "Home", path: "/admin", icon: "hero-home"},
           %{label: "Users", path: "/admin/users", icon: "hero-users"},
           %{label: "Courses", path: "/admin/courses", icon: "hero-book-open"},
           %{label: "Materials", path: "/admin/materials", icon: "hero-document-text"},
-          %{label: "Review", path: "/admin/questions/review", icon: "hero-clipboard-document-check"},
-          %{label: "Jobs", path: "/admin/jobs", icon: "hero-bolt"},
-          %{label: "Audit", path: "/admin/audit-log", icon: "hero-cog-6-tooth"}
+          %{label: "Review", path: "/admin/questions/review", icon: "hero-clipboard-document-check"}
         ]
 
       _ ->

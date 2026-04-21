@@ -54,6 +54,7 @@ defmodule FunSheep.Accounts do
   defp safe_to_role_atom("student"), do: :student
   defp safe_to_role_atom("parent"), do: :parent
   defp safe_to_role_atom("teacher"), do: :teacher
+  defp safe_to_role_atom("admin"), do: :admin
   defp safe_to_role_atom(_), do: nil
 
   def create_user_role(attrs \\ %{}) do
@@ -251,5 +252,75 @@ defmodule FunSheep.Accounts do
   """
   def get_user_role_by_email(email) do
     Repo.get_by(UserRole, email: email)
+  end
+
+  ## Admin queries
+
+  @doc """
+  Paginated list of user_role rows for the admin UI.
+
+  ## Options
+    * `:search` — case-insensitive substring match on email or display_name
+    * `:role` — filter by role atom or string
+    * `:limit` (default 25), `:offset` (default 0)
+  """
+  def list_users_for_admin(opts \\ []) do
+    opts
+    |> admin_users_query()
+    |> order_by([ur], desc: ur.inserted_at)
+    |> limit(^Keyword.get(opts, :limit, 25))
+    |> offset(^Keyword.get(opts, :offset, 0))
+    |> Repo.all()
+  end
+
+  @doc "Counts rows matching the same filters used by `list_users_for_admin/1`."
+  def count_users_for_admin(opts \\ []) do
+    opts
+    |> admin_users_query()
+    |> select([ur], count(ur.id))
+    |> Repo.one()
+  end
+
+  @doc "Counts all user_role rows grouped by role. Returns `%{role => count}`."
+  def count_users_by_role do
+    from(ur in UserRole,
+      group_by: ur.role,
+      select: {ur.role, count(ur.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp admin_users_query(opts) do
+    search = Keyword.get(opts, :search)
+    role = Keyword.get(opts, :role)
+
+    UserRole
+    |> maybe_filter_role(role)
+    |> maybe_filter_search(search)
+  end
+
+  defp maybe_filter_role(query, nil), do: query
+
+  defp maybe_filter_role(query, role) when is_atom(role) do
+    from(ur in query, where: ur.role == ^role)
+  end
+
+  defp maybe_filter_role(query, role) when is_binary(role) do
+    case safe_to_role_atom(role) do
+      nil -> query
+      r -> from(ur in query, where: ur.role == ^r)
+    end
+  end
+
+  defp maybe_filter_search(query, nil), do: query
+  defp maybe_filter_search(query, ""), do: query
+
+  defp maybe_filter_search(query, term) when is_binary(term) do
+    pattern = "%#{term}%"
+
+    from(ur in query,
+      where: ilike(ur.email, ^pattern) or ilike(ur.display_name, ^pattern)
+    )
   end
 end

@@ -147,8 +147,8 @@ defmodule FunSheepWeb.AuthController do
 
         email = profile["email"] || claims["username"]
         display_name = profile["username"] || claims["username"] || "User"
-        default_role = get_in(profile, ["metadata", "role"]) || "student"
-        role = normalize_role(selected_role) || default_role
+        claim_role = get_in(profile, ["metadata", "role"]) || "student"
+        role = FunSheep.Accounts.RoleResolver.resolve(claim_role, selected_role)
 
         user_role_id = ensure_local_user_role(sub, role, email, display_name)
 
@@ -174,13 +174,10 @@ defmodule FunSheepWeb.AuthController do
     end
   end
 
-  defp normalize_role(role) when role in ~w(student parent teacher), do: role
-  defp normalize_role(_), do: nil
 
   defp ensure_local_user_role(interactor_user_id, role, email, display_name) do
-    # user_roles.role is an Ecto.Enum [:student, :parent, :teacher].
-    # Admin-ish roles (if any) fall back to student at the DB layer.
-    db_role = if role in ~w(student parent teacher), do: role, else: "student"
+    # user_roles.role is an Ecto.Enum [:student, :parent, :teacher, :admin].
+    db_role = if role in ~w(student parent teacher admin), do: role, else: "student"
 
     case FunSheep.Accounts.get_user_role_by_interactor_id_and_role(interactor_user_id, db_role) do
       %FunSheep.Accounts.UserRole{id: id} ->

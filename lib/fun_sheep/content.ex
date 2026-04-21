@@ -16,6 +16,53 @@ defmodule FunSheep.Content do
     Repo.all(UploadedMaterial)
   end
 
+  @doc """
+  Admin-facing paginated material list. Supports search on file_name and
+  filter by ocr_status. Preloads course and uploader.
+  """
+  def list_materials_for_admin(opts \\ []) do
+    opts
+    |> admin_materials_query()
+    |> order_by([m], desc: m.inserted_at)
+    |> limit(^Keyword.get(opts, :limit, 25))
+    |> offset(^Keyword.get(opts, :offset, 0))
+    |> preload([:course, :user_role])
+    |> Repo.all()
+  end
+
+  @doc "Counts materials matching the same filters used by `list_materials_for_admin/1`."
+  def count_materials_for_admin(opts \\ []) do
+    opts
+    |> admin_materials_query()
+    |> select([m], count(m.id))
+    |> Repo.one()
+  end
+
+  defp admin_materials_query(opts) do
+    search = Keyword.get(opts, :search)
+    status = Keyword.get(opts, :status)
+    query = from(m in UploadedMaterial)
+
+    query =
+      case status do
+        nil -> query
+        "" -> query
+        s when is_binary(s) -> from(m in query, where: m.ocr_status == ^s)
+      end
+
+    case search do
+      nil ->
+        query
+
+      "" ->
+        query
+
+      term when is_binary(term) ->
+        pattern = "%#{term}%"
+        from(m in query, where: ilike(m.file_name, ^pattern))
+    end
+  end
+
   def list_materials_by_user(user_role_id) do
     from(m in UploadedMaterial,
       where: m.user_role_id == ^user_role_id,
