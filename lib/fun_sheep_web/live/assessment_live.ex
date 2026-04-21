@@ -3,8 +3,10 @@ defmodule FunSheepWeb.AssessmentLive do
 
   import FunSheepWeb.BillingComponents
 
-  alias FunSheep.{Assessments, Billing, Questions}
+  alias FunSheep.{Assessments, Billing, Engagement, Gamification, Questions}
   alias FunSheep.Assessments.{Engine, StateCache}
+
+  @xp_per_correct 10
 
   @impl true
   def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
@@ -203,6 +205,12 @@ defmodule FunSheepWeb.AssessmentLive do
           time_taken_seconds: max(time_taken, 0),
           difficulty_at_attempt: to_string(state.current_difficulty)
         })
+
+        if is_correct do
+          Gamification.award_xp(user_role_id, @xp_per_correct, "assessment", source_id: question.id)
+        end
+
+        Gamification.record_activity(user_role_id)
       end
 
       new_state = Engine.record_answer(state, question.id, answer, is_correct)
@@ -250,6 +258,7 @@ defmodule FunSheepWeb.AssessmentLive do
 
       {:complete, new_state} ->
         summary = Engine.summary(new_state)
+        finalize_session(socket)
 
         assign(socket,
           engine_state: new_state,
@@ -261,6 +270,7 @@ defmodule FunSheepWeb.AssessmentLive do
       _other ->
         # generate_needed or other - treat as complete for now
         summary = Engine.summary(state)
+        finalize_session(socket)
 
         assign(socket,
           current_question: nil,
@@ -268,6 +278,17 @@ defmodule FunSheepWeb.AssessmentLive do
           summary: summary
         )
     end
+  end
+
+  defp finalize_session(socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    course_id = socket.assigns.schedule.course_id
+
+    if user_role_id && course_id do
+      Engagement.after_session(user_role_id, course_id)
+    end
+
+    :ok
   end
 
   defp save_state_to_cache(socket) do
