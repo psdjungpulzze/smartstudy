@@ -64,7 +64,7 @@ defmodule FunSheep.OCR.GoogleVision do
       ]
     }
 
-    case Req.post("#{@base_url}/images:annotate?key=#{api_key}", json: body) do
+    case vision_post("#{@base_url}/images:annotate?key=#{api_key}", body, []) do
       {:ok, %{status: 200, body: resp}} -> parse_response(resp)
       {:ok, %{status: status, body: resp_body}} -> {:error, {status, resp_body}}
       {:error, reason} -> {:error, reason}
@@ -85,7 +85,7 @@ defmodule FunSheep.OCR.GoogleVision do
       {:ok, token} ->
         headers = [{"authorization", "Bearer #{token}"}]
 
-        case Req.post("#{@base_url}/images:annotate", json: body, headers: headers) do
+        case vision_post("#{@base_url}/images:annotate", body, headers) do
           {:ok, %{status: 200, body: resp}} -> parse_response(resp)
           {:ok, %{status: status, body: resp_body}} -> {:error, {status, resp_body}}
           {:error, reason} -> {:error, reason}
@@ -94,6 +94,25 @@ defmodule FunSheep.OCR.GoogleVision do
       {:error, reason} ->
         {:error, {:oauth_token_error, reason}}
     end
+  end
+
+  # Route every Vision request through our dedicated Finch pool so sockets
+  # to `vision.googleapis.com` are isolated from the default pool used by
+  # unrelated Req callers. In-process retry with exponential backoff absorbs
+  # transient transport errors (`:closed`, `:einval`, `:timeout`) without
+  # burning an Oban attempt — that alone lifts success rate far more than
+  # tuning Oban concurrency.
+  defp vision_post(url, body, headers) do
+    Req.post(url,
+      json: body,
+      headers: headers,
+      finch: FunSheep.VisionFinch,
+      connect_options: [timeout: 10_000],
+      receive_timeout: 60_000,
+      retry: :transient,
+      max_retries: 3,
+      retry_delay: fn attempt -> :timer.seconds(2 * (attempt + 1)) end
+    )
   end
 
   defp fetch_oauth_token do

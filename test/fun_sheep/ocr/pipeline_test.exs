@@ -65,7 +65,7 @@ defmodule FunSheep.OCR.PipelineTest do
     test "updates material status to failed when file not found" do
       material = create_uploaded_material(%{file_path: "nonexistent/path.pdf"})
 
-      assert {:error, {:file_read_error, _}} = Pipeline.process(material.id)
+      assert {:error, {:fatal, {:file_read_error, _}}} = Pipeline.process(material.id)
 
       updated = Content.get_uploaded_material!(material.id)
       assert updated.ocr_status == :failed

@@ -23,46 +23,77 @@ defmodule FunSheep.OCR.Pipeline do
   def process(material_id) do
     material = Content.get_uploaded_material!(material_id)
 
-    Content.update_uploaded_material(material, %{ocr_status: :processing, ocr_error: nil})
+    # Skip work if already completed — Oban may re-run this job after a
+    # worker crash that happened *after* the OCR page was stored. Redoing
+    # Vision calls for already-good text wastes Vision quota and pool
+    # capacity that the remaining backlog needs.
+    if material.ocr_status == :completed do
+      {:ok, :already_completed}
+    else
+      Content.update_uploaded_material(material, %{ocr_status: :processing, ocr_error: nil})
 
-    # Single-page model today: every retry rewrites the page record(s) from
-    # scratch. When PDF splitting lands, switch to per-page upserts keyed on
-    # (material_id, page_number) so already-completed pages aren't redone.
-    Content.delete_ocr_pages_for_material(material.id)
+      # Single-page model today: every retry rewrites the page record(s) from
+      # scratch. When PDF splitting lands, switch to per-page upserts keyed on
+      # (material_id, page_number) so already-completed pages aren't redone.
+      Content.delete_ocr_pages_for_material(material.id)
 
-    case do_process(material) do
-      {:ok, pages} ->
-        material_status = derive_material_status(pages)
-        material_error = aggregate_error(pages)
+      case do_process(material) do
+        {:ok, pages} ->
+          material_status = derive_material_status(pages)
+          material_error = aggregate_error(pages)
 
-        Content.update_uploaded_material(material, %{
-          ocr_status: material_status,
-          ocr_error: material_error
-        })
-
-        {:ok, pages}
-
-      {:error, reason} ->
-        formatted = format_error(reason)
-
-        # Record the failure as a page so per-page UI has something to surface
-        # and the unique-constraint slot is consumed (next retry deletes it).
-        {:ok, _failed_page} =
-          Content.create_ocr_page(%{
-            material_id: material.id,
-            page_number: 1,
-            status: :failed,
-            error: formatted
+          Content.update_uploaded_material(material, %{
+            ocr_status: material_status,
+            ocr_error: material_error
           })
 
-        Content.update_uploaded_material(material, %{
-          ocr_status: :failed,
-          ocr_error: formatted
-        })
+          {:ok, pages}
 
-        {:error, reason}
+        {:error, reason} ->
+          formatted = format_error(reason)
+          error_class = classify_error(reason)
+
+          # Record the failure as a page so per-page UI has something to surface
+          # and the unique-constraint slot is consumed (next retry deletes it).
+          {:ok, _failed_page} =
+            Content.create_ocr_page(%{
+              material_id: material.id,
+              page_number: 1,
+              status: :failed,
+              error: formatted
+            })
+
+          # For transient errors keep material `:processing` so the next Oban
+          # attempt can retry without overwriting a real `:failed` terminal
+          # state. Only mark `:failed` on fatal errors or exhausted retries.
+          next_status = if error_class == :transient, do: :processing, else: :failed
+
+          Content.update_uploaded_material(material, %{
+            ocr_status: next_status,
+            ocr_error: formatted
+          })
+
+          {:error, {error_class, reason}}
+      end
     end
   end
+
+  @doc """
+  Classify an error as `:transient` (worth retrying via Oban snooze) or
+  `:fatal` (permanent; mark the material failed immediately).
+
+  Transport errors and 5xx/429 responses are transient. 4xx (bad image,
+  permission denied) and `:no_text_detected` are fatal — retrying won't
+  change the outcome and we'd just burn quota.
+  """
+  def classify_error(%Req.TransportError{}), do: :transient
+  def classify_error({:oauth_token_error, _}), do: :transient
+  def classify_error({status, _}) when is_integer(status) and status >= 500, do: :transient
+  def classify_error({429, _}), do: :transient
+  def classify_error({status, _}) when is_integer(status) and status >= 400, do: :fatal
+  def classify_error(:no_text_detected), do: :fatal
+  def classify_error({:file_read_error, _}), do: :fatal
+  def classify_error(_), do: :transient
 
   # Derive the material-level status from its constituent pages. Used today
   # only with a single page, but ready for PDF splitting where some pages may

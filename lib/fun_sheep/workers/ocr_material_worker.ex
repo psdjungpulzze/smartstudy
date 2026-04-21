@@ -7,26 +7,37 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
   if discovery is also done to trigger question extraction.
   """
 
-  use Oban.Worker, queue: :ocr, max_attempts: 3
+  use Oban.Worker, queue: :ocr, max_attempts: 5
 
   alias FunSheep.Courses
   alias FunSheep.OCR.Pipeline
 
   require Logger
 
+  # Exponential backoff with jitter so retries spread out — a thundering
+  # herd of transient failures retrying in lockstep just recreates the
+  # Finch pool storm that caused them. Caps around 3 min so we don't leave
+  # materials languishing when the upstream issue has already cleared.
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"material_id" => material_id, "course_id" => course_id}}) do
+  def backoff(%Oban.Job{attempt: attempt}) do
+    base = :math.pow(2, attempt) |> round()
+    jitter = :rand.uniform(10)
+    min(base * 10 + jitter, 180)
+  end
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"material_id" => material_id, "course_id" => course_id}} = job) do
     # Skip if course processing was cancelled
     course = Courses.get_course!(course_id)
 
     if course.processing_status == "cancelled" do
       :ok
     else
-      do_process(material_id, course_id)
+      do_process(material_id, course_id, job)
     end
   end
 
-  defp do_process(material_id, course_id) do
+  defp do_process(material_id, course_id, job) do
     case Pipeline.process(material_id) do
       {:ok, _pages} ->
         # Check if this material matches the course subject/topic
@@ -35,11 +46,41 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
         # Verify textbook completeness — worker no-ops on non-textbook kinds.
         FunSheep.Workers.TextbookCompletenessWorker.enqueue(material_id)
 
-      {:error, reason} ->
-        Logger.error("[OCR] Failed material #{material_id}: #{inspect(reason)}")
+        advance_course(course_id)
+        :ok
+
+      {:error, {:transient, reason}} ->
+        Logger.warning("[OCR] Transient failure material #{material_id}: #{inspect(reason)}")
+
+        if job.attempt < job.max_attempts do
+          # Snooze the job so Oban puts it back on the queue with our
+          # backoff delay. Do NOT advance course counters — the material is
+          # still :processing and will reach a terminal state on a later
+          # attempt.
+          {:snooze, backoff(job)}
+        else
+          # Exhausted retries on a transient error — mark it terminal now.
+          Logger.error(
+            "[OCR] Exhausted retries for material #{material_id}: #{inspect(reason)}"
+          )
+
+          FunSheep.Content.update_uploaded_material(
+            FunSheep.Content.get_uploaded_material!(material_id),
+            %{ocr_status: :failed, ocr_error: "Exhausted retries: #{inspect(reason)}"}
+          )
+
+          advance_course(course_id)
+          :ok
+        end
+
+      {:error, {:fatal, reason}} ->
+        Logger.error("[OCR] Fatal failure material #{material_id}: #{inspect(reason)}")
+        advance_course(course_id)
         :ok
     end
+  end
 
+  defp advance_course(course_id) do
     {new_count, total} = Courses.increment_ocr_completed(course_id)
 
     # Update processing step text periodically
