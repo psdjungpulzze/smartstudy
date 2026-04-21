@@ -20,7 +20,8 @@ defmodule FunSheepWeb.DashboardLive do
           tests_with_readiness =
             Enum.map(tests, fn test ->
               readiness = Assessments.latest_readiness(user_role_id, test.id)
-              %{test: test, readiness: readiness}
+              attempts_count = Assessments.attempts_count_for_schedule(user_role_id, test)
+              %{test: test, readiness: readiness, attempts_count: attempts_count}
             end)
 
           gam = Gamification.dashboard_summary(user_role_id)
@@ -70,8 +71,15 @@ defmodule FunSheepWeb.DashboardLive do
           },
           %{
             emoji: "🔥",
-            title: "Streak + XP",
-            body: "Show up daily to grow your streak and climb the flock."
+            title: "Streak",
+            body:
+              "Days in a row you've studied. Answer at least one question each day to keep it alive — miss a day and it resets. Tap the 🔥 badge any time for details."
+          },
+          %{
+            emoji: "⚡",
+            title: "Fleece Points (FP)",
+            body:
+              "Earned for every question, assessment, and daily challenge. More FP level you up. Tap the ⚡ badge any time to see where your FP came from and how to earn more."
           }
         ]
       )
@@ -179,6 +187,7 @@ defmodule FunSheepWeb.DashboardLive do
     urgency = urgency_level(days_left, readiness)
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id
+    attempts_count = Map.get(assigns.test, :attempts_count, 0)
 
     assigns =
       assigns
@@ -187,6 +196,7 @@ defmodule FunSheepWeb.DashboardLive do
       |> assign(:urgency, urgency)
       |> assign(:course_id, course_id)
       |> assign(:schedule_id, schedule_id)
+      |> assign(:attempts_count, attempts_count)
 
     ~H"""
     <div
@@ -242,6 +252,11 @@ defmodule FunSheepWeb.DashboardLive do
             <span class="text-[10px] text-white/50">0%</span>
             <span class="text-[10px] text-white/50">Golden Fleece 100%</span>
           </div>
+          <p class="text-[11px] sm:text-xs font-medium text-white/80 mt-1.5">
+            {@attempts_count} {if @attempts_count == 1,
+              do: "question answered",
+              else: "questions answered"}
+          </p>
         </div>
 
         <div class="flex items-center justify-between mt-2 sm:mt-3">
@@ -408,6 +423,7 @@ defmodule FunSheepWeb.DashboardLive do
 
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id
+    attempts_count = Map.get(assigns.test, :attempts_count, 0)
 
     assigns =
       assigns
@@ -415,6 +431,7 @@ defmodule FunSheepWeb.DashboardLive do
       |> assign(:readiness_pct, readiness)
       |> assign(:course_id, course_id)
       |> assign(:schedule_id, schedule_id)
+      |> assign(:attempts_count, attempts_count)
 
     ~H"""
     <.link
@@ -431,7 +448,7 @@ defmodule FunSheepWeb.DashboardLive do
           {if @test.test.course, do: @test.test.course.name, else: ""} · {Calendar.strftime(
             @test.test.test_date,
             "%b %d"
-          )}
+          )} · {@attempts_count} answered
         </p>
       </div>
       <div class="text-right shrink-0">

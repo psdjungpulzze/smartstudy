@@ -15,6 +15,8 @@ defmodule FunSheep.Assessments do
     ReadinessCalculator
   }
 
+  alias FunSheep.Questions
+
   ## Test Schedules
 
   def list_test_schedules do
@@ -231,15 +233,51 @@ defmodule FunSheep.Assessments do
   end
 
   @doc """
-  Returns the most recent readiness score for a user+test, or nil.
+  Returns a live-computed readiness score reflecting every recorded attempt.
+
+  Returns an unsaved `%ReadinessScore{}` struct with `:aggregate_score`,
+  `:chapter_scores`, and `:topic_scores` populated from the current
+  `question_attempts` data. Returns `nil` only when the schedule doesn't exist.
+
+  Snapshots in the `readiness_scores` table are written only by
+  `calculate_and_save_readiness/2` and used for trend history.
   """
   def latest_readiness(user_role_id, test_schedule_id) do
-    from(rs in ReadinessScore,
-      where: rs.user_role_id == ^user_role_id and rs.test_schedule_id == ^test_schedule_id,
-      order_by: [desc: rs.inserted_at],
-      limit: 1
-    )
-    |> Repo.one()
+    case Repo.get(TestSchedule, test_schedule_id) do
+      nil ->
+        nil
+
+      schedule ->
+        scores = ReadinessCalculator.calculate(user_role_id, schedule)
+
+        %ReadinessScore{
+          user_role_id: user_role_id,
+          test_schedule_id: test_schedule_id,
+          aggregate_score: scores.aggregate_score,
+          chapter_scores: scores.chapter_scores,
+          topic_scores: scores.topic_scores
+        }
+    end
+  end
+
+  @doc """
+  Returns the total number of question attempts a user has made against
+  questions in the test schedule's scoped chapters.
+
+  Used alongside readiness to show effort (how many questions attempted)
+  independent of performance (what % were correct).
+  """
+  def attempts_count_for_schedule(user_role_id, %TestSchedule{scope: scope}) do
+    chapter_ids = (scope || %{}) |> Map.get("chapter_ids", [])
+    Questions.count_attempts_in_chapters(user_role_id, chapter_ids)
+  end
+
+  def attempts_count_for_schedule(user_role_id, test_schedule_id)
+      when is_binary(test_schedule_id) do
+    case Repo.get(TestSchedule, test_schedule_id) do
+      nil -> 0
+      schedule -> attempts_count_for_schedule(user_role_id, schedule)
+    end
   end
 
   ## ── Readiness Benchmarking ──────────────────────────────────────────────

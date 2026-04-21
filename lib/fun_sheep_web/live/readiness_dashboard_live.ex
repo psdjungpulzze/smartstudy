@@ -12,6 +12,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
     readiness = Assessments.latest_readiness(user_role_id, schedule_id)
     history = Assessments.list_readiness_history(user_role_id, schedule_id, 5)
+    attempts_count = Assessments.attempts_count_for_schedule(user_role_id, schedule)
 
     chapter_ids = get_in(schedule.scope, ["chapter_ids"]) || []
     chapters = Courses.list_chapters_by_ids(chapter_ids)
@@ -37,6 +38,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
        schedule: schedule,
        readiness: readiness,
        history: history,
+       attempts_count: attempts_count,
        chapter_breakdown: chapter_breakdown,
        today: Date.utc_today(),
        generating_guide: false
@@ -51,6 +53,10 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     case Assessments.calculate_and_save_readiness(user_role_id, schedule_id) do
       {:ok, readiness} ->
         history = Assessments.list_readiness_history(user_role_id, schedule_id, 5)
+
+        attempts_count =
+          Assessments.attempts_count_for_schedule(user_role_id, socket.assigns.schedule)
+
         chapter_ids = get_in(socket.assigns.schedule.scope, ["chapter_ids"]) || []
         chapters = Courses.list_chapters_by_ids(chapter_ids)
 
@@ -64,7 +70,12 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
 
         {:noreply,
          socket
-         |> assign(readiness: readiness, history: history, chapter_breakdown: chapter_breakdown)
+         |> assign(
+           readiness: readiness,
+           history: history,
+           attempts_count: attempts_count,
+           chapter_breakdown: chapter_breakdown
+         )
          |> put_flash(:info, "Readiness score updated.")}
 
       {:error, _changeset} ->
@@ -182,7 +193,9 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         <p class="mt-3 sm:mt-4 text-sm text-[#8E8E93]">
           {days_remaining(@schedule.test_date)} days left, readiness: {round(
             aggregate_score(@readiness)
-          )}%
+          )}% &middot; {@attempts_count} {if @attempts_count == 1,
+            do: "question answered",
+            else: "questions answered"}
         </p>
       </div>
 

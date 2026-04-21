@@ -85,7 +85,8 @@ defmodule FunSheepWeb.CourseDetailLive do
     upcoming =
       Enum.map(upcoming, fn ts ->
         readiness = Assessments.latest_readiness(user_role_id, ts.id)
-        %{schedule: ts, readiness: readiness}
+        attempts_count = Assessments.attempts_count_for_schedule(user_role_id, ts)
+        %{schedule: ts, readiness: readiness, attempts_count: attempts_count}
       end)
 
     past =
@@ -94,7 +95,8 @@ defmodule FunSheepWeb.CourseDetailLive do
       |> Enum.take(5)
       |> Enum.map(fn ts ->
         readiness = Assessments.latest_readiness(user_role_id, ts.id)
-        %{schedule: ts, readiness: readiness}
+        attempts_count = Assessments.attempts_count_for_schedule(user_role_id, ts)
+        %{schedule: ts, readiness: readiness, attempts_count: attempts_count}
       end)
 
     {upcoming, past}
@@ -578,10 +580,11 @@ defmodule FunSheepWeb.CourseDetailLive do
   defp readiness_color(score) when score >= 40, do: "amber"
   defp readiness_color(_score), do: "red"
 
-  defp readiness_label(nil), do: "Not assessed"
-  defp readiness_label(score) when score >= 70, do: "Ready"
-  defp readiness_label(score) when score >= 40, do: "Almost ready"
-  defp readiness_label(_score), do: "Needs work"
+  defp readiness_label(_score, 0), do: "Not started"
+  defp readiness_label(nil, _), do: "Not assessed"
+  defp readiness_label(score, _) when score >= 70, do: "Ready"
+  defp readiness_label(score, _) when score >= 40, do: "Almost ready"
+  defp readiness_label(_score, _), do: "Needs work"
 
   defp readiness_score(nil), do: nil
   defp readiness_score(%{aggregate_score: score}), do: round(score)
@@ -880,7 +883,8 @@ defmodule FunSheepWeb.CourseDetailLive do
     color = urgency_color(days)
     score = readiness_score(assigns.test.readiness)
     r_color = readiness_color(score)
-    r_label = readiness_label(score)
+    attempts_count = Map.get(assigns.test, :attempts_count, 0)
+    r_label = readiness_label(score, attempts_count)
     scope_text = scope_summary(assigns.test.schedule, assigns.course.chapters)
 
     assigns =
@@ -891,7 +895,8 @@ defmodule FunSheepWeb.CourseDetailLive do
         score: score,
         r_color: r_color,
         r_label: r_label,
-        scope_text: scope_text
+        scope_text: scope_text,
+        attempts_count: attempts_count
       )
 
     ~H"""
@@ -907,6 +912,11 @@ defmodule FunSheepWeb.CourseDetailLive do
               <h3 class="font-semibold text-[#1C1C1E] text-base">{@test.schedule.name}</h3>
               <p class="text-sm text-[#8E8E93] mt-0.5">
                 {@scope_text} &middot; {Calendar.strftime(@test.schedule.test_date, "%b %d, %Y")}
+              </p>
+              <p class="text-xs text-[#8E8E93] mt-0.5">
+                {@attempts_count} {if @attempts_count == 1,
+                  do: "question answered",
+                  else: "questions answered"}
               </p>
             </div>
 
