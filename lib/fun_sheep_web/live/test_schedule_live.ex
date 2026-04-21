@@ -125,7 +125,7 @@ defmodule FunSheepWeb.TestScheduleLive do
         <h1 class="text-2xl sm:text-3xl font-bold text-[#1C1C1E]">Assessments</h1>
         <.link
           navigate={~p"/courses/#{@course_id}/tests/new"}
-          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 sm:py-2 rounded-full shadow-md transition-colors text-center touch-target"
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 sm:py-2 rounded-full shadow-md transition-colors inline-flex items-center justify-center text-center touch-target"
         >
           Schedule New Test
         </.link>
@@ -193,13 +193,13 @@ defmodule FunSheepWeb.TestScheduleLive do
           <div class="flex flex-wrap items-center gap-2 mt-3 sm:mt-4 pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100">
             <.link
               navigate={~p"/courses/#{@course_id}/tests/#{schedule.id}/readiness"}
-              class="bg-white border border-[#4CD964] text-[#4CD964] hover:bg-[#E8F8EB] font-medium px-4 py-2.5 sm:py-2 rounded-full text-sm transition-colors flex-1 sm:flex-none text-center touch-target"
+              class="bg-white border border-[#4CD964] text-[#4CD964] hover:bg-[#E8F8EB] font-medium px-4 py-2.5 sm:py-2 rounded-full text-sm transition-colors flex-1 sm:flex-none inline-flex items-center justify-center text-center touch-target"
             >
               View Readiness
             </.link>
             <.link
               navigate={~p"/courses/#{@course_id}/tests/#{schedule.id}/assess"}
-              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-4 py-2.5 sm:py-2 rounded-full text-sm transition-colors flex-1 sm:flex-none text-center touch-target"
+              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-4 py-2.5 sm:py-2 rounded-full text-sm transition-colors flex-1 sm:flex-none inline-flex items-center justify-center text-center touch-target"
             >
               Assess
             </.link>
