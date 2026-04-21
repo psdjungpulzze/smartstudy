@@ -6,11 +6,12 @@ defmodule FunSheepWeb.DailyChallengeLive do
 
   alias FunSheep.{Courses, Questions, Gamification}
   alias FunSheep.Engagement.DailyChallenges
+  alias FunSheep.Gamification.FpEconomy
 
-  @question_count 5
+  @question_count FpEconomy.daily_challenge_question_count()
   @auto_advance_ms 1_500
-  @xp_per_correct 20
-  @xp_bonus_perfect 50
+  @xp_per_correct FpEconomy.daily_challenge_xp_per_correct()
+  @xp_bonus_perfect FpEconomy.daily_challenge_xp_bonus_perfect()
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do

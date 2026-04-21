@@ -9,7 +9,7 @@ defmodule FunSheep.Gamification do
   import Ecto.Query, warn: false
   alias FunSheep.Repo
 
-  alias FunSheep.Gamification.{Streak, XpEvent, Achievement}
+  alias FunSheep.Gamification.{Streak, XpEvent, Achievement, FpEconomy}
 
   ## ── Streaks ──────────────────────────────────────────────────────────────
 
@@ -267,6 +267,191 @@ defmodule FunSheep.Gamification do
           sheep_state: :sleepy
         }
     end
+  end
+
+  ## ── Streak Detail Summary ────────────────────────────────────────────────
+
+  @doc """
+  Returns a rich summary of a user's streak for the streak detail modal.
+
+  Includes the 30-day activity heatmap (derived from `xp_events` — any
+  FP-earning activity counts as a study day), today/yesterday status,
+  next milestone, longest streak, and wool level.
+  """
+  def streak_summary(user_role_id) do
+    with {:ok, _} <- Ecto.UUID.cast(user_role_id),
+         {:ok, streak} <- get_or_create_streak(user_role_id) do
+      streak_summary_from(streak, user_role_id)
+    else
+      _ -> empty_streak_summary()
+    end
+  end
+
+  defp streak_summary_from(streak, user_role_id) do
+    today = Date.utc_today()
+    active_dates = activity_dates(user_role_id, 30)
+    active_set = MapSet.new(active_dates)
+
+    heatmap =
+      for offset <- 29..0//-1 do
+        d = Date.add(today, -offset)
+        %{date: d, active: MapSet.member?(active_set, d)}
+      end
+
+    studied_today? = MapSet.member?(active_set, today)
+    studied_yesterday? = MapSet.member?(active_set, Date.add(today, -1))
+
+    status =
+      cond do
+        studied_today? -> :safe
+        studied_yesterday? and streak.current_streak > 0 -> :at_risk
+        streak.current_streak > 0 -> :broken_today
+        true -> :no_streak
+      end
+
+    %{
+      current_streak: streak.current_streak,
+      longest_streak: streak.longest_streak,
+      wool_level: streak.wool_level,
+      last_activity_date: streak.last_activity_date,
+      streak_frozen_until: streak.streak_frozen_until,
+      status: status,
+      studied_today: studied_today?,
+      next_milestone: FpEconomy.next_streak_milestone(streak.current_streak),
+      milestones_hit: Enum.count(FpEconomy.streak_milestones(), &(&1 <= streak.current_streak)),
+      milestones_total: length(FpEconomy.streak_milestones()),
+      heatmap: heatmap
+    }
+  end
+
+  defp empty_streak_summary do
+    today = Date.utc_today()
+
+    heatmap =
+      for offset <- 29..0//-1 do
+        %{date: Date.add(today, -offset), active: false}
+      end
+
+    %{
+      current_streak: 0,
+      longest_streak: 0,
+      wool_level: 0,
+      last_activity_date: nil,
+      streak_frozen_until: nil,
+      status: :no_streak,
+      studied_today: false,
+      next_milestone: FpEconomy.next_streak_milestone(0),
+      milestones_hit: 0,
+      milestones_total: length(FpEconomy.streak_milestones()),
+      heatmap: heatmap
+    }
+  end
+
+  ## ── FP Detail Summary ────────────────────────────────────────────────────
+
+  @doc """
+  Returns a rich summary of a user's FP for the FP detail modal.
+
+  Includes total, this-week per-day chart data, breakdown by source,
+  recent events, current level, and FP to next level. All amounts derive
+  from real `xp_events` data — no fabricated values.
+  """
+  def fp_summary(user_role_id) do
+    case Ecto.UUID.cast(user_role_id) do
+      {:ok, _} ->
+        total = total_xp(user_role_id)
+        today = Date.utc_today()
+        week_chart = daily_xp(user_role_id, 7)
+        week_total = Enum.reduce(week_chart, 0, &(&1.amount + &2))
+
+        %{
+          total_xp: total,
+          xp_today: xp_today(user_role_id),
+          xp_this_week: week_total,
+          week_chart: week_chart,
+          source_breakdown: source_breakdown(user_role_id),
+          recent_events: recent_xp_events(user_role_id, 5),
+          level: FpEconomy.level_for_xp(total),
+          earn_more: FpEconomy.earn_more_rules(),
+          today: today
+        }
+
+      :error ->
+        empty_fp_summary()
+    end
+  end
+
+  defp empty_fp_summary do
+    today = Date.utc_today()
+
+    week_chart =
+      for offset <- 6..0//-1 do
+        %{date: Date.add(today, -offset), amount: 0}
+      end
+
+    %{
+      total_xp: 0,
+      xp_today: 0,
+      xp_this_week: 0,
+      week_chart: week_chart,
+      source_breakdown: [],
+      recent_events: [],
+      level: FpEconomy.level_for_xp(0),
+      earn_more: FpEconomy.earn_more_rules(),
+      today: today
+    }
+  end
+
+  @doc """
+  Returns a list of `%{date: Date.t(), amount: integer()}` for the most
+  recent `n` days (oldest first), filling missing days with zero.
+  """
+  def daily_xp(user_role_id, days) when is_integer(days) and days > 0 do
+    today = Date.utc_today()
+    window_start = Date.add(today, -(days - 1))
+
+    window_start_dt = DateTime.new!(window_start, ~T[00:00:00], "Etc/UTC")
+
+    rows =
+      from(x in XpEvent,
+        where: x.user_role_id == ^user_role_id and x.inserted_at >= ^window_start_dt,
+        group_by: fragment("date_trunc('day', ?)", x.inserted_at),
+        select: {fragment("date_trunc('day', ?)::date", x.inserted_at), sum(x.amount)}
+      )
+      |> Repo.all()
+      |> Map.new(fn {date, amount} -> {date, amount || 0} end)
+
+    for offset <- (days - 1)..0//-1 do
+      d = Date.add(today, -offset)
+      %{date: d, amount: Map.get(rows, d, 0)}
+    end
+  end
+
+  @doc """
+  Returns FP grouped by source for a user, sorted by total descending.
+  Each entry: `%{source: "practice", amount: 250, count: 25}`.
+  """
+  def source_breakdown(user_role_id) do
+    from(x in XpEvent,
+      where: x.user_role_id == ^user_role_id,
+      group_by: x.source,
+      select: %{source: x.source, amount: coalesce(sum(x.amount), 0), count: count(x.id)},
+      order_by: [desc: coalesce(sum(x.amount), 0)]
+    )
+    |> Repo.all()
+  end
+
+  defp activity_dates(user_role_id, days) do
+    today = Date.utc_today()
+    window_start = Date.add(today, -(days - 1))
+    window_start_dt = DateTime.new!(window_start, ~T[00:00:00], "Etc/UTC")
+
+    from(x in XpEvent,
+      where: x.user_role_id == ^user_role_id and x.inserted_at >= ^window_start_dt,
+      distinct: true,
+      select: fragment("date_trunc('day', ?)::date", x.inserted_at)
+    )
+    |> Repo.all()
   end
 
   ## ── Leaderboard (Flock) ──────────────────────────────────────────────────

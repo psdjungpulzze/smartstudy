@@ -12,18 +12,14 @@ defmodule FunSheep.Engagement.StudySessions do
   alias FunSheep.Repo
   alias FunSheep.Engagement.StudySession
   alias FunSheep.Gamification
+  alias FunSheep.Gamification.FpEconomy
 
-  @xp_per_correct 5
-  @xp_session_completion 10
-  @all_windows_bonus 25
-  @all_windows_threshold 3
+  @xp_per_correct FpEconomy.study_session_xp_per_correct()
+  @xp_session_completion FpEconomy.study_session_completion_bonus()
+  @all_windows_bonus FpEconomy.study_session_all_windows_bonus()
+  @all_windows_threshold FpEconomy.study_session_all_windows_threshold()
 
-  @time_window_multipliers %{
-    "morning" => 2.0,
-    "afternoon" => 1.5,
-    "evening" => 1.0,
-    "night" => 1.0
-  }
+  @time_window_multipliers FpEconomy.study_session_time_window_multipliers()
 
   ## ── Session Lifecycle ────────────────────────────────────────────────────
 

@@ -1,6 +1,28 @@
+<%!-- Impersonation banner — fixed top bar, rendered only when an admin is
+     actively impersonating a user. Sticky + high z-index so it's always visible. --%>
+<div
+  :if={assigns[:impersonation]}
+  class="bg-[#FF3B30] text-white text-sm font-medium fixed top-0 left-0 right-0 z-[60] h-10 flex items-center justify-center gap-4 px-4"
+  role="alert"
+>
+  <span aria-hidden="true">👀</span>
+  <span>
+    Impersonating <strong>{@impersonation.target_email}</strong>. All actions are audited.
+  </span>
+  <.form for={%{}} action="/admin/impersonate" method="delete" class="inline">
+    <button
+      type="submit"
+      class="px-3 py-1 rounded-full bg-white text-[#FF3B30] text-xs font-bold hover:bg-[#FFE5E3]"
+    >
+      Stop impersonation
+    </button>
+  </.form>
+</div>
+
 <%!-- Top Navigation Bar - Test Prep Journey Style --%>
 <header class={[
-  "bg-white border-b border-gray-100 h-14 sm:h-16 fixed top-0 left-0 right-0 z-50 safe-area-top",
+  "bg-white border-b border-gray-100 h-14 sm:h-16 fixed left-0 right-0 z-50 safe-area-top",
+  if(assigns[:impersonation], do: "top-10", else: "top-0"),
   if((@current_path || "") == "/practice", do: "hidden lg:block", else: "")
 ]}>
   <div class="max-w-5xl mx-auto h-full flex items-center justify-between px-3 sm:px-4">
@@ -33,30 +55,44 @@
 
     <%!-- Right: Streak + XP + Avatar --%>
     <div class="flex items-center gap-1.5 sm:gap-3 shrink-0">
-      <%!-- Streak --%>
-      <div class="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-orange-50 border border-orange-100">
+      <%!-- Streak (clickable — opens streak detail modal) --%>
+      <button
+        type="button"
+        phx-click={open_streak_modal_js()}
+        class="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-orange-50 border border-orange-100 hover:bg-orange-100 transition-colors touch-target"
+        aria-label={"Streak: #{assigns[:streak_count] || 0} days. Tap for details."}
+      >
         <span class="text-sm sm:text-base animate-streak">🔥</span>
         <span class="text-xs sm:text-sm font-extrabold text-orange-600">
           {assigns[:streak_count] || 0}
         </span>
-      </div>
+      </button>
 
       <%!-- Review Cards Due Badge --%>
       <%= if (assigns[:due_reviews] || 0) > 0 do %>
-        <div class="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-blue-50 border border-blue-100">
+        <.link
+          navigate="/review"
+          class="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl bg-blue-50 border border-blue-100 hover:bg-blue-100 transition-colors touch-target"
+          aria-label={"#{assigns[:due_reviews]} review cards due. Tap to review."}
+        >
           <span class="text-sm sm:text-base">🧠</span>
           <span class="text-xs sm:text-sm font-extrabold text-blue-600">
             {assigns[:due_reviews]}
           </span>
-        </div>
+        </.link>
       <% end %>
 
-      <%!-- Fleece Points (hidden on small phones, visible on large phones+) --%>
-      <div class="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-100">
+      <%!-- Fleece Points (clickable — opens FP detail modal) --%>
+      <button
+        type="button"
+        phx-click={open_fp_modal_js()}
+        class="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-100 hover:bg-amber-100 transition-colors touch-target"
+        aria-label={"Fleece Points: #{assigns[:total_xp] || 0}. Tap for details."}
+      >
         <span class="text-base">⚡</span>
         <span class="text-sm font-extrabold text-amber-600">{assigns[:total_xp] || 0}</span>
         <span class="text-[10px] text-amber-400 font-medium">FP</span>
-      </div>
+      </button>
 
       <%!-- Avatar + Dropdown --%>
       <div class="relative" phx-click-away={JS.hide(to: "#profile-dropdown")}>
@@ -195,6 +231,10 @@
   cta_label={@tutorial_config.cta_label}
   steps={@tutorial_config.steps}
 />
+
+<%!-- Streak + FP detail modals (lazy-loaded on first badge click) --%>
+<.streak_modal id="streak-modal" summary={assigns[:streak_summary]} />
+<.fp_modal id="fp-modal" summary={assigns[:fp_summary]} />
 
 <%!-- Bottom Tab Bar (mobile only, hidden on tablet+ and on practice page) --%>
 <nav class={[

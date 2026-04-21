@@ -5,9 +5,10 @@ defmodule FunSheepWeb.ReviewLive do
 
   alias FunSheep.Engagement.{SpacedRepetition, StudySessions}
   alias FunSheep.Gamification
+  alias FunSheep.Gamification.FpEconomy
 
   @batch_size 5
-  @xp_per_card 10
+  @xp_per_card FpEconomy.xp_per_review_card()
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do

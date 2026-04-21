@@ -3,8 +3,9 @@ defmodule FunSheepWeb.PracticeLive do
 
   alias FunSheep.{Courses, Engagement, Gamification, Questions, Tutor}
   alias FunSheep.Assessments.PracticeEngine
+  alias FunSheep.Gamification.FpEconomy
 
-  @xp_per_correct 10
+  @xp_per_correct FpEconomy.xp_per_correct()
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do
@@ -416,7 +417,7 @@ defmodule FunSheepWeb.PracticeLive do
         </table>
       </div>
       <figcaption class="px-4 py-2 text-xs text-[#8E8E93] bg-[#F5F5F7] border-t border-[#E5E5EA]">
-        <span :if={@spec["caption"] && @spec["caption"] != ""}>{@spec["caption"]} · </span>
+        <span :if={@spec["caption"] && @spec["caption"] != ""}>{@spec["caption"]}   · </span>
         AI-generated reference table
       </figcaption>
     </figure>
