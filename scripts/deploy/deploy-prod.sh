@@ -104,6 +104,25 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# --- Provision Interactor assistants ------------------------------------
+# Every module implementing FunSheep.Interactor.AssistantSpec gets
+# resolve-or-create'd against the Interactor pointed at by the loaded env.
+# Idempotent: existing assistants resolve to their current id. Required
+# whenever an AssistantSpec is renamed or added — otherwise the verify
+# step below would fail, and at runtime the worker would log
+# `:assistant_not_found` for every call until a human clicked through
+# the Interactor admin UI.
+info "Provisioning Interactor assistants..."
+mix funsheep.interactor.provision_assistants \
+  || fail "Assistant provisioning failed — fix the issues above before deploying."
+
+# --- Verify Interactor configuration ------------------------------------
+# Runs only after provisioning so freshly-renamed assistants are already
+# present. Also checks JWKS reachability and OAuth token flow.
+info "Verifying Interactor configuration..."
+"$ROOT/scripts/deploy/verify-interactor.sh" "$ENV_FILE" \
+  || fail "Interactor verification failed — fix the issues above before deploying."
+
 # --- gcloud checks -------------------------------------------------------
 command -v gcloud >/dev/null 2>&1 || fail "gcloud CLI not installed."
 
