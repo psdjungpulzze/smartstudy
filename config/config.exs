@@ -73,7 +73,10 @@ config :fun_sheep, Oban,
        # Daily at 08:00 UTC — close the loop on pending TOC proposals
        # that nobody has approved after 14 days. See
        # FunSheep.Workers.TOCEscalationWorker for the logic.
-       {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker}
+       {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker},
+       # Every 15min — re-enqueue questions stuck at :pending after a
+       # validation job was discarded (see StuckValidationSweeperWorker).
+       {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker}
      ]}
   ],
   queues: [

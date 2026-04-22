@@ -79,7 +79,7 @@ defmodule FunSheep.Questions.Validation do
     # for every call until the operator intervenes.
     with {:ok, _id} <- ensure_assistant(),
          {:ok, response} <-
-           Agents.chat(@assistant_name, prompt, %{
+           agents_impl().chat(@assistant_name, prompt, %{
              source: "questions_validation_context",
              metadata: %{course_id: course.id, kind: "question_validation"}
            }) do
@@ -175,7 +175,7 @@ defmodule FunSheep.Questions.Validation do
     # Race-safe: if two workers hit this simultaneously, one wins the
     # create; the loser's 422 is converted to a re-resolve inside
     # Agents.resolve_or_create_assistant/1.
-    case Agents.resolve_or_create_assistant(assistant_attrs()) do
+    case agents_impl().resolve_or_create_assistant(assistant_attrs()) do
       {:ok, id} ->
         :persistent_term.put({__MODULE__, :assistant_id}, id)
         {:ok, id}
@@ -183,6 +183,13 @@ defmodule FunSheep.Questions.Validation do
       {:error, _} = err ->
         err
     end
+  end
+
+  # Routes Agents calls through a configurable impl so tests can stub the
+  # Interactor round-trip with Mox. Default is the real
+  # `FunSheep.Interactor.Agents`; tests set this to a Mox-backed stub.
+  defp agents_impl do
+    Application.get_env(:fun_sheep, :interactor_agents_impl, Agents)
   end
 
   # --- Prompt building ---
