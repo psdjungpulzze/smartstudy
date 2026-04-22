@@ -320,6 +320,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     """
 
     case Agents.chat("web_search", prompt, %{
+           source: "web_content_discovery_worker",
            metadata: %{search_query: query}
          }) do
       {:ok, response} ->

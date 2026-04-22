@@ -91,6 +91,21 @@ config :fun_sheep,
   interactor_skb_url: "https://skb.interactor.com",
   stripe_publishable_key: "mock"
 
+# Feature flags — Postgres-backed with in-process ETS cache. Flags toggle
+# in <1s across the cluster because Postgres LISTEN/NOTIFY pushes change
+# events to every node.
+config :fun_with_flags, :persistence,
+  adapter: FunWithFlags.Store.Persistent.Ecto,
+  repo: FunSheep.Repo,
+  ecto_table_name: "fun_with_flags_toggles"
+
+config :fun_with_flags, :cache, enabled: true, ttl: 300
+
+config :fun_with_flags, :cache_bust_notifications,
+  enabled: true,
+  adapter: FunWithFlags.Notifications.PhoenixPubSub,
+  client: FunSheep.PubSub
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

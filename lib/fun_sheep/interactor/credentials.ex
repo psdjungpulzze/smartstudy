@@ -43,4 +43,14 @@ defmodule FunSheep.Interactor.Credentials do
   def delete_credential(credential_id) do
     FunSheep.Interactor.Client.delete("#{@base_path}/#{credential_id}")
   end
+
+  @doc """
+  Forces a refresh of the credential's access token. Used by the admin
+  `/admin/interactor/credentials` page to unblock users whose token has
+  been flagged as expired by a downstream provider call.
+  """
+  @spec force_refresh(String.t()) :: {:ok, map()} | {:error, term()}
+  def force_refresh(credential_id) do
+    Client.post("#{@base_path}/#{credential_id}/refresh", %{})
+  end
 end
