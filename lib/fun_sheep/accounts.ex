@@ -232,6 +232,49 @@ defmodule FunSheep.Accounts do
   end
 
   @doc """
+  Returns the active guardians for a student as `[UserRole.t()]`.
+
+  Used by `FunSheep.PracticeRequests` for Flow A's guardian picker. Per
+  spec §6.3 and §7.4 Flow C, teachers must never appear in the picker
+  for a billing flow — pass `only: :parent` to exclude them.
+
+  Options:
+    * `:only` — `:parent` or `:teacher`, restricts the `relationship_type`
+  """
+  def list_active_guardian_roles_for_student(student_id, opts \\ []) do
+    query =
+      from(sg in StudentGuardian,
+        join: ur in assoc(sg, :guardian),
+        where: sg.student_id == ^student_id and sg.status == :active,
+        order_by: [asc: sg.inserted_at],
+        select: ur
+      )
+
+    query =
+      case Keyword.get(opts, :only) do
+        nil -> query
+        type when type in [:parent, :teacher] -> where(query, [sg, _ur], sg.relationship_type == ^type)
+      end
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Returns a single "primary" guardian for a student — parents preferred
+  over teachers, oldest active link first. Returns `nil` if none found.
+
+  Used by §4.4 request-builder modal for auto-selection when only one
+  parent is linked, and by the §4.8 fallback to identify the single
+  guardian to direct a reminder to.
+  """
+  def find_primary_guardian(student_id) do
+    case list_active_guardian_roles_for_student(student_id, only: :parent) do
+      [parent | _] -> parent
+      [] -> list_active_guardian_roles_for_student(student_id, only: :teacher) |> List.first()
+    end
+  end
+
+  @doc """
   Finds or creates a user_role by interactor_user_id, then updates profile fields.
   Used during course creation wizard to persist demographics.
   """

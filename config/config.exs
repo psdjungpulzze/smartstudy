@@ -64,6 +64,14 @@ config :phoenix, :json_library, Jason
 # Oban background job processing
 config :fun_sheep, Oban,
   repo: FunSheep.Repo,
+  plugins: [
+    # Hourly expiry of stale practice_requests (§4.5, §11.2).
+    # Plugins are disabled automatically in test env (testing: :inline).
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 * * * *", FunSheep.Workers.RequestExpiryWorker}
+     ]}
+  ],
   queues: [
     default: 10,
     ocr: 3,
