@@ -37,6 +37,17 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   """
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
+    with :ok <- FunSheep.FeatureFlags.require!(:ai_question_generation_enabled) do
+      do_perform(args)
+    else
+      {:cancel, reason} ->
+        require Logger
+        Logger.info("[AIGen] Skipped (#{reason})")
+        {:cancel, reason}
+    end
+  end
+
+  defp do_perform(args) do
     course_id = args["course_id"]
     chapter_id = args["chapter_id"]
     count = args["count"] || 10

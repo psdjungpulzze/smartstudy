@@ -4,7 +4,7 @@ defmodule FunSheepWeb.AdminDashboardLive do
   """
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Accounts, Admin, AIUsage, Questions, Repo}
+  alias FunSheep.{Accounts, Admin, AIUsage, FeatureFlags, Questions, Repo}
   alias FunSheep.Admin.Jobs
   alias FunSheep.AIUsage.Pricing
   alias FunSheep.Courses.Course
@@ -24,6 +24,7 @@ defmodule FunSheepWeb.AdminDashboardLive do
     course_total = Repo.aggregate(Course, :count)
     review_count = Questions.count_questions_needing_review()
     recent_audit = Admin.list_audit_logs(limit: 10)
+    flags_disabled = Enum.count(FeatureFlags.list(), &(not &1.enabled?))
     failures_24h = safe_failures_24h()
     ai_summary_24h = load_ai_summary_24h()
 
@@ -33,6 +34,7 @@ defmodule FunSheepWeb.AdminDashboardLive do
     |> assign(:course_total, course_total)
     |> assign(:review_count, review_count)
     |> assign(:recent_audit, recent_audit)
+    |> assign(:flags_disabled, flags_disabled)
     |> assign(:failures_24h, failures_24h)
     |> assign(:ai_summary_24h, ai_summary_24h)
   end
@@ -204,6 +206,32 @@ defmodule FunSheepWeb.AdminDashboardLive do
           </div>
           <p class="text-xs text-[#8E8E93] mt-1">
             Full history of privileged actions.
+          </p>
+        </.link>
+
+        <.link
+          navigate={~p"/admin/flags"}
+          class={[
+            "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
+            @flags_disabled > 0 && "ring-2 ring-[#FFCC00]/40"
+          ]}
+        >
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-[#1C1C1E]">Feature flags</h3>
+            <span
+              :if={@flags_disabled > 0}
+              class="inline-block px-2 py-0.5 rounded-full bg-[#FFF4CC] text-[#1C1C1E] text-xs font-medium"
+            >
+              {@flags_disabled} off
+            </span>
+            <.icon
+              :if={@flags_disabled == 0}
+              name="hero-bolt"
+              class="w-5 h-5 text-[#4CD964]"
+            />
+          </div>
+          <p class="text-xs text-[#8E8E93] mt-1">
+            Kill switches for background work and signup.
           </p>
         </.link>
       </div>

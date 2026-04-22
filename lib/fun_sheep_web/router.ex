@@ -157,6 +157,7 @@ defmodule FunSheepWeb.Router do
       live "/settings/mfa", AdminMfaSettingsLive, :index
       live "/usage/ai", AdminAIUsageLive, :index
       live "/jobs/failures", AdminJobsLive, :index
+      live "/flags", AdminFlagsLive, :index
     end
   end
 
