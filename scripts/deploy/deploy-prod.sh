@@ -281,13 +281,20 @@ if gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" >/dev/n
     --format='value(spec.template.spec.containers[0].image)')
 
   info "Promoting $WORKER_SERVICE to image $NEW_IMAGE"
+  # Horizontal scaling: min=2 keeps two always-on workers so a single
+  # slow/stuck instance doesn't halve global OCR throughput, and max=5
+  # lets Cloud Run absorb parallel textbook uploads during launch bursts.
   # POOL_SIZE must cover the sum of Oban queue concurrencies in runtime.exs
-  # (default=10 + ocr=15 + ai=5 + ingest=1 = 31) plus a small headroom for
-  # Lifeline / Pruner plugins. Setting it to 35 leaves 4 slots of slack.
+  # (default=10 + ocr=8 + ai=5 + pdf_ocr=3 + ingest=1 = 27) plus headroom
+  # for Lifeline / Pruner plugins and Oban's own Peer/Notifier DB traffic.
+  # 50 leaves ~23 slots of slack, which matters once multiple workers are
+  # competing for the same Cloud SQL pool on db-custom-1-3840.
   gcloud run services update "$WORKER_SERVICE" \
     --region="$GCP_REGION" \
     --image="$NEW_IMAGE" \
-    --update-env-vars="POOL_SIZE=35" \
+    --min-instances=2 \
+    --max-instances=5 \
+    --update-env-vars="POOL_SIZE=50" \
     --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest" \
     --quiet >/dev/null
 

@@ -143,12 +143,17 @@ run_step_2() {
   if gcloud sql instances describe "$DB_INSTANCE" &>/dev/null; then
     ok "Cloud SQL instance $DB_INSTANCE already exists"
   else
-    info "Creating PostgreSQL 15 instance (db-f1-micro, ~\$7.67/mo)..."
+    # Tier: db-custom-1-3840 (1 dedicated vCPU + 3.84GB RAM, ~\$48/mo).
+    # Shared-core tiers (db-f1-micro, db-g1-small) saturate under Oban's
+    # Peer/Notifier + OCR worker DB traffic once worker concurrency crosses
+    # ~4 slots, producing cascading 5s GenServer timeouts that halve OCR
+    # throughput. The dedicated-core tier removes that ceiling.
+    info "Creating PostgreSQL 15 instance (db-custom-1-3840, ~\$48/mo)..."
     gcloud sql instances create "$DB_INSTANCE" \
       --database-version=POSTGRES_15 \
-      --tier=db-f1-micro \
+      --tier=db-custom-1-3840 \
       --region="$REGION" \
-      --storage-type=HDD \
+      --storage-type=SSD \
       --storage-size=10GB \
       --storage-auto-increase \
       --backup-start-time=03:00 \
