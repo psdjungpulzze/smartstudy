@@ -66,10 +66,50 @@ defmodule FunSheepWeb.WebhookController do
     json(conn, %{status: "received"})
   end
 
+  defp handle_credential_event(conn, %{"type" => type, "data" => data}) do
+    credential_id = data["credential_id"] || data["id"]
+
+    case credential_id && FunSheep.Integrations.get_by_credential_id(credential_id) do
+      nil ->
+        # No credential_id on the event, or no matching connection on our
+        # side — either way there's nothing actionable. The event is still
+        # acknowledged so Interactor doesn't retry forever.
+        json(conn, %{status: "received"})
+
+      false ->
+        json(conn, %{status: "received"})
+
+      connection ->
+        apply_credential_event(connection, type)
+        json(conn, %{status: "ok"})
+    end
+  end
+
   defp handle_credential_event(conn, _params) do
-    # TODO: Notify about credential status changes
     json(conn, %{status: "received"})
   end
+
+  defp apply_credential_event(connection, "credential.revoked") do
+    {:ok, updated} = FunSheep.Integrations.mark_status(connection, :revoked)
+    FunSheep.Integrations.broadcast(updated, :revoked)
+  end
+
+  defp apply_credential_event(connection, "credential.expired") do
+    {:ok, updated} = FunSheep.Integrations.mark_status(connection, :expired)
+    FunSheep.Integrations.broadcast(updated, :expired)
+  end
+
+  defp apply_credential_event(connection, "credential.refreshed") do
+    {:ok, updated} =
+      FunSheep.Integrations.update_connection(connection, %{
+        status: :active,
+        last_sync_error: nil
+      })
+
+    FunSheep.Integrations.broadcast(updated, :refreshed)
+  end
+
+  defp apply_credential_event(_connection, _type), do: :ok
 
   defp handle_billing_event(conn, %{"type" => type, "data" => data}) do
     case type do

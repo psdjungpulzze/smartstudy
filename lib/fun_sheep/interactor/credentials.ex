@@ -28,4 +28,19 @@ defmodule FunSheep.Interactor.Credentials do
   def get_token(credential_id) do
     Client.get("#{@base_path}/#{credential_id}/token")
   end
+
+  @doc "Fetches the full credential record (status, scopes, metadata)."
+  @spec get_credential(String.t()) :: {:ok, map()} | {:error, term()}
+  def get_credential(credential_id) do
+    Client.get("#{@base_path}/#{credential_id}")
+  end
+
+  @doc """
+  Revokes a credential on the Interactor side. Interactor issues the
+  provider revocation (e.g. Google `/revoke`) and removes the record.
+  """
+  @spec delete_credential(String.t()) :: {:ok, map()} | {:error, term()}
+  def delete_credential(credential_id) do
+    FunSheep.Interactor.Client.delete("#{@base_path}/#{credential_id}")
+  end
 end

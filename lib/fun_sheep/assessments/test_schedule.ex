@@ -16,6 +16,9 @@ defmodule FunSheep.Assessments.TestSchedule do
     field :name, :string
     field :test_date, :date
     field :scope, :map
+    field :external_provider, :string
+    field :external_id, :string
+    field :external_synced_at, :utc_datetime
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :course, FunSheep.Courses.Course
@@ -30,7 +33,17 @@ defmodule FunSheep.Assessments.TestSchedule do
   @doc false
   def changeset(test_schedule, attrs) do
     test_schedule
-    |> cast(attrs, [:name, :test_date, :scope, :user_role_id, :course_id, :format_template_id])
+    |> cast(attrs, [
+      :name,
+      :test_date,
+      :scope,
+      :user_role_id,
+      :course_id,
+      :format_template_id,
+      :external_provider,
+      :external_id,
+      :external_synced_at
+    ])
     |> validate_required([:name, :test_date, :scope, :user_role_id, :course_id])
     |> foreign_key_constraint(:user_role_id)
     |> foreign_key_constraint(:course_id)

@@ -24,6 +24,9 @@ defmodule FunSheep.Courses.Course do
     field :ocr_completed_count, :integer, default: 0
     field :ocr_total_count, :integer, default: 0
     field :custom_textbook_name, :string
+    field :external_provider, :string
+    field :external_id, :string
+    field :external_synced_at, :utc_datetime
 
     belongs_to :school, FunSheep.Geo.School
     belongs_to :created_by, FunSheep.Accounts.UserRole
@@ -54,7 +57,10 @@ defmodule FunSheep.Courses.Course do
       :ocr_completed_count,
       :ocr_total_count,
       :textbook_id,
-      :custom_textbook_name
+      :custom_textbook_name,
+      :external_provider,
+      :external_id,
+      :external_synced_at
     ])
     |> validate_required([:name, :subject, :grade])
     |> foreign_key_constraint(:school_id)

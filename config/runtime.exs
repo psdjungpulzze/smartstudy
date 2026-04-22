@@ -159,7 +159,7 @@ if config_env() == :prod do
       # too many connections are created at once, so we keep outbound
       # concurrency low and let in-process Req retries + Oban snooze
       # handle transient blips instead.
-      [default: 10, ocr: 4, ai: 5, pdf_ocr: 3, ingest: 1]
+      [default: 10, ocr: 4, ai: 5, pdf_ocr: 3, ingest: 1, integrations: 3]
     else
       false
     end
@@ -185,6 +185,7 @@ if config_env() == :prod do
     interactor_url: System.get_env("INTERACTOR_URL", "https://auth.interactor.com"),
     interactor_core_url: System.get_env("INTERACTOR_CORE_URL", "https://core.interactor.com"),
     interactor_ukb_url: System.get_env("INTERACTOR_UKB_URL", "https://ukb.interactor.com"),
+    interactor_skb_url: System.get_env("INTERACTOR_SKB_URL", "https://skb.interactor.com"),
     interactor_udb_url: System.get_env("INTERACTOR_UDB_URL", "https://udb.interactor.com"),
     interactor_org_name: System.get_env("INTERACTOR_ORG_NAME", "studysmart"),
     interactor_client_id: interactor_client_id,
