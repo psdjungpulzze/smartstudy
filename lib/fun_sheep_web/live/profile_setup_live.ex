@@ -243,11 +243,10 @@ defmodule FunSheepWeb.ProfileSetupLive do
      )}
   end
 
-  # phx-keyup sends `%{"key" => key, "value" => current_input_value}`.
-  # phx-change on a wrapping form would send `%{"school_query" => ...}`.
-  # Accept both shapes so the autocomplete works regardless of how it's wired.
+  # Input-level phx-change fires per keystroke and sends `%{"school_query" => value}`.
+  # Accept a few shapes so callers (form change, hook push) all work.
   def handle_event("search_schools", params, socket) do
-    query = params["value"] || params["school_query"] || params["query"] || ""
+    query = params["school_query"] || params["value"] || params["query"] || ""
     state_id = socket.assigns.selected_state_id
     country_id = socket.assigns.selected_country_id
 
@@ -772,7 +771,7 @@ defmodule FunSheepWeb.ProfileSetupLive do
                     else: "Search by name (e.g. Saratoga, Palo Alto)"
                 }
                 disabled={@selected_state_id in [nil, ""]}
-                phx-keyup="search_schools"
+                phx-change="search_schools"
                 phx-debounce="250"
                 autocomplete="off"
                 class="w-full px-4 py-3 bg-[#F5F5F7] border border-[#D1D1D6] focus:border-[#4CD964] rounded-full outline-none transition-colors disabled:opacity-50"
