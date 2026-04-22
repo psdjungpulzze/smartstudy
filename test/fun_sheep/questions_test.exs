@@ -241,7 +241,7 @@ defmodule FunSheep.QuestionsTest do
         {:ok, count} = Questions.requeue_pending_validations(course.id)
 
         assert count == 2
-        assert_enqueued(worker: FunSheep.Workers.QuestionValidationWorker, queue: :ai)
+        assert_enqueued(worker: FunSheep.Workers.QuestionValidationWorker, queue: :ai_validation)
       end)
     end
 

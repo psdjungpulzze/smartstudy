@@ -153,12 +153,24 @@ if config_env() == :prod do
   # sustained queue depth.
   # ai=5 covers question generation + content discovery without saturating
   # the OpenAI rate limit on the Interactor agent endpoint.
+  # ai_validation=3 is its own dedicated queue (2026-04-22 incident: generation
+  # was saturating :ai with thousands of jobs, starving the validator on the
+  # shared queue and freezing the UI).
   # POOL_SIZE on the worker container must be >= sum of these queues
-  # (default=10 + ocr=8 + ai=5 + pdf_ocr=3 + ingest=1 = 27) plus headroom
-  # for Lifeline/Pruner plugins and Oban's internal Peer/Notifier traffic.
+  # (default=10 + ocr=8 + ai=5 + ai_validation=3 + pdf_ocr=3 + ingest=1 = 30)
+  # plus headroom for Lifeline/Pruner plugins and Oban's internal Peer/Notifier.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      [default: 10, ocr: 8, ai: 5, pdf_ocr: 3, ingest: 1, integrations: 3, notifications: 2]
+      [
+        default: 10,
+        ocr: 8,
+        ai: 5,
+        ai_validation: 3,
+        pdf_ocr: 3,
+        ingest: 1,
+        integrations: 3,
+        notifications: 2
+      ]
     else
       false
     end

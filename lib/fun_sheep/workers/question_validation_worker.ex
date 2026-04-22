@@ -24,8 +24,11 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   # `unique` prevents accidental duplicate enqueues of the same batch from
   # stacking on the :ai queue. Order is normalized on enqueue so two callers
   # passing the same ids in different order collapse to one job.
+  # Runs on its own `:ai_validation` queue so it doesn't compete with
+  # question generation / classification / extraction / scraping for slots
+  # on the general `:ai` queue. See `config/runtime.exs` for prod concurrency.
   use Oban.Worker,
-    queue: :ai,
+    queue: :ai_validation,
     max_attempts: 3,
     unique: [
       period: 120,
@@ -40,7 +43,16 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   import Ecto.Query
   require Logger
 
+  # How many questions each Interactor round-trip validates.
   @batch_size 10
+
+  # How many questions go into one Oban job. The worker chunks internally
+  # into `@batch_size` sub-batches, so an outer chunk of 50 means 5 Interactor
+  # calls per job. Bounded so that if the job is discarded after max_attempts,
+  # at most this many questions need recovery by
+  # `StuckValidationSweeperWorker` — instead of thousands (the 2026-04-22
+  # incident had single jobs holding 3398 ids).
+  @outer_chunk_size 50
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -78,22 +90,34 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   @doc """
   Enqueues validation for a list of question ids. Call this immediately after
   inserting new questions.
+
+  Large lists are chunked into multiple Oban jobs of at most
+  `@outer_chunk_size` ids each. Each chunk is a separate job so a failure
+  in one doesn't affect the others. Ids within a chunk are sorted so the
+  `:unique` constraint deduplicates across callers that pass the same set
+  in different orders.
+
+  Returns `:ok` on success, `{:error, reason}` on the first insert failure.
   """
   def enqueue(question_ids, opts \\ [])
 
   def enqueue([], _opts), do: :ok
 
   def enqueue(question_ids, opts) when is_list(question_ids) do
-    # Normalize id order so duplicate enqueues with the same members collapse
-    # under the `unique` constraint regardless of caller order.
-    args =
-      %{"question_ids" => Enum.sort(question_ids)}
-      |> put_if(:course_id, opts[:course_id])
-      |> put_if(:retry_round, opts[:retry_round])
+    question_ids
+    |> Enum.sort()
+    |> Enum.chunk_every(@outer_chunk_size)
+    |> Enum.reduce_while(:ok, fn chunk, :ok ->
+      args =
+        %{"question_ids" => chunk}
+        |> put_if(:course_id, opts[:course_id])
+        |> put_if(:retry_round, opts[:retry_round])
 
-    args
-    |> __MODULE__.new()
-    |> Oban.insert()
+      case args |> __MODULE__.new() |> Oban.insert() do
+        {:ok, _job} -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
   end
 
   defp put_if(map, _k, nil), do: map

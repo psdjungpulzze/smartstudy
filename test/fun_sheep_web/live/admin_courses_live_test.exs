@@ -89,7 +89,7 @@ defmodule FunSheepWeb.AdminCoursesLiveTest do
         end
 
         assert {:ok, 2} = Questions.requeue_pending_validations(course.id)
-        assert_enqueued(worker: FunSheep.Workers.QuestionValidationWorker, queue: :ai)
+        assert_enqueued(worker: FunSheep.Workers.QuestionValidationWorker, queue: :ai_validation)
       end)
     end
   end

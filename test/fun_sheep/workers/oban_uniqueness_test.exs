@@ -77,11 +77,8 @@ defmodule FunSheep.Workers.ObanUniquenessTest do
         ids = for _ <- 1..3, do: Ecto.UUID.generate()
         course_id = Ecto.UUID.generate()
 
-        assert {:ok, %Oban.Job{conflict?: false}} =
-                 QuestionValidationWorker.enqueue(ids, course_id: course_id)
-
-        assert {:ok, %Oban.Job{conflict?: true}} =
-                 QuestionValidationWorker.enqueue(ids, course_id: course_id)
+        assert :ok = QuestionValidationWorker.enqueue(ids, course_id: course_id)
+        assert :ok = QuestionValidationWorker.enqueue(ids, course_id: course_id)
 
         assert count_jobs(QuestionValidationWorker) == 1
       end)
@@ -91,11 +88,8 @@ defmodule FunSheep.Workers.ObanUniquenessTest do
       with_manual_oban(fn ->
         ids = for _ <- 1..3, do: Ecto.UUID.generate()
 
-        assert {:ok, %Oban.Job{conflict?: false}} =
-                 QuestionValidationWorker.enqueue(ids, course_id: Ecto.UUID.generate())
-
-        assert {:ok, %Oban.Job{conflict?: false}} =
-                 QuestionValidationWorker.enqueue(ids, course_id: Ecto.UUID.generate())
+        assert :ok = QuestionValidationWorker.enqueue(ids, course_id: Ecto.UUID.generate())
+        assert :ok = QuestionValidationWorker.enqueue(ids, course_id: Ecto.UUID.generate())
 
         assert count_jobs(QuestionValidationWorker) == 2
       end)
@@ -106,13 +100,22 @@ defmodule FunSheep.Workers.ObanUniquenessTest do
         course_id = Ecto.UUID.generate()
         ids = for _ <- 1..3, do: Ecto.UUID.generate()
 
-        assert {:ok, %Oban.Job{conflict?: false}} =
-                 QuestionValidationWorker.enqueue(ids, course_id: course_id)
-
-        assert {:ok, %Oban.Job{conflict?: true}} =
-                 QuestionValidationWorker.enqueue(Enum.reverse(ids), course_id: course_id)
+        assert :ok = QuestionValidationWorker.enqueue(ids, course_id: course_id)
+        assert :ok = QuestionValidationWorker.enqueue(Enum.reverse(ids), course_id: course_id)
 
         assert count_jobs(QuestionValidationWorker) == 1
+      end)
+    end
+
+    test "large id list chunks into multiple jobs bounded by outer chunk size" do
+      with_manual_oban(fn ->
+        course_id = Ecto.UUID.generate()
+        # 101 ids → 3 chunks of 50 (50 + 50 + 1) under @outer_chunk_size = 50.
+        ids = for _ <- 1..101, do: Ecto.UUID.generate()
+
+        assert :ok = QuestionValidationWorker.enqueue(ids, course_id: course_id)
+
+        assert count_jobs(QuestionValidationWorker) == 3
       end)
     end
   end
