@@ -4,7 +4,9 @@ defmodule FunSheepWeb.AdminDashboardLive do
   """
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Accounts, Admin, FeatureFlags, Questions, Repo}
+  alias FunSheep.{Accounts, Admin, AIUsage, FeatureFlags, Questions, Repo}
+  alias FunSheep.Admin.Jobs
+  alias FunSheep.AIUsage.Pricing
   alias FunSheep.Courses.Course
 
   @impl true
@@ -23,6 +25,8 @@ defmodule FunSheepWeb.AdminDashboardLive do
     review_count = Questions.count_questions_needing_review()
     recent_audit = Admin.list_audit_logs(limit: 10)
     flags_disabled = Enum.count(FeatureFlags.list(), &(not &1.enabled?))
+    failures_24h = safe_failures_24h()
+    ai_summary_24h = load_ai_summary_24h()
 
     socket
     |> assign(:users_by_role, users_by_role)
@@ -31,6 +35,22 @@ defmodule FunSheepWeb.AdminDashboardLive do
     |> assign(:review_count, review_count)
     |> assign(:recent_audit, recent_audit)
     |> assign(:flags_disabled, flags_disabled)
+    |> assign(:failures_24h, failures_24h)
+    |> assign(:ai_summary_24h, ai_summary_24h)
+  end
+
+  defp safe_failures_24h do
+    Jobs.count_failures()
+  rescue
+    _ -> 0
+  end
+
+  defp load_ai_summary_24h do
+    now = DateTime.utc_now()
+    since = DateTime.add(now, -24 * 3600, :second)
+    AIUsage.summary(%{since: since, until: now})
+  rescue
+    _ -> %{calls: 0, est_cost_cents: nil}
   end
 
   @impl true
@@ -109,6 +129,22 @@ defmodule FunSheepWeb.AdminDashboardLive do
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <.link
+          navigate={~p"/admin/usage/ai"}
+          class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
+        >
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-[#1C1C1E]">AI usage (24h)</h3>
+            <.icon name="hero-chart-bar" class="w-5 h-5 text-[#8E8E93]" />
+          </div>
+          <p class="text-2xl font-bold text-[#1C1C1E] mt-2">
+            {Pricing.format_cost_cents(@ai_summary_24h.est_cost_cents)}
+          </p>
+          <p class="text-xs text-[#8E8E93] mt-1">
+            {@ai_summary_24h.calls} calls · tokens, cost, latency breakdown
+          </p>
+        </.link>
+
+        <.link
           navigate={~p"/admin/settings/mfa"}
           class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
         >
@@ -131,6 +167,32 @@ defmodule FunSheepWeb.AdminDashboardLive do
           </div>
           <p class="text-xs text-[#8E8E93] mt-1">
             Oban Web: queues, jobs, retries.
+          </p>
+        </.link>
+
+        <.link
+          navigate={~p"/admin/jobs/failures"}
+          class={[
+            "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
+            @failures_24h > 0 && "ring-2 ring-[#FF3B30]/30"
+          ]}
+        >
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-[#1C1C1E]">Job failures</h3>
+            <span
+              :if={@failures_24h > 0}
+              class="inline-block px-2 py-0.5 rounded-full bg-[#FFE5E3] text-[#FF3B30] text-xs font-medium"
+            >
+              {@failures_24h}
+            </span>
+            <.icon
+              :if={@failures_24h == 0}
+              name="hero-check-circle"
+              class="w-5 h-5 text-[#4CD964]"
+            />
+          </div>
+          <p class="text-xs text-[#8E8E93] mt-1">
+            FunSheep-domain drill-down for retryable / discarded jobs.
           </p>
         </.link>
 

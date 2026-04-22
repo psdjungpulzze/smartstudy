@@ -84,6 +84,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
     broadcast(course.id, %{sub_step: "Asking AI to identify chapters and sections..."})
 
     case Agents.chat("course_discovery", prompt, %{
+           source: "course_discovery_worker",
            metadata: %{course_id: course.id, subject: subject, grade: grade}
          }) do
       {:ok, response} ->
