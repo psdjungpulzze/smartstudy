@@ -3,15 +3,19 @@ defmodule FunSheepWeb.ParentDashboardLive do
 
   import FunSheepWeb.SheepMascot
 
-  alias FunSheep.{Accounts, Assessments, Courses, Gamification, Repo}
+  alias FunSheep.{Accountability, Accounts, Assessments, Courses, Gamification, Repo}
   alias FunSheep.Assessments.Forecaster
   alias FunSheep.Engagement.{StudySessions, Wellbeing}
 
   alias FunSheepWeb.StudentLive.Shared.{
     ActivityTimeline,
+    AssignmentsPanel,
+    ConversationPrompts,
     ForecastCard,
+    GoalsPanel,
     PeerComparison,
     PercentileTrend,
+    ShareTriggers,
     StudyHeatmap,
     TopicMasteryMap,
     WellbeingFraming
@@ -55,7 +59,8 @@ defmodule FunSheepWeb.ParentDashboardLive do
         students: students,
         selected_id: selected_id,
         shared_student_id: nil,
-        drill: nil
+        drill: nil,
+        propose_goal_open?: false
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "parent_dashboard",
@@ -129,9 +134,82 @@ defmodule FunSheepWeb.ParentDashboardLive do
   end
 
   @impl true
-  def handle_event("assign_topic_practice", _params, socket) do
-    # Wired up in Phase 3 (§7.2 practice_assignments).
-    {:noreply, socket}
+  def handle_event("assign_topic_practice", params, socket) do
+    guardian_id = socket.assigns.user_role && socket.assigns.user_role.id
+    student_id = socket.assigns.selected_id
+    section_id = socket.assigns.drill && socket.assigns.drill.section_id
+
+    with true <- is_binary(guardian_id),
+         true <- is_binary(student_id),
+         true <- is_binary(section_id),
+         question_count <- Map.get(params, "question_count", 10) |> to_int(10),
+         {:ok, _} <-
+           Accountability.assign_practice(guardian_id, student_id, section_id,
+             question_count: question_count
+           ) do
+      {:noreply, socket |> assign(drill: nil) |> refresh_students()}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("open_propose_goal", _, socket) do
+    {:noreply, assign(socket, propose_goal_open?: true)}
+  end
+
+  @impl true
+  def handle_event("close_propose_goal", _, socket) do
+    {:noreply, assign(socket, propose_goal_open?: false)}
+  end
+
+  @impl true
+  def handle_event("propose_goal", params, socket) do
+    guardian_id = socket.assigns.user_role && socket.assigns.user_role.id
+    student_id = params["student_id"] || socket.assigns.selected_id
+
+    attrs = %{
+      "student_id" => student_id,
+      "goal_type" => params["goal_type"],
+      "target_value" => to_int(params["target_value"], 0),
+      "end_date" => parse_date(params["end_date"])
+    }
+
+    case Accountability.propose_goal(guardian_id, attrs) do
+      {:ok, _goal} ->
+        {:noreply, socket |> assign(propose_goal_open?: false) |> refresh_students()}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("accept_goal", %{"goal-id" => goal_id}, socket) do
+    case Accountability.accept_goal(goal_id, :guardian) do
+      {:ok, _} -> {:noreply, refresh_students(socket)}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("decline_goal", %{"goal-id" => goal_id}, socket) do
+    case Accountability.decline_goal(goal_id, :guardian) do
+      {:ok, _} -> {:noreply, refresh_students(socket)}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("open_counter_goal", _params, socket) do
+    # Full counter-propose UX lives in the propose form with pre-fill — the
+    # decline + propose flow is the simplest correct mechanism for now.
+    {:noreply, assign(socket, propose_goal_open?: true)}
+  end
+
+  @impl true
+  def handle_event("open_share", %{"student-id" => student_id}, socket) do
+    {:noreply, assign(socket, shared_student_id: student_id)}
   end
 
   @impl true
@@ -156,6 +234,29 @@ defmodule FunSheepWeb.ParentDashboardLive do
       _ -> {:noreply, socket}
     end
   end
+
+  defp to_int(v, _default) when is_integer(v), do: v
+
+  defp to_int(v, default) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} -> n
+      _ -> default
+    end
+  end
+
+  defp to_int(_, default), do: default
+
+  defp parse_date(nil), do: nil
+  defp parse_date(""), do: nil
+
+  defp parse_date(s) when is_binary(s) do
+    case Date.from_iso8601(s) do
+      {:ok, d} -> d
+      _ -> nil
+    end
+  end
+
+  defp parse_date(_), do: nil
 
   defp refresh_students(socket) do
     user_role = socket.assigns.user_role
@@ -219,6 +320,22 @@ defmodule FunSheepWeb.ParentDashboardLive do
       {percentile_history, forecast, peer_bands, target_readiness, days_to_test} =
         benchmarks_block(student_id, student, primary_test)
 
+      # Phase 3 additions
+      pending_goals = Accountability.list_pending_for(:guardian, guardian_id)
+      pending_for_student = pending_goals |> Enum.filter(&(&1.student_id == student_id))
+      active_goals = Accountability.list_active_goals(student_id)
+
+      progress_by_goal =
+        Map.new(active_goals, fn g -> {g.id, Accountability.goal_progress(g)} end)
+
+      open_assignments = Accountability.list_open_assignments(student_id)
+
+      assignment_slots =
+        Accountability.max_open_assignments_per_student() - length(open_assignments)
+
+      prompts = Accountability.conversation_prompts_for_parent(guardian_id, student_id)
+      triggers = Accountability.share_triggers(guardian_id, student_id)
+
       %{
         id: student_id,
         name: student.display_name || student.email,
@@ -246,7 +363,15 @@ defmodule FunSheepWeb.ParentDashboardLive do
         peer_bands: peer_bands,
         target_readiness: target_readiness,
         days_to_test: days_to_test,
-        primary_test_schedule_id: primary_test && primary_test.id
+        primary_test_schedule_id: primary_test && primary_test.id,
+        # Phase 3
+        pending_goals_for_parent: pending_for_student,
+        active_goals: active_goals,
+        progress_by_goal: progress_by_goal,
+        open_assignments: open_assignments,
+        assignment_slots: assignment_slots,
+        conversation_prompts: prompts,
+        share_triggers: triggers
       }
     else
       # Defensive: if an in-flight revoke happens between list + enrich, bail.
@@ -434,6 +559,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
             student={student}
             shared={@shared_student_id == student.id}
             drill={@drill}
+            propose_goal_open?={@propose_goal_open?}
           />
         </div>
       </div>
@@ -556,8 +682,29 @@ defmodule FunSheepWeb.ParentDashboardLive do
         chapter_name={@drill.chapter_name}
         attempts={@drill.attempts}
         trend={@drill.trend}
-        assign_enabled?={false}
+        assign_enabled?={@student.assignment_slots > 0}
       />
+
+      <%!-- ── Phase 3 (§7.1): Goals ── --%>
+      <GoalsPanel.panel
+        pending_for_viewer={@student.pending_goals_for_parent}
+        active_goals={@student.active_goals}
+        progress_by_goal={@student.progress_by_goal}
+        propose_open?={@propose_goal_open?}
+        student_id={@student.id}
+      />
+
+      <%!-- ── Phase 3 (§7.2): Parent-assigned practice ── --%>
+      <AssignmentsPanel.panel
+        assignments={@student.open_assignments}
+        open_slots={@student.assignment_slots}
+      />
+
+      <%!-- ── Phase 3 (§7.3): Conversation prompts ── --%>
+      <ConversationPrompts.card prompts={@student.conversation_prompts} />
+
+      <%!-- ── Phase 3 share triggers (milestones) ── --%>
+      <ShareTriggers.banner triggers={@student.share_triggers} student_id={@student.id} />
 
       <%!-- ── Proof Card (shareable progress) ── --%>
       <.proof_card_section
