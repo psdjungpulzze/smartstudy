@@ -5,6 +5,7 @@ defmodule FunSheepWeb.AdminDashboardLive do
   use FunSheepWeb, :live_view
 
   alias FunSheep.{Accounts, Admin, Questions, Repo}
+  alias FunSheep.Admin.Jobs
   alias FunSheep.Courses.Course
 
   @impl true
@@ -22,6 +23,7 @@ defmodule FunSheepWeb.AdminDashboardLive do
     course_total = Repo.aggregate(Course, :count)
     review_count = Questions.count_questions_needing_review()
     recent_audit = Admin.list_audit_logs(limit: 10)
+    failures_24h = safe_failures_24h()
 
     socket
     |> assign(:users_by_role, users_by_role)
@@ -29,6 +31,13 @@ defmodule FunSheepWeb.AdminDashboardLive do
     |> assign(:course_total, course_total)
     |> assign(:review_count, review_count)
     |> assign(:recent_audit, recent_audit)
+    |> assign(:failures_24h, failures_24h)
+  end
+
+  defp safe_failures_24h do
+    Jobs.count_failures()
+  rescue
+    _ -> 0
   end
 
   @impl true
@@ -129,6 +138,32 @@ defmodule FunSheepWeb.AdminDashboardLive do
           </div>
           <p class="text-xs text-[#8E8E93] mt-1">
             Oban Web: queues, jobs, retries.
+          </p>
+        </.link>
+
+        <.link
+          navigate={~p"/admin/jobs/failures"}
+          class={[
+            "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
+            @failures_24h > 0 && "ring-2 ring-[#FF3B30]/30"
+          ]}
+        >
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-[#1C1C1E]">Job failures</h3>
+            <span
+              :if={@failures_24h > 0}
+              class="inline-block px-2 py-0.5 rounded-full bg-[#FFE5E3] text-[#FF3B30] text-xs font-medium"
+            >
+              {@failures_24h}
+            </span>
+            <.icon
+              :if={@failures_24h == 0}
+              name="hero-check-circle"
+              class="w-5 h-5 text-[#4CD964]"
+            />
+          </div>
+          <p class="text-xs text-[#8E8E93] mt-1">
+            FunSheep-domain drill-down for retryable / discarded jobs.
           </p>
         </.link>
 
