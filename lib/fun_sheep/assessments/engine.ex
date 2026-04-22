@@ -81,7 +81,11 @@ defmodule FunSheep.Assessments.Engine do
     topic = Enum.at(state.topics, state.current_topic_index)
 
     if topic == nil do
-      {:complete, %{state | status: :complete}}
+      if total_attempts(state) == 0 do
+        {:no_questions_available, %{state | status: :no_questions_available}}
+      else
+        {:complete, %{state | status: :complete}}
+      end
     else
       attempts = Map.get(state.topic_attempts, topic.id, [])
 
@@ -349,6 +353,13 @@ defmodule FunSheep.Assessments.Engine do
   defp score_to_label(s) when s < 0.33, do: :easy
   defp score_to_label(s) when s < 0.66, do: :medium
   defp score_to_label(_), do: :hard
+
+  defp total_attempts(state) do
+    state.topic_attempts
+    |> Map.values()
+    |> Enum.map(&length/1)
+    |> Enum.sum()
+  end
 
   defp topic_mastered?(attempts) do
     if length(attempts) < @min_questions_per_topic do

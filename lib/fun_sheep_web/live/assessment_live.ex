@@ -270,6 +270,15 @@ defmodule FunSheepWeb.AssessmentLive do
           summary: summary
         )
 
+      {:no_questions_available, new_state} ->
+        assign(socket,
+          engine_state: new_state,
+          current_question: nil,
+          assessment_complete: false,
+          no_questions_available: true,
+          summary: nil
+        )
+
       _other ->
         # generate_needed or other - treat as complete for now
         summary = Engine.summary(state)
@@ -298,8 +307,9 @@ defmodule FunSheepWeb.AssessmentLive do
     user_role_id = socket.assigns.current_user["user_role_id"]
     schedule_id = socket.assigns.schedule.id
     assessment_complete = Map.get(socket.assigns, :assessment_complete, false)
+    no_questions_available = Map.get(socket.assigns, :no_questions_available, false)
 
-    if assessment_complete do
+    if assessment_complete or no_questions_available do
       StateCache.delete(user_role_id, schedule_id)
     else
       StateCache.put(user_role_id, schedule_id, %{
@@ -353,6 +363,7 @@ defmodule FunSheepWeb.AssessmentLive do
     assigns =
       assigns
       |> Map.put_new(:assessment_complete, false)
+      |> Map.put_new(:no_questions_available, false)
       |> Map.put_new(:summary, nil)
 
     ~H"""
@@ -367,12 +378,14 @@ defmodule FunSheepWeb.AssessmentLive do
       <div :if={!@billing_blocked}>
         <div class="flex items-center justify-between mb-6">
           <div class="flex items-center gap-4">
-            <.link
-              navigate={~p"/courses/#{@course_id}/tests"}
-              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+            <button
+              type="button"
+              onclick="history.back()"
+              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors cursor-pointer"
+              aria-label="Go back"
             >
               <.icon name="hero-arrow-left" class="w-6 h-6" />
-            </.link>
+            </button>
             <div>
               <h1 class="text-2xl font-bold text-[#1C1C1E]">{@schedule.name}</h1>
               <p class="text-sm text-[#8E8E93]">{@schedule.course.name}</p>
@@ -396,17 +409,20 @@ defmodule FunSheepWeb.AssessmentLive do
             schedule={@schedule}
           />
         <% else %>
-          <%= if @assessment_complete do %>
-            <.render_summary summary={@summary} schedule={@schedule} />
-          <% else %>
-            <.render_question
-              question={@current_question}
-              selected_answer={@selected_answer}
-              feedback={@feedback}
-              question_number={@question_number}
-              engine_state={@engine_state}
-              question_stats={assigns[:current_question_stats]}
-            />
+          <%= cond do %>
+            <% @no_questions_available -> %>
+              <.render_no_questions schedule={@schedule} course_id={@course_id} />
+            <% @assessment_complete -> %>
+              <.render_summary summary={@summary} schedule={@schedule} />
+            <% true -> %>
+              <.render_question
+                question={@current_question}
+                selected_answer={@selected_answer}
+                feedback={@feedback}
+                question_number={@question_number}
+                engine_state={@engine_state}
+                question_stats={assigns[:current_question_stats]}
+              />
           <% end %>
         <% end %>
       </div>
@@ -503,6 +519,36 @@ defmodule FunSheepWeb.AssessmentLive do
         >
           Start Assessment
         </button>
+      </div>
+    </div>
+    """
+  end
+
+  attr :schedule, :map, required: true
+  attr :course_id, :string, required: true
+
+  defp render_no_questions(assigns) do
+    ~H"""
+    <div class="bg-white rounded-2xl shadow-md p-8 text-center">
+      <.icon name="hero-clock" class="w-16 h-16 text-[#4CD964] mx-auto mb-4" />
+      <h2 class="text-2xl font-bold text-[#1C1C1E]">Questions not ready yet</h2>
+      <p class="text-[#8E8E93] mt-3 max-w-md mx-auto">
+        We don't have questions for {@schedule.name} yet. We've queued generation from your
+        source material — please check back in a few minutes.
+      </p>
+      <div class="flex justify-center gap-3 mt-6">
+        <.link
+          navigate={~p"/courses/#{@course_id}"}
+          class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
+        >
+          Back to Course
+        </.link>
+        <.link
+          navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+        >
+          Try Again
+        </.link>
       </div>
     </div>
     """
