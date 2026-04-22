@@ -92,7 +92,10 @@ config :fun_sheep, Oban,
     ingest: 1,
     # External LMS sync (Google Classroom, Canvas, …). Mostly network-bound;
     # low concurrency avoids bursting on provider rate limits.
-    integrations: 3
+    integrations: 3,
+    # Parent notifications (weekly digest, opt-in alerts — spec §8). Swoosh
+    # is I/O-bound and the digest fan-out is roughly one job per family.
+    notifications: 2
   ]
 
 # Interactor integration (billing, auth, agents)

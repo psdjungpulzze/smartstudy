@@ -25,6 +25,12 @@ defmodule FunSheep.Accounts.UserRole do
     field :last_login_at, :utc_datetime
     field :timezone, :string
 
+    # Parent notification preferences (spec §8.1 / §8.2).
+    field :digest_frequency, Ecto.Enum, values: [:weekly, :off], default: :weekly
+    field :alerts_skipped_days, :boolean, default: false
+    field :alerts_readiness_drop, :boolean, default: false
+    field :alerts_goal_achieved, :boolean, default: true
+
     belongs_to :school, FunSheep.Geo.School
 
     has_many :student_guardians, FunSheep.Accounts.StudentGuardian, foreign_key: :guardian_id
@@ -53,7 +59,11 @@ defmodule FunSheep.Accounts.UserRole do
       :school_id,
       :suspended_at,
       :last_login_at,
-      :timezone
+      :timezone,
+      :digest_frequency,
+      :alerts_skipped_days,
+      :alerts_readiness_drop,
+      :alerts_goal_achieved
     ])
     |> validate_required([:interactor_user_id, :role, :email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/)

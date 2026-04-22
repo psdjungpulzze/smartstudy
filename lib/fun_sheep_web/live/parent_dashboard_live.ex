@@ -531,22 +531,25 @@ defmodule FunSheepWeb.ParentDashboardLive do
         </div>
       </div>
 
-      <%!-- ── Student Tabs (if multiple) ── --%>
-      <div :if={length(@students) > 1} class="flex gap-2 overflow-x-auto animate-slide-up">
-        <button
-          :for={student <- @students}
-          phx-click="select_student"
-          phx-value-id={student.id}
-          class={[
-            "px-4 py-2 rounded-full text-sm font-bold transition-colors shrink-0",
-            if(student.id == @selected_id,
-              do: "bg-[#4CD964] text-white shadow-md",
-              else: "bg-white text-gray-600 border border-gray-200 hover:border-[#4CD964]"
-            )
-          ]}
-        >
-          {student.name}
-        </button>
+      <%!-- ── Student Tabs + Household Overview (§8.3) ── --%>
+      <div :if={length(@students) >= 2} class="space-y-3 animate-slide-up">
+        <.household_overview students={@students} selected_id={@selected_id} />
+        <div class="flex gap-2 overflow-x-auto">
+          <button
+            :for={student <- @students}
+            phx-click="select_student"
+            phx-value-id={student.id}
+            class={[
+              "px-4 py-2 rounded-full text-sm font-bold transition-colors shrink-0",
+              if(student.id == @selected_id,
+                do: "bg-[#4CD964] text-white shadow-md",
+                else: "bg-white text-gray-600 border border-gray-200 hover:border-[#4CD964]"
+              )
+            ]}
+          >
+            {student.name}
+          </button>
+        </div>
       </div>
 
       <%!-- ── Student Cards ── --%>
@@ -716,6 +719,58 @@ defmodule FunSheepWeb.ParentDashboardLive do
       <%!-- ── Weekly Summary Bar ── --%>
       <.weekly_summary activity={@student.activity} />
     </div>
+    """
+  end
+
+  attr :students, :list, required: true
+  attr :selected_id, :any, required: true
+
+  defp household_overview(assigns) do
+    ~H"""
+    <section class="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5">
+      <div class="mb-3">
+        <h3 class="text-sm font-extrabold text-gray-900">
+          {gettext("Household")}
+        </h3>
+        <p class="text-xs text-gray-500">
+          {gettext("Quick view of everyone connected — click a card to drill in.")}
+        </p>
+      </div>
+      <ul class="grid grid-cols-1 sm:grid-cols-2 gap-3 list-none">
+        <li :for={student <- @students}>
+          <button
+            type="button"
+            phx-click="select_student"
+            phx-value-id={student.id}
+            class={[
+              "w-full text-left rounded-xl border p-3 transition-colors",
+              if(student.id == @selected_id,
+                do: "border-[#4CD964] bg-[#E8F8EB]",
+                else: "border-gray-100 hover:border-[#4CD964] bg-white"
+              )
+            ]}
+          >
+            <p class="text-sm font-extrabold text-gray-900 truncate">{student.name}</p>
+            <p class="text-[11px] text-gray-500 mt-0.5">
+              <span :if={student.grade}>{gettext("Grade")} {student.grade}  · </span>
+              {student.upcoming_count} {gettext("upcoming")}
+            </p>
+            <p class="text-xs text-gray-700 mt-2">
+              {gettext("Readiness")}:
+              <span class="font-bold">
+                {student.readiness_score || gettext("—")}
+                <span :if={student.readiness_score}>%</span>
+              </span>
+            </p>
+            <p class="text-xs text-gray-500">
+              {student.activity.sessions_this_week} {gettext("sessions / %{m} min this week",
+                m: student.activity.total_study_minutes_week
+              )}
+            </p>
+          </button>
+        </li>
+      </ul>
+    </section>
     """
   end
 

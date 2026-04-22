@@ -69,6 +69,7 @@ defmodule FunSheepWeb.Router do
       live "/practice", QuickPracticeLive, :index
       live "/profile/setup", ProfileSetupLive, :index
       live "/parent", ParentDashboardLive, :index
+      live "/parent/settings", ParentSettingsLive, :index
       live "/teacher", TeacherDashboardLive, :index
       live "/guardians", GuardianInviteLive, :index
 
@@ -195,6 +196,13 @@ defmodule FunSheepWeb.Router do
     pipe_through :browser
 
     live "/progress/:token", ProofCardLive, :show
+  end
+
+  # Public unsubscribe (signed token — no auth required, spec §8.4)
+  scope "/notifications", FunSheepWeb do
+    pipe_through :browser
+
+    get "/unsubscribe/:token", NotificationUnsubscribeController, :show
   end
 
   # Interactor webhook and tool callback routes (no auth required)
