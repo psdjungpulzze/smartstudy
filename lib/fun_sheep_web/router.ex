@@ -75,6 +75,8 @@ defmodule FunSheepWeb.Router do
       live "/subscription", SubscriptionLive, :index
       live "/leaderboard", LeaderboardLive, :index
 
+      live "/integrations", IntegrationsLive, :index
+
       live "/courses", CourseSearchLive, :index
       live "/courses/new", CourseNewLive, :new
       live "/courses/:id/edit", CourseNewLive, :edit
@@ -96,6 +98,16 @@ defmodule FunSheepWeb.Router do
       live "/courses/:course_id/study-guides", StudyGuidesListLive, :index
       live "/courses/:course_id/study-guides/:id", StudyGuideLive, :show
     end
+  end
+
+  # Integration controller routes (OAuth redirect + callback + disconnect)
+  scope "/integrations", FunSheepWeb do
+    pipe_through [:browser, FunSheepWeb.Plugs.DevAuth]
+
+    get "/connect/:provider", IntegrationController, :connect
+    get "/callback", IntegrationController, :callback
+    post "/:id/sync", IntegrationController, :sync_now
+    delete "/:id", IntegrationController, :disconnect
   end
 
   # File upload endpoint (direct HTTP, not LiveView)

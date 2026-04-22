@@ -34,7 +34,9 @@ defmodule FunSheepWeb.CourseDetailLiveTest do
       assert html =~ "Test Algebra"
       assert html =~ "Mathematics"
       assert html =~ "Grade 10"
-      assert html =~ "Chapters"
+      # Chapter management is behind a toggle; the "Question Bank" action link
+      # is always visible, so use that to confirm the detail shell rendered.
+      assert html =~ "Question Bank"
     end
 
     test "shows chapters", %{conn: conn} do
@@ -73,11 +75,12 @@ defmodule FunSheepWeb.CourseDetailLiveTest do
       conn = auth_conn(conn)
       {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}")
 
-      # Expand chapter and show add section form
+      # Chapter management panel is collapsed by default; open it first so the
+      # section markup is actually rendered for the assertion.
+      render_click(view, "toggle_chapters")
       render_click(view, "toggle_chapter", %{id: chapter.id})
       render_click(view, "show_add_section", %{"chapter-id" => chapter.id})
 
-      # Submit the section form
       html = render_submit(view, "save_section", %{section: %{name: "New Section"}})
 
       assert html =~ "New Section"

@@ -77,7 +77,10 @@ config :fun_sheep, Oban,
     # (NCES CCD ~130K rows, IPEDS ~6K, NEIS ~12K, GIAS ~32K, ROR ~100K).
     # Low concurrency: one job at a time keeps the DB write throughput
     # sane and avoids hammering upstream servers.
-    ingest: 1
+    ingest: 1,
+    # External LMS sync (Google Classroom, Canvas, …). Mostly network-bound;
+    # low concurrency avoids bursting on provider rate limits.
+    integrations: 3
   ]
 
 # Interactor integration (billing, auth, agents)
@@ -85,6 +88,7 @@ config :fun_sheep,
   interactor_mock: false,
   interactor_core_url: "https://core.interactor.com",
   interactor_billing_url: "https://billing.interactor.com",
+  interactor_skb_url: "https://skb.interactor.com",
   stripe_publishable_key: "mock"
 
 # Import environment specific config. This must remain at the bottom

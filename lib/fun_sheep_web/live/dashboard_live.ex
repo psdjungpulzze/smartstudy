@@ -5,14 +5,14 @@ defmodule FunSheepWeb.DashboardLive do
 
   import FunSheepWeb.ShareButton
 
-  alias FunSheep.{Courses, Assessments, Gamification}
+  alias FunSheep.{Courses, Assessments, Gamification, Integrations}
   alias FunSheep.Engagement.{SpacedRepetition, StudySessions}
 
   @impl true
   def mount(_params, _session, socket) do
     user_role_id = socket.assigns.current_user["id"]
 
-    {upcoming_tests, gamification, course_count, review_stats, daily_summary} =
+    {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations} =
       case Ecto.UUID.cast(user_role_id) do
         {:ok, _uuid} ->
           tests = Assessments.list_upcoming_schedules(user_role_id, 90)
@@ -28,10 +28,11 @@ defmodule FunSheepWeb.DashboardLive do
           count = length(Courses.list_courses_for_user(user_role_id))
           review = SpacedRepetition.review_stats(user_role_id)
           daily = StudySessions.daily_summary(user_role_id)
-          {tests_with_readiness, gam, count, review, daily}
+          int = Integrations.list_for_user(user_role_id)
+          {tests_with_readiness, gam, count, review, daily, int}
 
         :error ->
-          {[], default_gamification(), 0, default_review_stats(), default_daily_summary()}
+          {[], default_gamification(), 0, default_review_stats(), default_daily_summary(), []}
       end
 
     # Most urgent test = first (already sorted by date ascending)
@@ -47,7 +48,8 @@ defmodule FunSheepWeb.DashboardLive do
         gamification: gamification,
         course_count: course_count,
         review_stats: review_stats,
-        daily_summary: daily_summary
+        daily_summary: daily_summary,
+        integrations: integrations
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "dashboard",
@@ -141,6 +143,11 @@ defmodule FunSheepWeb.DashboardLive do
       <%!-- ── Skill Breakdown (per-skill status) ── --%>
       <div :if={@primary_test} class="animate-slide-up">
         <.skill_breakdown test={@primary_test} />
+      </div>
+
+      <%!-- ── Connected apps ── --%>
+      <div class="animate-slide-up">
+        <.connected_apps_card integrations={@integrations} />
       </div>
 
       <%!-- ── Other Upcoming Tests ── --%>
@@ -475,6 +482,58 @@ defmodule FunSheepWeb.DashboardLive do
         <p class={["text-sm font-extrabold", readiness_pct_color(@readiness_pct)]}>
           {@readiness_pct}%
         </p>
+      </div>
+    </.link>
+    """
+  end
+
+  # ── Connected apps ───────────────────────────────────────────────────────
+
+  defp connected_apps_card(%{integrations: []} = assigns) do
+    ~H"""
+    <.link
+      navigate={~p"/integrations"}
+      class="block bg-white rounded-2xl border border-gray-100 p-5 hover:border-[#4CD964] transition-colors"
+    >
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-[#E8F8EB] flex items-center justify-center text-xl">
+          🔗
+        </div>
+        <div class="flex-1">
+          <h3 class="font-semibold text-gray-900 text-sm">
+            Connect your school app
+          </h3>
+          <p class="text-gray-500 text-xs">
+            Auto-import courses &amp; tests from Google Classroom or Canvas.
+          </p>
+        </div>
+        <span class="text-[#4CD964] text-xs font-medium">Connect →</span>
+      </div>
+    </.link>
+    """
+  end
+
+  defp connected_apps_card(assigns) do
+    assigns = assign(assigns, :active, Enum.count(assigns.integrations, &(&1.status == :active)))
+
+    ~H"""
+    <.link
+      navigate={~p"/integrations"}
+      class="block bg-white rounded-2xl border border-gray-100 p-5 hover:border-[#4CD964] transition-colors"
+    >
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-[#E8F8EB] flex items-center justify-center text-xl">
+          🔗
+        </div>
+        <div class="flex-1">
+          <h3 class="font-semibold text-gray-900 text-sm">
+            Connected apps
+          </h3>
+          <p class="text-gray-500 text-xs">
+            {@active} of {length(@integrations)} connected. Tap to manage.
+          </p>
+        </div>
+        <span class="text-[#4CD964] text-xs font-medium">Manage →</span>
       </div>
     </.link>
     """
