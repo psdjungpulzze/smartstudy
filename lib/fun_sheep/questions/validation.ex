@@ -79,6 +79,7 @@ defmodule FunSheep.Questions.Validation do
     _ = ensure_assistant()
 
     case Agents.chat(@assistant_name, prompt, %{
+           source: "questions_validation_context",
            metadata: %{course_id: course.id, kind: "question_validation"}
          }) do
       {:ok, response} ->

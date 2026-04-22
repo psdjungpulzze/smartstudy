@@ -93,7 +93,10 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
       course = if material.course_id, do: Courses.get_course!(material.course_id), else: nil
       prompt = build_prompt(material, course, text)
 
-      case Agents.chat(@assistant_name, prompt, %{metadata: %{material_id: material.id}}) do
+      case Agents.chat(@assistant_name, prompt, %{
+             source: "textbook_completeness_worker",
+             metadata: %{material_id: material.id}
+           }) do
         {:ok, response} ->
           persist_result(material, response)
 

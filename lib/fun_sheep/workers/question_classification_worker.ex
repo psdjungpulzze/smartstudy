@@ -81,6 +81,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     _ = ensure_assistant()
 
     case Agents.chat(@assistant_name, prompt, %{
+           source: "question_classification_worker",
            metadata: %{question_id: question.id, chapter_id: question.chapter_id}
          }) do
       {:ok, response} ->

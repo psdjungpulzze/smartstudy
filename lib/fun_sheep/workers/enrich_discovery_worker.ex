@@ -270,11 +270,12 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     """
 
     case Agents.chat("course_discovery", prompt, %{
+           source: "enrich_discovery_worker",
            metadata: %{
              course_id: course.id,
              subject: subject,
              grade: grade,
-             source: "textbook_ocr"
+             origin: "textbook_ocr"
            }
          }) do
       {:ok, response} ->
