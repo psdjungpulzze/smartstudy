@@ -66,3 +66,8 @@ config :fun_sheep, dev_routes: true
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Feature flags — disable cache and cluster notifications in tests so every
+# sandboxed DB write is immediately visible and teardown is clean.
+config :fun_with_flags, :cache, enabled: false
+config :fun_with_flags, :cache_bust_notifications, enabled: false
