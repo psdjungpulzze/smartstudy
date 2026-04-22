@@ -635,6 +635,8 @@ defmodule FunSheep.Courses do
 
   def get_chapter!(id), do: Repo.get!(Chapter, id)
 
+  def get_chapter(id), do: Repo.get(Chapter, id)
+
   def create_chapter(attrs \\ %{}) do
     %Chapter{}
     |> Chapter.changeset(attrs)
@@ -706,6 +708,8 @@ defmodule FunSheep.Courses do
   end
 
   def get_section!(id), do: Repo.get!(Section, id)
+
+  def get_section(id), do: Repo.get(Section, id)
 
   def create_section(attrs \\ %{}) do
     %Section{}

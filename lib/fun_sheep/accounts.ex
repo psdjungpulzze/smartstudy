@@ -79,6 +79,27 @@ defmodule FunSheep.Accounts do
 
   ## Student Guardians
 
+  @doc """
+  Returns true when the given guardian user_role is linked to the student
+  user_role via an `:active` student_guardians row.
+
+  This is the centralised authorization check for parent-facing data-fetching
+  functions (spec §9.1). Call it at the edge of every context function that
+  takes a `student_id` in a parent flow. Do not trust the LiveView.
+  """
+  def guardian_has_access?(guardian_id, student_id)
+      when is_binary(guardian_id) and is_binary(student_id) do
+    Repo.exists?(
+      from sg in StudentGuardian,
+        where:
+          sg.guardian_id == ^guardian_id and
+            sg.student_id == ^student_id and
+            sg.status == :active
+    )
+  end
+
+  def guardian_has_access?(_, _), do: false
+
   def list_student_guardians do
     Repo.all(StudentGuardian)
   end

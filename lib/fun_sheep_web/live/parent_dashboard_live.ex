@@ -3,9 +3,18 @@ defmodule FunSheepWeb.ParentDashboardLive do
 
   import FunSheepWeb.SheepMascot
 
-  alias FunSheep.{Accounts, Assessments, Gamification}
-  alias FunSheep.Engagement.StudySessions
-  alias FunSheep.Courses
+  alias FunSheep.{Accounts, Assessments, Courses, Gamification}
+  alias FunSheep.Engagement.{StudySessions, Wellbeing}
+
+  alias FunSheepWeb.StudentLive.Shared.{
+    ActivityTimeline,
+    StudyHeatmap,
+    TopicMasteryMap,
+    WellbeingFraming
+  }
+
+  @activity_window_days 30
+  @heatmap_weeks 4
 
   @impl true
   def mount(_params, _session, socket) do
@@ -18,7 +27,12 @@ defmodule FunSheepWeb.ParentDashboardLive do
 
         ur ->
           links = Accounts.list_students_for_guardian(ur.id)
-          enriched = Enum.map(links, fn sg -> enrich_student(sg.student) end)
+
+          enriched =
+            links
+            |> Enum.map(fn sg -> enrich_student(sg.student, guardian_id: ur.id) end)
+            |> Enum.reject(&is_nil/1)
+
           {enriched, ur}
       end
 
@@ -35,7 +49,8 @@ defmodule FunSheepWeb.ParentDashboardLive do
         user_role: user_role,
         students: students,
         selected_id: selected_id,
-        shared_student_id: nil
+        shared_student_id: nil,
+        drill: nil
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "parent_dashboard",
@@ -65,7 +80,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
 
   @impl true
   def handle_event("select_student", %{"id" => id}, socket) do
-    {:noreply, assign(socket, selected_id: id)}
+    {:noreply, assign(socket, selected_id: id, drill: nil)}
   end
 
   @impl true
@@ -73,57 +88,122 @@ defmodule FunSheepWeb.ParentDashboardLive do
     {:noreply, assign(socket, shared_student_id: student_id)}
   end
 
+  @impl true
+  def handle_event("topic_drill", %{"section-id" => section_id}, socket) do
+    guardian_id = socket.assigns.user_role && socket.assigns.user_role.id
+    student_id = socket.assigns.selected_id
+
+    cond do
+      guardian_id == nil or student_id == nil ->
+        {:noreply, socket}
+
+      not Accounts.guardian_has_access?(guardian_id, student_id) ->
+        {:noreply, socket}
+
+      true ->
+        section = Courses.get_section(section_id)
+        chapter = section && Courses.get_chapter(section.chapter_id)
+        attempts = Assessments.recent_attempts_for_topic(student_id, section_id, 10)
+        trend = Assessments.topic_accuracy_trend(student_id, section_id, 30)
+
+        drill = %{
+          section_id: section_id,
+          topic_name: section && section.name,
+          chapter_name: chapter && chapter.name,
+          attempts: attempts,
+          trend: trend
+        }
+
+        {:noreply, assign(socket, drill: drill)}
+    end
+  end
+
+  @impl true
+  def handle_event("close_topic_drill", _params, socket) do
+    {:noreply, assign(socket, drill: nil)}
+  end
+
+  @impl true
+  def handle_event("assign_topic_practice", _params, socket) do
+    # Wired up in Phase 3 (§7.2 practice_assignments).
+    {:noreply, socket}
+  end
+
   # ── Data Loading ──────────────────────────────────────────────────────────
 
-  defp enrich_student(student) do
+  defp enrich_student(student, opts) do
     student_id = student.id
+    guardian_id = Keyword.fetch!(opts, :guardian_id)
 
-    # Upcoming tests + readiness
-    upcoming = Assessments.list_upcoming_schedules(student_id, 90)
-    primary_test = List.first(upcoming)
+    # Spec §9.1 authorization guard: never expose data unless access is active.
+    if Accounts.guardian_has_access?(guardian_id, student_id) do
+      tz = student.timezone || "Etc/UTC"
 
-    {readiness_score, readiness_trend, percentile, test_name, course_name, weakest_area,
-     previous_score} =
-      if primary_test do
-        readiness = Assessments.latest_readiness(student_id, primary_test.id)
-        trend = Assessments.readiness_trend(student_id, primary_test.id)
-        pctile = Assessments.readiness_percentile(student_id, primary_test.id)
+      # Upcoming tests + readiness
+      upcoming = Assessments.list_upcoming_schedules(student_id, 90)
+      primary_test = List.first(upcoming)
 
-        score = if readiness, do: round(readiness.aggregate_score), else: nil
+      {readiness_score, readiness_trend, percentile, test_name, course_name, weakest_area,
+       previous_score, topic_grid, test_schedule_id} = readiness_block(student_id, primary_test)
 
-        # Find weakest chapter from readiness breakdown
-        weak = weakest_chapter(readiness, primary_test)
+      # Activity summary (existing v1)
+      activity = StudySessions.parent_activity_summary(student_id)
 
-        # Get previous score for proof card comparison
-        prev = previous_readiness_score(trend)
+      # Gamification (existing v1)
+      gam = Gamification.dashboard_summary(student_id)
 
-        {score, trend, pctile, primary_test.name,
-         if(primary_test.course, do: primary_test.course.name, else: "Test Prep"), weak, prev}
-      else
-        {nil, %{direction: :none, change: 0, scores: []}, nil, nil, nil, nil, nil}
-      end
+      # Phase 1 additions
+      timeline_sessions =
+        StudySessions.list_for_student_in_window(student_id, @activity_window_days)
 
-    # Activity summary
-    activity = StudySessions.parent_activity_summary(student_id)
+      heatmap_grid = StudySessions.study_heatmap(student_id, @heatmap_weeks, tz)
+      wellbeing = Wellbeing.classify(student_id)
 
-    # Gamification
-    gam = Gamification.dashboard_summary(student_id)
+      %{
+        id: student_id,
+        name: student.display_name || student.email,
+        grade: student.grade,
+        timezone: tz,
+        readiness_score: readiness_score,
+        readiness_trend: readiness_trend,
+        percentile: percentile,
+        test_name: test_name,
+        course_name: course_name,
+        previous_score: previous_score,
+        weakest_area: weakest_area,
+        activity: activity,
+        gamification: gam,
+        upcoming_count: length(upcoming),
+        # Phase 1
+        test_schedule_id: test_schedule_id,
+        timeline_sessions: timeline_sessions,
+        heatmap_grid: heatmap_grid,
+        topic_grid: topic_grid,
+        wellbeing: wellbeing
+      }
+    else
+      # Defensive: if an in-flight revoke happens between list + enrich, bail.
+      nil
+    end
+  end
 
-    %{
-      id: student_id,
-      name: student.display_name || student.email,
-      grade: student.grade,
-      readiness_score: readiness_score,
-      readiness_trend: readiness_trend,
-      percentile: percentile,
-      test_name: test_name,
-      course_name: course_name,
-      previous_score: previous_score,
-      weakest_area: weakest_area,
-      activity: activity,
-      gamification: gam,
-      upcoming_count: length(upcoming)
-    }
+  defp readiness_block(_student_id, nil) do
+    {nil, %{direction: :none, change: 0, scores: []}, nil, nil, nil, nil, nil, [], nil}
+  end
+
+  defp readiness_block(student_id, primary_test) do
+    readiness = Assessments.latest_readiness(student_id, primary_test.id)
+    trend = Assessments.readiness_trend(student_id, primary_test.id)
+    pctile = Assessments.readiness_percentile(student_id, primary_test.id)
+
+    score = if readiness, do: round(readiness.aggregate_score), else: nil
+    weak = weakest_chapter(readiness, primary_test)
+    prev = previous_readiness_score(trend)
+    topic_grid = Assessments.topic_mastery_map(student_id, primary_test.id)
+
+    {score, trend, pctile, primary_test.name,
+     if(primary_test.course, do: primary_test.course.name, else: "Test Prep"), weak, prev,
+     topic_grid, primary_test.id}
   end
 
   defp weakest_chapter(nil, _schedule), do: nil
@@ -151,7 +231,6 @@ defmodule FunSheepWeb.ParentDashboardLive do
   end
 
   defp previous_readiness_score(%{scores: scores}) when length(scores) >= 2 do
-    # Second-to-last score is the "before"
     scores
     |> Enum.reverse()
     |> Enum.at(1)
@@ -175,7 +254,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
           {greeting()}, {@current_user["display_name"]}
         </h1>
         <p class="text-gray-500 text-sm mt-0.5">
-          Here's how your children are doing
+          {gettext("Here's how your children are doing")}
         </p>
       </div>
 
@@ -191,13 +270,13 @@ defmodule FunSheepWeb.ParentDashboardLive do
             </div>
             <div class="flex-1">
               <h3 class="font-semibold text-gray-900 text-sm">
-                School apps
+                {gettext("School apps")}
               </h3>
               <p class="text-gray-500 text-xs">
-                Auto-import your child's courses and tests.
+                {gettext("Auto-import your child's courses and tests.")}
               </p>
             </div>
-            <span class="text-[#4CD964] text-xs font-medium">Manage →</span>
+            <span class="text-[#4CD964] text-xs font-medium">{gettext("Manage")} →</span>
           </div>
         </.link>
       </div>
@@ -209,20 +288,21 @@ defmodule FunSheepWeb.ParentDashboardLive do
             state={:encouraging}
             size="xl"
             wool_level={0}
-            message="Invite your child to connect their account!"
+            message={gettext("Invite your child to connect their account!")}
           />
           <h3 class="font-extrabold text-gray-900 text-lg mt-4">
-            No students linked yet
+            {gettext("No students linked yet")}
           </h3>
           <p class="text-gray-500 text-sm mt-1 mb-5 max-w-sm mx-auto">
-            Connect your child's Fun Sheep account to see their study progress
-            and celebrate their achievements together.
+            {gettext(
+              "Connect your child's Fun Sheep account to see their study progress and celebrate their achievements together."
+            )}
           </p>
           <.link
             navigate={~p"/guardians"}
             class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-bold px-6 py-3 sm:py-2.5 rounded-full shadow-md text-sm transition-colors touch-target inline-flex items-center justify-center"
           >
-            Connect a Student
+            {gettext("Connect a Student")}
           </.link>
         </div>
       </div>
@@ -254,6 +334,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
           <.student_card
             student={student}
             shared={@shared_student_id == student.id}
+            drill={@drill}
           />
         </div>
       </div>
@@ -264,6 +345,14 @@ defmodule FunSheepWeb.ParentDashboardLive do
   # ── Student Card ──────────────────────────────────────────────────────────
 
   defp student_card(assigns) do
+    signal = assigns.student.wellbeing.signal
+    dampen? = WellbeingFraming.dampen_competitive?(signal)
+
+    assigns =
+      assigns
+      |> assign(:wellbeing_signal, signal)
+      |> assign(:dampen?, dampen?)
+
     ~H"""
     <div class="space-y-3">
       <%!-- ── Student Header ── --%>
@@ -289,15 +378,20 @@ defmodule FunSheepWeb.ParentDashboardLive do
                 </span>
               </div>
               <p :if={@student.grade} class="text-xs text-gray-400">
-                Grade {@student.grade}
+                {gettext("Grade")} {@student.grade}
               </p>
             </div>
           </div>
           <div class="text-right shrink-0">
-            <p class="text-xs text-gray-400">{@student.upcoming_count} upcoming tests</p>
+            <p class="text-xs text-gray-400">
+              {@student.upcoming_count} {gettext("upcoming tests")}
+            </p>
           </div>
         </div>
       </div>
+
+      <%!-- ── Wellbeing Framing Banner (§5.4) ── --%>
+      <WellbeingFraming.framing_banner signal={@wellbeing_signal} student_name={@student.name} />
 
       <%!-- ── 4 Key Metrics (2x2 grid) ── --%>
       <div class="grid grid-cols-2 gap-3">
@@ -309,6 +403,34 @@ defmodule FunSheepWeb.ParentDashboardLive do
         <.activity_metric activity={@student.activity} />
         <.focus_metric weakest_area={@student.weakest_area} />
       </div>
+
+      <%!-- ── Percentile card (dampened when wellbeing says so) ── --%>
+      <.percentile_card
+        :if={!@dampen? and @student.percentile}
+        percentile={@student.percentile}
+      />
+
+      <%!-- ── Activity Timeline (§5.1) ── --%>
+      <ActivityTimeline.timeline
+        sessions={@student.timeline_sessions}
+        student_name={@student.name}
+      />
+
+      <%!-- ── Study Heatmap (§5.2) ── --%>
+      <StudyHeatmap.heatmap grid={@student.heatmap_grid} />
+
+      <%!-- ── Topic Mastery Map (§5.3) ── --%>
+      <TopicMasteryMap.mastery_map grid={@student.topic_grid} test_name={@student.test_name} />
+
+      <%!-- ── Drill-down Modal ── --%>
+      <TopicMasteryMap.drill_modal
+        :if={@drill}
+        topic_name={@drill.topic_name || gettext("Topic")}
+        chapter_name={@drill.chapter_name}
+        attempts={@drill.attempts}
+        trend={@drill.trend}
+        assign_enabled?={false}
+      />
 
       <%!-- ── Proof Card (shareable progress) ── --%>
       <.proof_card_section
@@ -323,13 +445,34 @@ defmodule FunSheepWeb.ParentDashboardLive do
     """
   end
 
+  attr :percentile, :any, required: true
+
+  defp percentile_card(assigns) do
+    pct = percentile_value(assigns.percentile)
+    assigns = assign(assigns, :pct, pct)
+
+    ~H"""
+    <div class="bg-white rounded-2xl border border-gray-100 p-4">
+      <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+        {gettext("Cohort standing")}
+      </p>
+      <p :if={@pct} class="text-sm text-gray-700">
+        {gettext("Top")} {100 - @pct}{gettext("% of same-grade FunSheep students")}
+      </p>
+      <p :if={!@pct} class="text-sm text-gray-500">
+        {gettext("Not enough cohort data yet.")}
+      </p>
+    </div>
+    """
+  end
+
   # ── Readiness Metric ──────────────────────────────────────────────────────
 
   defp readiness_metric(assigns) do
     ~H"""
     <div class="bg-white rounded-2xl border border-gray-100 p-4">
       <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-        Readiness
+        {gettext("Readiness")}
       </p>
       <div :if={@score} class="flex items-baseline gap-1">
         <span class={["text-3xl font-extrabold", readiness_text_color(@score)]}>
@@ -338,7 +481,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
         <span class={["text-sm font-bold", readiness_text_color(@score)]}>%</span>
       </div>
       <p :if={!@score} class="text-lg font-bold text-gray-300 mt-1">
-        No data yet
+        {gettext("No data yet")}
       </p>
       <p :if={@test_name} class="text-[10px] text-gray-400 mt-1 truncate">
         {@test_name}
@@ -353,7 +496,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
     ~H"""
     <div class="bg-white rounded-2xl border border-gray-100 p-4">
       <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-        Trend
+        {gettext("Trend")}
       </p>
       <div class="flex items-center gap-1.5">
         <span class={["text-2xl", trend_arrow_color(@trend.direction)]}>
@@ -372,7 +515,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
           --
         </span>
       </div>
-      <p class="text-[10px] text-gray-400 mt-1">last 2 weeks</p>
+      <p class="text-[10px] text-gray-400 mt-1">{gettext("last 2 weeks")}</p>
     </div>
     """
   end
@@ -383,16 +526,16 @@ defmodule FunSheepWeb.ParentDashboardLive do
     ~H"""
     <div class="bg-white rounded-2xl border border-gray-100 p-4">
       <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-        Activity
+        {gettext("Activity")}
       </p>
       <div class="flex items-baseline gap-1">
         <span class={["text-2xl font-extrabold", activity_color(@activity.sessions_today)]}>
           {@activity.sessions_today}
         </span>
-        <span class="text-xs text-gray-500">sessions today</span>
+        <span class="text-xs text-gray-500">{gettext("sessions today")}</span>
       </div>
       <p class="text-[10px] text-gray-400 mt-1">
-        {@activity.total_study_minutes_today} min studied
+        {@activity.total_study_minutes_today} {gettext("min studied")}
       </p>
     </div>
     """
@@ -404,15 +547,15 @@ defmodule FunSheepWeb.ParentDashboardLive do
     ~H"""
     <div class="bg-white rounded-2xl border border-gray-100 p-4">
       <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-        Next Action
+        {gettext("Next Action")}
       </p>
       <div :if={@weakest_area} class="mt-1">
         <span class="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full">
-          Focus: {@weakest_area}
+          {gettext("Focus:")} {@weakest_area}
         </span>
       </div>
       <p :if={!@weakest_area} class="text-sm font-bold text-gray-300 mt-1">
-        Keep it up!
+        {gettext("Keep it up!")}
       </p>
     </div>
     """
@@ -429,7 +572,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
       <div class="flex items-center gap-2 mb-3">
         <span class="text-lg">🏆</span>
         <p class="text-xs font-bold text-white/80 uppercase tracking-wider">
-          Progress Achievement
+          {gettext("Progress Achievement")}
         </p>
       </div>
 
@@ -439,12 +582,12 @@ defmodule FunSheepWeb.ParentDashboardLive do
         <div class="flex items-center gap-3 mt-2">
           <div class="text-center">
             <p class="text-2xl font-extrabold">{@student.previous_score}%</p>
-            <p class="text-[10px] text-white/60">before</p>
+            <p class="text-[10px] text-white/60">{gettext("before")}</p>
           </div>
           <span class="text-xl text-white/80">→</span>
           <div class="text-center">
             <p class="text-2xl font-extrabold">{@student.readiness_score}%</p>
-            <p class="text-[10px] text-white/60">now</p>
+            <p class="text-[10px] text-white/60">{gettext("now")}</p>
           </div>
           <div class="ml-auto text-right">
             <p class="text-xl font-extrabold text-yellow-200">
@@ -452,14 +595,16 @@ defmodule FunSheepWeb.ParentDashboardLive do
             </p>
           </div>
         </div>
-        <p :if={@student.percentile} class="text-xs text-white/70 mt-2">
-          Top {100 - @student.percentile}% of students
+        <p :if={percentile_value(@student.percentile)} class="text-xs text-white/70 mt-2">
+          {gettext("Top")} {100 - percentile_value(@student.percentile)}{gettext("% of students")}
         </p>
       </div>
 
       <div class="mt-3 flex items-center justify-between">
         <p class="text-xs text-white/70">
-          {if @shared, do: "Shared! Screenshot to save.", else: "Your child is making great progress!"}
+          {if @shared,
+            do: gettext("Shared! Screenshot to save."),
+            else: gettext("Your child is making great progress!")}
         </p>
         <button
           :if={!@shared}
@@ -467,13 +612,13 @@ defmodule FunSheepWeb.ParentDashboardLive do
           phx-value-id={@student.id}
           class="bg-white text-[#4CD964] text-xs font-bold px-4 py-2 rounded-full shadow-md hover:bg-green-50 transition-colors"
         >
-          Share Progress
+          {gettext("Share Progress")}
         </button>
         <span
           :if={@shared}
           class="bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-full"
         >
-          ✓ Shared
+          ✓ {gettext("Shared")}
         </span>
       </div>
     </div>
@@ -486,14 +631,14 @@ defmodule FunSheepWeb.ParentDashboardLive do
     ~H"""
     <div class="bg-white rounded-2xl border border-gray-100 p-4">
       <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-        This Week
+        {gettext("This Week")}
       </p>
       <div class="grid grid-cols-3 gap-3 text-center">
         <div>
           <p class="text-lg sm:text-xl font-extrabold text-gray-900">
             {@activity.total_study_minutes_week}
           </p>
-          <p class="text-[10px] text-gray-400">minutes</p>
+          <p class="text-[10px] text-gray-400">{gettext("minutes")}</p>
         </div>
         <div>
           <p class={[
@@ -502,13 +647,13 @@ defmodule FunSheepWeb.ParentDashboardLive do
           ]}>
             {format_accuracy(@activity.average_accuracy)}%
           </p>
-          <p class="text-[10px] text-gray-400">accuracy</p>
+          <p class="text-[10px] text-gray-400">{gettext("accuracy")}</p>
         </div>
         <div>
           <p class="text-lg sm:text-xl font-extrabold text-gray-900">
             {@activity.sessions_this_week}
           </p>
-          <p class="text-[10px] text-gray-400">sessions</p>
+          <p class="text-[10px] text-gray-400">{gettext("sessions")}</p>
         </div>
       </div>
     </div>
@@ -521,9 +666,9 @@ defmodule FunSheepWeb.ParentDashboardLive do
     hour = DateTime.utc_now().hour
 
     cond do
-      hour < 12 -> "Good morning"
-      hour < 17 -> "Good afternoon"
-      true -> "Good evening"
+      hour < 12 -> gettext("Good morning")
+      hour < 17 -> gettext("Good afternoon")
+      true -> gettext("Good evening")
     end
   end
 
@@ -560,4 +705,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
     prev = student.previous_score
     score != nil and prev != nil and score - prev >= 5
   end
+
+  defp percentile_value(%{percentile: p}) when is_number(p), do: p
+  defp percentile_value(_), do: nil
 end
