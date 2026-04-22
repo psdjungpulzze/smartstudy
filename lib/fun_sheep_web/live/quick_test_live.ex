@@ -1096,5 +1096,4 @@ defmodule FunSheepWeb.QuickTestLive do
     </div>
     """
   end
-
 end

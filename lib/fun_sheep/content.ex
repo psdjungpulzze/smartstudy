@@ -372,7 +372,6 @@ defmodule FunSheep.Content do
     |> Repo.all()
   end
 
-
   @doc """
   Video-type sources linked to a specific section (skill). Used by the
   practice UI on wrong-answer / "I don't know" events — North Star I-14.

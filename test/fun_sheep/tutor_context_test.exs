@@ -61,7 +61,9 @@ defmodule FunSheep.TutorContextTest do
 
   test "build_context includes student's hobbies as a flat list", ctx do
     {:ok, hobby} = Learning.create_hobby(%{name: "KPOP", category: "music"})
-    {:ok, _} = Learning.create_student_hobby(%{user_role_id: ctx.user_role.id, hobby_id: hobby.id})
+
+    {:ok, _} =
+      Learning.create_student_hobby(%{user_role_id: ctx.user_role.id, hobby_id: hobby.id})
 
     context = Tutor.build_context(ctx.current_q, ctx.course, ctx.user_role.id)
     assert "KPOP" in context.student.hobbies
