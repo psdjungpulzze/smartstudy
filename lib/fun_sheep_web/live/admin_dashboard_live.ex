@@ -4,6 +4,8 @@ defmodule FunSheepWeb.AdminDashboardLive do
   """
   use FunSheepWeb, :live_view
 
+  import FunSheepWeb.Components.AdminSidebar
+
   alias FunSheep.{Accounts, Admin, AIUsage, FeatureFlags, Questions, Repo}
   alias FunSheep.Admin.Jobs
   alias FunSheep.AIUsage.Pricing
@@ -56,13 +58,15 @@ defmodule FunSheepWeb.AdminDashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="p-6 max-w-7xl mx-auto">
-      <div class="mb-8">
-        <h1 class="text-2xl font-bold text-[#1C1C1E]">Admin</h1>
-        <p class="text-[#8E8E93] text-sm mt-1">
-          Welcome back, {@current_user["display_name"]}.
-        </p>
-      </div>
+    <div class="flex min-h-screen">
+      <.admin_sidebar current_path={assigns[:current_path]} />
+      <div class="flex-1 p-6 max-w-7xl mx-auto">
+        <div class="mb-8">
+          <h1 class="text-2xl font-bold text-[#1C1C1E]">Admin</h1>
+          <p class="text-[#8E8E93] text-sm mt-1">
+            Welcome back, {@current_user["display_name"]}.
+          </p>
+        </div>
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <.stat_card label="Total users" value={@total_users} />
@@ -262,6 +266,7 @@ defmodule FunSheepWeb.AdminDashboardLive do
         <p :if={@recent_audit == []} class="text-sm text-[#8E8E93] text-center py-6">
           No admin actions recorded yet.
         </p>
+      </div>
       </div>
     </div>
     """
