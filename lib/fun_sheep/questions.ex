@@ -730,6 +730,22 @@ defmodule FunSheep.Questions do
   @doc """
   Counts attempts for a user across multiple chapters in a single query.
   """
+
+  @doc """
+  Returns all attempts a user has made on questions in the given section,
+  chronologically ordered, with the question preloaded so mastery checks
+  can read the authored difficulty enum.
+  """
+  def list_section_attempts(user_role_id, section_id) do
+    from(qa in QuestionAttempt,
+      join: q in assoc(qa, :question),
+      where: qa.user_role_id == ^user_role_id and q.section_id == ^section_id,
+      order_by: [asc: qa.inserted_at],
+      preload: [question: q]
+    )
+    |> Repo.all()
+  end
+
   def count_attempts_in_chapters(_user_role_id, []), do: 0
 
   def count_attempts_in_chapters(user_role_id, chapter_ids) when is_list(chapter_ids) do
