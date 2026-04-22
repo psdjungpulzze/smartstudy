@@ -63,10 +63,13 @@ defmodule FunSheep.Tutor do
   Use this context to tailor your explanations.
   """
 
+  @behaviour FunSheep.Interactor.AssistantSpec
+
   @doc """
   Returns the assistant configuration for the tutor.
   The assistant is created on first use and the ID is cached in the application env.
   """
+  @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
     %{
       name: @assistant_name,

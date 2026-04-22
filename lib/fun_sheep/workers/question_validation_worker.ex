@@ -190,6 +190,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
     with {:ok, text} <-
            Agents.chat("question_gen", prompt, %{
+             source: "question_validation_worker",
              metadata: %{question_id: q.id, kind: "correction"}
            }),
          {:ok, parsed} <- parse_correction(text) do
