@@ -507,16 +507,6 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
-  Lists questions for a quick test session. Prioritizes: wrong answers > unseen > previously correct.
-  Optionally filters by course. Shuffles and limits results.
-
-  Questions attempted in the user's most recent window are excluded so the
-  user does not see the same card across consecutive sessions. If the course
-  does not have enough fresh questions to fill a session, previously-seen
-  questions backfill the remainder.
-  """
-
-  @doc """
   Returns per-skill deficit scores for a user in a course.
   `deficit = 1 - correct/total` in [0.0, 1.0]. Higher = weaker.
   Returns `%{section_id => %{correct, total, deficit}}`.
@@ -728,10 +718,6 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
-  Counts attempts for a user across multiple chapters in a single query.
-  """
-
-  @doc """
   Returns all attempts a user has made on questions in the given section,
   chronologically ordered, with the question preloaded so mastery checks
   can read the authored difficulty enum.
@@ -746,6 +732,9 @@ defmodule FunSheep.Questions do
     |> Repo.all()
   end
 
+  @doc """
+  Counts attempts for a user across multiple chapters in a single query.
+  """
   def count_attempts_in_chapters(_user_role_id, []), do: 0
 
   def count_attempts_in_chapters(user_role_id, chapter_ids) when is_list(chapter_ids) do
