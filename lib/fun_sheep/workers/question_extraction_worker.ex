@@ -8,7 +8,14 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
   This is the final step in the course processing pipeline.
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 2
+  use Oban.Worker,
+    queue: :ai,
+    max_attempts: 2,
+    unique: [
+      period: 600,
+      fields: [:worker, :args],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias FunSheep.{Content, Courses, Repo}
   alias FunSheep.Questions.Question

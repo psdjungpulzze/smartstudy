@@ -20,6 +20,7 @@ defmodule FunSheepWeb.CourseDetailLive do
     {upcoming, past} = load_test_schedules(user_role_id, course_id)
     discovered_sources = Content.list_discovered_sources(course_id)
     question_count = Questions.count_questions_by_course(course_id)
+    validation_counts = Questions.count_by_validation_status(course_id)
 
     # Materials: course-linked + unlinked (staged uploads not yet processed)
     {materials, has_pending} =
@@ -48,6 +49,7 @@ defmodule FunSheepWeb.CourseDetailLive do
        page_title: course.name,
        course: course,
        question_count: question_count,
+       validation_counts: validation_counts,
        upcoming_tests: upcoming,
        past_tests: past,
        show_chapters: false,
@@ -119,10 +121,12 @@ defmodule FunSheepWeb.CourseDetailLive do
       if Map.has_key?(update, :status) or Map.has_key?(update, :step) do
         course = Courses.get_course_with_chapters!(socket.assigns.course.id)
         question_count = Questions.count_questions_by_course(course.id)
+        validation_counts = Questions.count_by_validation_status(course.id)
 
         assign(socket,
           course: course,
-          question_count: question_count
+          question_count: question_count,
+          validation_counts: validation_counts
         )
       else
         socket
@@ -135,6 +139,7 @@ defmodule FunSheepWeb.CourseDetailLive do
     course = Courses.get_course_with_chapters!(socket.assigns.course.id)
     discovered_sources = Content.list_discovered_sources(course.id)
     question_count = Questions.count_questions_by_course(course.id)
+    validation_counts = Questions.count_by_validation_status(course.id)
     textbook_status = Courses.textbook_status(course.id)
     # Clear sub_step when a major step completes
     {:noreply,
@@ -142,6 +147,7 @@ defmodule FunSheepWeb.CourseDetailLive do
        course: course,
        discovered_sources: discovered_sources,
        question_count: question_count,
+       validation_counts: validation_counts,
        processing_sub_step: nil,
        textbook_status: textbook_status
      )}
@@ -155,7 +161,14 @@ defmodule FunSheepWeb.CourseDetailLive do
   def handle_info({:questions_generated, _data}, socket) do
     course = Courses.get_course_with_chapters!(socket.assigns.course.id)
     question_count = Questions.count_questions_by_course(course.id)
-    {:noreply, assign(socket, course: course, question_count: question_count)}
+    validation_counts = Questions.count_by_validation_status(course.id)
+
+    {:noreply,
+     assign(socket,
+       course: course,
+       question_count: question_count,
+       validation_counts: validation_counts
+     )}
   end
 
   # ── Processing events ──────────────────────────────────────────────────
@@ -721,6 +734,7 @@ defmodule FunSheepWeb.CourseDetailLive do
         course={@course}
         discovered_sources={@discovered_sources}
         question_count={@question_count}
+        validation_counts={@validation_counts}
         sub_step={@processing_sub_step}
       />
       <.cancelled_banner :if={@course.processing_status == "cancelled"} />
@@ -1249,6 +1263,7 @@ defmodule FunSheepWeb.CourseDetailLive do
   attr :course, :map, required: true
   attr :discovered_sources, :list, default: []
   attr :question_count, :integer, default: 0
+  attr :validation_counts, :map, default: %{pending: 0, passed: 0, needs_review: 0, failed: 0}
   attr :sub_step, :string, default: nil
 
   defp processing_progress(assigns) do
@@ -1262,6 +1277,7 @@ defmodule FunSheepWeb.CourseDetailLive do
     chapters = assigns.course.chapters || []
     chapters_count = length(chapters)
     question_count = assigns.question_count || 0
+    validation_counts = assigns.validation_counts || %{pending: 0, passed: 0, needs_review: 0, failed: 0}
 
     web_search_done = meta["web_search_complete"] == true
 
@@ -1286,10 +1302,20 @@ defmodule FunSheepWeb.CourseDetailLive do
         true -> :skip
       end
 
+    # Split question work into two distinct steps so the UI tells the truth
+    # about what's happening. "Generating" = AI is producing questions;
+    # "Validating" = AI is reviewing them before they go to students.
     step4_state =
       cond do
+        status in ["ready", "validating"] -> :done
+        status in ["extracting", "generating"] -> :active
+        true -> :pending
+      end
+
+    step5_state =
+      cond do
         status == "ready" -> :done
-        status in ["extracting", "generating", "validating"] -> :active
+        status == "validating" -> :active
         true -> :pending
       end
 
@@ -1301,10 +1327,12 @@ defmodule FunSheepWeb.CourseDetailLive do
         sources_count: sources_count,
         chapters_count: chapters_count,
         question_count: question_count,
+        validation_counts: validation_counts,
         step1_state: step1_state,
         step2_state: step2_state,
         step3_state: step3_state,
-        step4_state: step4_state
+        step4_state: step4_state,
+        step5_state: step5_state
       )
 
     ~H"""
@@ -1396,20 +1424,45 @@ defmodule FunSheepWeb.CourseDetailLive do
           </div>
         </div>
 
-        <%!-- Step 4: Generating questions --%>
+        <%!-- Step 4: Generating questions (AI creates raw questions) --%>
         <.pipeline_step
           state={@step4_state}
           icon="hero-light-bulb"
           title="Generating practice questions"
           subtitle={
             cond do
-              @question_count > 0 && @step4_state == :done -> "#{@question_count} questions ready"
-              @question_count > 0 -> "#{@question_count} questions so far, generating more..."
-              @step4_state == :active -> "Creating questions from discovered content..."
-              true -> "Will generate questions when content is ready"
+              @step4_state == :done ->
+                "#{generated_total(@validation_counts, @question_count)} questions generated"
+
+              @step4_state == :active && generated_total(@validation_counts, @question_count) > 0 ->
+                "#{generated_total(@validation_counts, @question_count)} questions so far, generating more..."
+
+              @step4_state == :active ->
+                "Creating questions from discovered content..."
+
+              true ->
+                "Will generate questions when content is ready"
             end
           }
         />
+
+        <%!-- Step 5: Validating questions (AI reviews each before showing to students) --%>
+        <.pipeline_step
+          state={@step5_state}
+          icon="hero-check-badge"
+          title="Validating questions for accuracy"
+          subtitle={validation_subtitle(@step5_state, @validation_counts, @question_count)}
+        />
+
+        <%!-- Validation progress bar --%>
+        <div :if={@step5_state == :active} class="ml-10 -mt-2 mb-1">
+          <div class="w-full bg-[#F5F5F7] rounded-full h-1.5">
+            <div
+              class="bg-[#4CD964] h-1.5 rounded-full transition-all duration-500"
+              style={"width: #{validation_percent(@validation_counts)}%"}
+            />
+          </div>
+        </div>
       </div>
 
       <%!-- Live sub-step detail (Claude Code-style) --%>
@@ -1498,6 +1551,46 @@ defmodule FunSheepWeb.CourseDetailLive do
   defp step_indicator_class(:done), do: "bg-[#4CD964]"
   defp step_indicator_class(:active), do: "bg-[#007AFF]"
   defp step_indicator_class(_), do: "bg-[#F5F5F7]"
+
+  # Total questions the generator has produced, whether or not they've been
+  # validated yet. Falls back to the student-visible count if validation
+  # counts haven't loaded (e.g. race on first mount).
+  defp generated_total(counts, fallback) when is_map(counts) do
+    total =
+      Map.get(counts, :pending, 0) + Map.get(counts, :passed, 0) +
+        Map.get(counts, :needs_review, 0) + Map.get(counts, :failed, 0)
+
+    if total > 0, do: total, else: fallback
+  end
+
+  defp generated_total(_, fallback), do: fallback
+
+  defp validation_subtitle(:done, counts, _q) do
+    passed = Map.get(counts, :passed, 0)
+    needs_review = Map.get(counts, :needs_review, 0)
+
+    base = "#{passed} questions ready"
+    if needs_review > 0, do: base <> " (#{needs_review} flagged for review)", else: base
+  end
+
+  defp validation_subtitle(:active, counts, _q) do
+    pending = Map.get(counts, :pending, 0)
+    passed = Map.get(counts, :passed, 0)
+    total = generated_total(counts, passed)
+
+    cond do
+      total == 0 -> "Preparing to validate..."
+      pending == 0 -> "Finalizing validation..."
+      true -> "Validated #{passed}/#{total} — #{pending} remaining"
+    end
+  end
+
+  defp validation_subtitle(_, _, _), do: "Runs after questions are generated"
+
+  defp validation_percent(counts) do
+    total = generated_total(counts, 0)
+    if total == 0, do: 0, else: min(round(Map.get(counts, :passed, 0) / total * 100), 100)
+  end
 
   attr :course, :map, required: true
 

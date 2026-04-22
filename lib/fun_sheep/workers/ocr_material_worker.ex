@@ -134,24 +134,8 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     discovery_done = metadata["discovery_complete"] == true
 
     if discovery_done do
-      Logger.info("[OCR] Both discovery and OCR complete, triggering extraction for #{course_id}")
-
-      Courses.update_course(course, %{
-        processing_status: "extracting",
-        processing_step: "Extracting and generating questions...",
-        metadata: Map.merge(metadata, %{"ocr_complete" => true})
-      })
-
-      Phoenix.PubSub.broadcast(
-        FunSheep.PubSub,
-        "course:#{course_id}",
-        {:processing_update,
-         %{status: "extracting", step: "Extracting and generating questions..."}}
-      )
-
-      %{course_id: course_id}
-      |> FunSheep.Workers.QuestionExtractionWorker.new()
-      |> Oban.insert()
+      Logger.info("[OCR] Both discovery and OCR complete, advancing course #{course_id}")
+      Courses.advance_to_extraction(course_id)
     else
       Logger.info("[OCR] Waiting for discovery to complete")
     end

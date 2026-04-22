@@ -135,8 +135,8 @@ defmodule FunSheep.Questions.Validation do
         "Validates generated questions across topic relevance, completeness, categorization, answer correctness, and explanation quality.",
       system_prompt: @assistant_system_prompt,
       llm_provider: "openai",
-      llm_model: "gpt-4o",
-      llm_config: %{temperature: 0.1, max_tokens: 4000},
+      llm_model: "gpt-4o-mini",
+      llm_config: %{temperature: 0.1, max_tokens: 2000},
       metadata: %{app: "funsheep", role: "question_validator"}
     }
   end

@@ -174,6 +174,30 @@ defmodule FunSheep.QuestionsTest do
     end
   end
 
+  describe "count_by_validation_status/1" do
+    test "returns counts bucketed by status with zero-fill" do
+      course = create_course()
+      create_question(course, %{content: "p1", validation_status: :passed})
+      create_question(course, %{content: "p2", validation_status: :passed})
+      create_question(course, %{content: "r1", validation_status: :needs_review})
+      create_question(course, %{content: "f1", validation_status: :failed})
+
+      counts = Questions.count_by_validation_status(course.id)
+
+      assert counts == %{pending: 0, passed: 2, needs_review: 1, failed: 1}
+    end
+
+    test "returns all-zero map for a course with no questions" do
+      course = create_course()
+      assert Questions.count_by_validation_status(course.id) == %{
+               pending: 0,
+               passed: 0,
+               needs_review: 0,
+               failed: 0
+             }
+    end
+  end
+
   describe "list_questions_needing_review/1" do
     test "returns only needs_review questions" do
       course = create_course()

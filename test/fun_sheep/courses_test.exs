@@ -106,6 +106,73 @@ defmodule FunSheep.CoursesTest do
     end
   end
 
+  describe "advance_to_extraction/1" do
+    use Oban.Testing, repo: FunSheep.Repo
+    alias FunSheep.ContentFixtures
+
+    defp uploaded_material(course, attrs) do
+      user_role = ContentFixtures.create_user_role()
+
+      attrs =
+        Map.merge(
+          %{
+            material_kind: :textbook,
+            file_name: "x.pdf",
+            file_path: "tmp/#{Ecto.UUID.generate()}.pdf",
+            file_type: "application/pdf",
+            file_size: 1024,
+            course_id: course.id,
+            user_role_id: user_role.id
+          },
+          attrs
+        )
+
+      {:ok, m} =
+        %FunSheep.Content.UploadedMaterial{}
+        |> FunSheep.Content.UploadedMaterial.changeset(attrs)
+        |> FunSheep.Repo.insert()
+
+      m
+    end
+
+    test "routes to EnrichDiscoveryWorker when textbook materials are OCR-completed" do
+      course = create_course()
+      uploaded_material(course, %{ocr_status: :completed, material_kind: :textbook})
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        Courses.advance_to_extraction(course.id)
+      end)
+
+      assert_enqueued(
+        worker: FunSheep.Workers.EnrichDiscoveryWorker,
+        args: %{"course_id" => course.id}
+      )
+
+      refute_enqueued(worker: FunSheep.Workers.QuestionExtractionWorker)
+    end
+
+    test "routes straight to QuestionExtractionWorker when no textbook OCR exists" do
+      course = create_course()
+      uploaded_material(course, %{ocr_status: :pending, material_kind: :textbook})
+      uploaded_material(course, %{ocr_status: :completed, material_kind: :sample_questions})
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        Courses.advance_to_extraction(course.id)
+      end)
+
+      assert_enqueued(
+        worker: FunSheep.Workers.QuestionExtractionWorker,
+        args: %{"course_id" => course.id}
+      )
+
+      refute_enqueued(worker: FunSheep.Workers.EnrichDiscoveryWorker)
+
+      reloaded = Courses.get_course!(course.id)
+      assert reloaded.processing_status == "extracting"
+      assert reloaded.metadata["ocr_complete"] == true
+    end
+  end
+
   describe "textbook_status/1" do
     alias FunSheep.ContentFixtures
 
