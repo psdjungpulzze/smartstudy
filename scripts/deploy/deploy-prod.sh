@@ -195,6 +195,7 @@ upsert_secret() {
 
 upsert_secret interactor-client-secret "$INTERACTOR_CLIENT_SECRET"
 upsert_secret google-vision-api-key "$GOOGLE_VISION_API_KEY"
+upsert_secret smtp-password "$SMTP_PASSWORD"
 
 for required_secret in database-url secret-key-base; do
   gcloud secrets describe "$required_secret" >/dev/null 2>&1 \
@@ -236,6 +237,10 @@ INTERACTOR_UDB_URL: "$INTERACTOR_UDB_URL"
 INTERACTOR_ORG_NAME: "$INTERACTOR_ORG_NAME"
 INTERACTOR_CLIENT_ID: "$INTERACTOR_CLIENT_ID"
 GCS_BUCKET: "$GCS_BUCKET"
+SMTP_HOST: "$SMTP_HOST"
+SMTP_PORT: "$SMTP_PORT"
+SMTP_USERNAME: "$SMTP_USERNAME"
+MAILER_FROM: "$MAILER_FROM"
 EOF
 
 # --- Deploy --------------------------------------------------------------
@@ -249,7 +254,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --service-account="$GCS_SERVICE_ACCOUNT" \
   --add-cloudsql-instances="$CONNECTION_NAME" \
   --env-vars-file="$ENV_VARS_FILE" \
-  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest"
+  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest"
 
 NEW_REVISION=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.latestReadyRevisionName)')
 SERVICE_URL=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.url)')
@@ -308,13 +313,21 @@ if gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" >/dev/n
   # for Lifeline / Pruner plugins and Oban's own Peer/Notifier DB traffic.
   # 50 leaves ~23 slots of slack, which matters once multiple workers are
   # competing for the same Cloud SQL pool on db-custom-1-3840.
+  # RUN_OBAN_WORKERS=true: runtime.exs only enables Oban queue processing
+  # on the worker when this is set. Without it the worker boots, accepts
+  # jobs into the DB, but never drains them — silently indistinguishable
+  # from the api service. Keep it pinned here so every deploy re-asserts it.
+  #
+  # SMTP_HOST/PORT/USERNAME/MAILER_FROM: mirror the api service's mailer
+  # config so the worker (which runs the :notifications queue and actually
+  # hands digests off to Swoosh) talks to the same SMTP relay.
   gcloud run services update "$WORKER_SERVICE" \
     --region="$GCP_REGION" \
     --image="$NEW_IMAGE" \
     --min-instances=2 \
     --max-instances=5 \
-    --update-env-vars="POOL_SIZE=50" \
-    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest" \
+    --update-env-vars="POOL_SIZE=50,RUN_OBAN_WORKERS=true,SMTP_HOST=$SMTP_HOST,SMTP_PORT=$SMTP_PORT,SMTP_USERNAME=$SMTP_USERNAME,MAILER_FROM=$MAILER_FROM" \
+    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest" \
     --quiet >/dev/null
 
   WORKER_REVISION=$(gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" \

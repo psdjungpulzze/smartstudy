@@ -43,7 +43,12 @@ defmodule Mix.Tasks.Funsheep.Deploy.Preflight do
     {"INTERACTOR_CLIENT_SECRET", :nonempty},
     {"GCS_BUCKET", :nonempty},
     {"GCS_SERVICE_ACCOUNT", :nonempty},
-    {"GOOGLE_VISION_API_KEY", :google_api_key}
+    {"GOOGLE_VISION_API_KEY", :google_api_key},
+    {"SMTP_HOST", :nonempty},
+    {"SMTP_PORT", :port},
+    {"SMTP_USERNAME", :nonempty},
+    {"SMTP_PASSWORD", :nonempty},
+    {"MAILER_FROM", :email}
   ]
 
   @impl Mix.Task
@@ -150,6 +155,21 @@ defmodule Mix.Tasks.Funsheep.Deploy.Preflight do
       []
     else
       ["#{key} does not look like a Google API key (expected AIza... and >=35 chars)"]
+    end
+  end
+
+  defp format_check(key, :port, value) do
+    case Integer.parse(value) do
+      {n, ""} when n > 0 and n < 65_536 -> []
+      _ -> ["#{key} is not a valid TCP port: #{inspect(value)}"]
+    end
+  end
+
+  defp format_check(key, :email, value) do
+    if Regex.match?(~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/, value) do
+      []
+    else
+      ["#{key} does not look like an email address: #{inspect(value)}"]
     end
   end
 end
