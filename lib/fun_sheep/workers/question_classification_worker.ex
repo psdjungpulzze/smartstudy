@@ -244,27 +244,15 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   end
 
   defp provision_assistant do
-    case Agents.resolve_assistant(@assistant_name) do
+    # Race-safe: if a peer just created the assistant, we'll re-resolve
+    # instead of fighting a 422.
+    case Agents.resolve_or_create_assistant(assistant_attrs()) do
       {:ok, id} ->
         :persistent_term.put({__MODULE__, :assistant_id}, id)
         {:ok, id}
 
-      {:error, _} ->
-        case Agents.create_assistant(assistant_attrs()) do
-          {:ok, %{"data" => %{"id" => id}}} ->
-            :persistent_term.put({__MODULE__, :assistant_id}, id)
-            Logger.info("[QClassify] Created #{@assistant_name} assistant: #{id}")
-            {:ok, id}
-
-          {:ok, %{"id" => id}} ->
-            :persistent_term.put({__MODULE__, :assistant_id}, id)
-            Logger.info("[QClassify] Created #{@assistant_name} assistant: #{id}")
-            {:ok, id}
-
-          {:error, reason} = err ->
-            Logger.error("[QClassify] Failed to create #{@assistant_name}: #{inspect(reason)}")
-            err
-        end
+      {:error, _} = err ->
+        err
     end
   end
 end

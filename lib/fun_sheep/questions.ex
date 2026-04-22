@@ -181,6 +181,24 @@ defmodule FunSheep.Questions do
     |> Map.new()
   end
 
+  @doc """
+  Batched count of `:pending` questions per course_id. Returns
+  `%{course_id => pending_count}` — course_ids with zero pending are
+  omitted. Powers the admin "Requeue pending validations" action.
+  """
+  @spec count_pending_by_courses([String.t()]) :: %{String.t() => non_neg_integer()}
+  def count_pending_by_courses([]), do: %{}
+
+  def count_pending_by_courses(course_ids) when is_list(course_ids) do
+    from(q in Question,
+      where: q.course_id in ^course_ids and q.validation_status == :pending,
+      group_by: q.course_id,
+      select: {q.course_id, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   def list_questions_by_course(course_id, filters \\ %{}) do
     Question
     |> where([q], q.course_id == ^course_id)
