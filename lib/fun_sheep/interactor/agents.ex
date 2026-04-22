@@ -223,6 +223,77 @@ defmodule FunSheep.Interactor.Agents do
     Client.delete("#{@base_path}/assistants/#{id}")
   end
 
+  @doc """
+  Resolve-or-create an assistant by attrs in one call. Designed to be race-safe
+  when many worker instances call it simultaneously on a cold environment.
+
+  Flow:
+    1. Try `resolve_assistant/1` first (cheap cache/list hit).
+    2. On miss, attempt `create_assistant/1`.
+    3. If creation returns `{422, account_id already taken}` — another worker
+       got there first — force a cache refresh and resolve again.
+
+  Returns `{:ok, id}` or `{:error, reason}`.
+  """
+  @spec resolve_or_create_assistant(%{required(:name) => String.t()} | map()) ::
+          {:ok, String.t()} | {:error, term()}
+  def resolve_or_create_assistant(%{name: name} = attrs) when is_binary(name) do
+    case resolve_assistant(name) do
+      {:ok, id} ->
+        {:ok, id}
+
+      {:error, _} ->
+        case create_assistant(attrs) do
+          {:ok, %{"data" => %{"id" => id}}} ->
+            cache_assistant(name, id)
+            {:ok, id}
+
+          {:ok, %{"id" => id}} ->
+            cache_assistant(name, id)
+            {:ok, id}
+
+          {:error, reason} ->
+            if already_exists?(reason) do
+              # Peer created it — drop stale cache and re-resolve.
+              :persistent_term.erase(@cache_key)
+
+              case resolve_assistant(name) do
+                {:ok, id} ->
+                  Logger.info(
+                    "[Agents] #{name}: lost create race (422), resolved to existing id #{id}"
+                  )
+
+                  {:ok, id}
+
+                {:error, _} = err ->
+                  Logger.error(
+                    "[Agents] #{name}: 422 on create but re-resolve also failed: #{inspect(reason)}"
+                  )
+
+                  err
+              end
+            else
+              Logger.error("[Agents] Failed to create #{name}: #{inspect(reason)}")
+              {:error, reason}
+            end
+        end
+    end
+  end
+
+  # Treat only the "already exists / account_id taken" shape as winnable race.
+  # Other 4xx/5xx bubble up as real failures.
+  defp already_exists?({422, %{"details" => %{"account_id" => _}}}), do: true
+
+  defp already_exists?({422, %{"error" => "validation_error"} = body}),
+    do: get_in(body, ["details", "name"]) != nil or get_in(body, ["details", "account_id"]) != nil
+
+  defp already_exists?(_), do: false
+
+  defp cache_assistant(name, id) do
+    current = :persistent_term.get(@cache_key, %{})
+    :persistent_term.put(@cache_key, Map.put(current, name, id))
+  end
+
   # --- Private Helpers ---
 
   defp uuid?(str) do

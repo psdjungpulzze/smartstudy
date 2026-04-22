@@ -60,6 +60,15 @@ defmodule FunSheepWeb.AdminCoursesLive do
     end
   end
 
+  def handle_event("requeue_pending", %{"id" => course_id}, socket) do
+    {:ok, count} = Questions.requeue_pending_validations(course_id)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Re-enqueued validation for #{count} pending question(s).")
+     |> load_courses()}
+  end
+
   defp load_courses(socket) do
     opts = [
       search: socket.assigns.search,
@@ -72,10 +81,12 @@ defmodule FunSheepWeb.AdminCoursesLive do
 
     course_ids = Enum.map(courses, & &1.id)
     question_counts = Questions.count_all_by_courses(course_ids)
+    pending_counts = Questions.count_pending_by_courses(course_ids)
 
     socket
     |> assign(:courses, courses)
     |> assign(:question_counts, question_counts)
+    |> assign(:pending_counts, pending_counts)
     |> assign(:total, total)
     |> assign(:page_size, @page_size)
   end
@@ -111,6 +122,7 @@ defmodule FunSheepWeb.AdminCoursesLive do
               <th class="text-left px-4 py-3">Owner</th>
               <th class="text-left px-4 py-3">Status</th>
               <th class="text-right px-4 py-3">Questions</th>
+              <th class="text-right px-4 py-3">Pending</th>
               <th class="text-left px-4 py-3">Created</th>
               <th class="text-right px-4 py-3">Actions</th>
             </tr>
@@ -132,6 +144,9 @@ defmodule FunSheepWeb.AdminCoursesLive do
               <td class="px-4 py-3 text-right text-[#1C1C1E]">
                 {Map.get(@question_counts, c.id, 0)}
               </td>
+              <td class="px-4 py-3 text-right">
+                <.pending_badge count={Map.get(@pending_counts, c.id, 0)} />
+              </td>
               <td class="px-4 py-3 text-[#8E8E93]">
                 {Calendar.strftime(c.inserted_at, "%Y-%m-%d")}
               </td>
@@ -142,6 +157,17 @@ defmodule FunSheepWeb.AdminCoursesLive do
                 >
                   View
                 </.link>
+                <button
+                  :if={Map.get(@pending_counts, c.id, 0) > 0}
+                  type="button"
+                  phx-click="requeue_pending"
+                  phx-value-id={c.id}
+                  data-confirm={"Re-enqueue validation for #{Map.get(@pending_counts, c.id, 0)} pending question(s) on this course?"}
+                  class="px-3 py-1 rounded-full text-xs font-medium text-[#4CD964] border border-[#4CD964]/30 hover:bg-[#E8F8EB] mr-2"
+                  title="Re-enqueues validation jobs for every :pending question on this course. Use after an Interactor outage leaves questions stuck."
+                >
+                  Requeue
+                </button>
                 <button
                   type="button"
                   phx-click="delete"
@@ -154,7 +180,7 @@ defmodule FunSheepWeb.AdminCoursesLive do
               </td>
             </tr>
             <tr :if={@courses == []}>
-              <td colspan="7" class="px-4 py-10 text-center text-[#8E8E93]">No courses match.</td>
+              <td colspan="8" class="px-4 py-10 text-center text-[#8E8E93]">No courses match.</td>
             </tr>
           </tbody>
         </table>
@@ -182,6 +208,24 @@ defmodule FunSheepWeb.AdminCoursesLive do
         </div>
       </div>
     </div>
+    """
+  end
+
+  attr :count, :integer, required: true
+
+  # Pill showing pending-validation count. Zero renders as "—" in neutral
+  # grey; >0 gets the warning yellow so stuck courses stand out at a glance.
+  defp pending_badge(%{count: 0} = assigns) do
+    ~H"""
+    <span class="text-[#8E8E93]">—</span>
+    """
+  end
+
+  defp pending_badge(assigns) do
+    ~H"""
+    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-[#FFF4CC] text-[#1C1C1E]">
+      {@count}
+    </span>
     """
   end
 

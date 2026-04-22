@@ -37,4 +37,25 @@ defmodule FunSheep.Interactor.AgentsTest do
       assert {:ok, %{"data" => []}} = Agents.list_messages("room_1")
     end
   end
+
+  describe "resolve_or_create_assistant/1 in mock mode" do
+    test "creates-and-caches when not found in the list" do
+      # Each test uses a fresh name so cache lookups across tests don't leak.
+      name = "resolve_create_#{System.unique_integer([:positive])}"
+      attrs = %{name: name, llm_provider: "openai", llm_model: "gpt-4o-mini"}
+
+      assert {:ok, id} = Agents.resolve_or_create_assistant(attrs)
+      assert is_binary(id)
+    end
+
+    test "returns the cached id on a second call without re-creating" do
+      name = "resolve_create_#{System.unique_integer([:positive])}"
+      attrs = %{name: name, llm_provider: "openai", llm_model: "gpt-4o-mini"}
+
+      {:ok, id1} = Agents.resolve_or_create_assistant(attrs)
+      {:ok, id2} = Agents.resolve_or_create_assistant(attrs)
+
+      assert id1 == id2
+    end
+  end
 end

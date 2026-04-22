@@ -172,30 +172,16 @@ defmodule FunSheep.Questions.Validation do
   end
 
   defp provision_assistant do
-    # Prefer resolving an already-registered assistant (idempotent in prod
-    # where ops registered it via the Interactor console). Fall back to
-    # creating it via the API if missing — convenient for dev and preview.
-    case Agents.resolve_assistant(@assistant_name) do
+    # Race-safe: if two workers hit this simultaneously, one wins the
+    # create; the loser's 422 is converted to a re-resolve inside
+    # Agents.resolve_or_create_assistant/1.
+    case Agents.resolve_or_create_assistant(assistant_attrs()) do
       {:ok, id} ->
         :persistent_term.put({__MODULE__, :assistant_id}, id)
         {:ok, id}
 
-      {:error, _} ->
-        case Agents.create_assistant(assistant_attrs()) do
-          {:ok, %{"data" => %{"id" => id}}} ->
-            :persistent_term.put({__MODULE__, :assistant_id}, id)
-            Logger.info("[Validation] Created question_validator assistant: #{id}")
-            {:ok, id}
-
-          {:ok, %{"id" => id}} ->
-            :persistent_term.put({__MODULE__, :assistant_id}, id)
-            Logger.info("[Validation] Created question_validator assistant: #{id}")
-            {:ok, id}
-
-          {:error, reason} = err ->
-            Logger.error("[Validation] Failed to create assistant: #{inspect(reason)}")
-            err
-        end
+      {:error, _} = err ->
+        err
     end
   end
 

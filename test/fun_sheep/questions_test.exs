@@ -206,6 +206,28 @@ defmodule FunSheep.QuestionsTest do
     end
   end
 
+  describe "count_pending_by_courses/1" do
+    test "returns pending counts keyed by course id, omitting zero-pending courses" do
+      course1 = create_course()
+      course2 = create_course()
+      course3 = create_course()
+
+      create_question(course1, %{content: "p1", validation_status: :pending})
+      create_question(course1, %{content: "p2", validation_status: :pending})
+      create_question(course1, %{content: "ok", validation_status: :passed})
+      create_question(course2, %{content: "p3", validation_status: :pending})
+      create_question(course3, %{content: "ok2", validation_status: :passed})
+
+      counts = Questions.count_pending_by_courses([course1.id, course2.id, course3.id])
+
+      assert counts == %{course1.id => 2, course2.id => 1}
+    end
+
+    test "returns empty map for empty input" do
+      assert Questions.count_pending_by_courses([]) == %{}
+    end
+  end
+
   describe "requeue_pending_validations/1" do
     # Use :manual so we can assert the job was enqueued without actually
     # running the validator (which would hit Interactor).
