@@ -179,15 +179,17 @@ defmodule FunSheepWeb.AuthController do
     db_role = if role in ~w(student parent teacher admin), do: role, else: "student"
 
     case FunSheep.Accounts.get_user_role_by_interactor_id_and_role(interactor_user_id, db_role) do
-      %FunSheep.Accounts.UserRole{id: id} ->
-        id
+      %FunSheep.Accounts.UserRole{} = role ->
+        touch_last_login(role)
+        role.id
 
       nil ->
         case FunSheep.Accounts.create_user_role(%{
                interactor_user_id: interactor_user_id,
                role: db_role,
                email: email || "unknown@example.com",
-               display_name: display_name
+               display_name: display_name,
+               last_login_at: DateTime.utc_now() |> DateTime.truncate(:second)
              }) do
           {:ok, %{id: id}} ->
             id
@@ -197,6 +199,14 @@ defmodule FunSheepWeb.AuthController do
             nil
         end
     end
+  end
+
+  defp touch_last_login(%FunSheep.Accounts.UserRole{} = user_role) do
+    FunSheep.Accounts.update_user_role(user_role, %{
+      last_login_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+  rescue
+    _ -> :ok
   end
 
   defp fetch_interactor_user(user_id, org) do

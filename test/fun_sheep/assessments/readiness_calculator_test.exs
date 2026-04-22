@@ -162,4 +162,143 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
       assert result.aggregate_score == 75.0
     end
   end
+
+  describe "assessment_complete?/1" do
+    test "false when readiness is nil" do
+      refute ReadinessCalculator.assessment_complete?(nil)
+    end
+
+    test "false when skill_scores map is empty and chapter_scores is empty" do
+      refute ReadinessCalculator.assessment_complete?(%{
+               skill_scores: %{},
+               chapter_scores: %{}
+             })
+    end
+
+    test "false when some skills have no attempts (insufficient_data)", ctx do
+      %{user_role: ur, course: course, chapter1: ch1, schedule: schedule} = ctx
+
+      {:ok, section1} =
+        FunSheep.Courses.create_section(%{
+          name: "S1",
+          position: 1,
+          chapter_id: ch1.id
+        })
+
+      {:ok, _section2} =
+        FunSheep.Courses.create_section(%{
+          name: "S2",
+          position: 2,
+          chapter_id: ch1.id
+        })
+
+      {:ok, q1} =
+        FunSheep.Questions.create_question(%{
+          validation_status: :passed,
+          content: "Q1",
+          answer: "A",
+          question_type: :short_answer,
+          difficulty: :easy,
+          course_id: course.id,
+          chapter_id: ch1.id,
+          section_id: section1.id
+        })
+
+      FunSheep.Questions.create_question_attempt(%{
+        user_role_id: ur.id,
+        question_id: q1.id,
+        answer_given: "A",
+        is_correct: true
+      })
+
+      result = ReadinessCalculator.calculate(ur.id, schedule)
+      refute ReadinessCalculator.assessment_complete?(result)
+    end
+
+    test "true when every in-scope skill has at least one attempt", ctx do
+      %{user_role: ur, course: course, chapter1: ch1, chapter2: ch2, schedule: schedule} = ctx
+
+      {:ok, section1} =
+        FunSheep.Courses.create_section(%{name: "S1", position: 1, chapter_id: ch1.id})
+
+      {:ok, section2} =
+        FunSheep.Courses.create_section(%{name: "S2", position: 1, chapter_id: ch2.id})
+
+      for {section, chapter} <- [{section1, ch1}, {section2, ch2}] do
+        {:ok, q} =
+          FunSheep.Questions.create_question(%{
+            validation_status: :passed,
+            content: "Q #{section.id}",
+            answer: "A",
+            question_type: :short_answer,
+            difficulty: :easy,
+            course_id: course.id,
+            chapter_id: chapter.id,
+            section_id: section.id
+          })
+
+        FunSheep.Questions.create_question_attempt(%{
+          user_role_id: ur.id,
+          question_id: q.id,
+          answer_given: "A",
+          is_correct: true
+        })
+      end
+
+      result = ReadinessCalculator.calculate(ur.id, schedule)
+      assert ReadinessCalculator.assessment_complete?(result)
+    end
+
+    test "falls back to chapter coverage when no sections exist", ctx do
+      %{user_role: ur, course: course, chapter1: ch1, chapter2: ch2, schedule: schedule} = ctx
+
+      for chapter <- [ch1, ch2] do
+        {:ok, q} =
+          FunSheep.Questions.create_question(%{
+            validation_status: :passed,
+            content: "Q #{chapter.id}",
+            answer: "A",
+            question_type: :short_answer,
+            difficulty: :easy,
+            course_id: course.id,
+            chapter_id: chapter.id
+          })
+
+        FunSheep.Questions.create_question_attempt(%{
+          user_role_id: ur.id,
+          question_id: q.id,
+          answer_given: "A",
+          is_correct: true
+        })
+      end
+
+      result = ReadinessCalculator.calculate(ur.id, schedule)
+      assert ReadinessCalculator.assessment_complete?(result)
+    end
+
+    test "false via chapter fallback when one chapter has no attempts", ctx do
+      %{user_role: ur, course: course, chapter1: ch1, schedule: schedule} = ctx
+
+      {:ok, q} =
+        FunSheep.Questions.create_question(%{
+          validation_status: :passed,
+          content: "Q",
+          answer: "A",
+          question_type: :short_answer,
+          difficulty: :easy,
+          course_id: course.id,
+          chapter_id: ch1.id
+        })
+
+      FunSheep.Questions.create_question_attempt(%{
+        user_role_id: ur.id,
+        question_id: q.id,
+        answer_given: "A",
+        is_correct: true
+      })
+
+      result = ReadinessCalculator.calculate(ur.id, schedule)
+      refute ReadinessCalculator.assessment_complete?(result)
+    end
+  end
 end
