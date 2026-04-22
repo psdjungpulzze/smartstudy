@@ -144,14 +144,15 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       assert html =~ "Question 2"
     end
 
-    test "renders summary without crashing when no questions match scope", %{
+    test "shows honest empty state when no questions match scope", %{
       conn: conn,
       user_role: ur,
       course: course
     } do
-      # Schedule scoped to a chapter that has no questions — exercises the
-      # `{:complete, state}` branch that previously crashed with
-      # `KeyError: :course_id` in render_summary/1.
+      # Schedule scoped to a chapter that has no questions — must NOT render
+      # a zero-of-zero "Assessment Complete" summary (which would advance the
+      # study path past Assessment despite no answers). Instead, show an
+      # honest "Questions not ready yet" state per the no-fake-content rule.
       {:ok, empty_chapter} =
         FunSheep.Courses.create_chapter(%{
           name: "Empty Chapter",
@@ -173,8 +174,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       {:ok, _view, html} =
         live(conn, ~p"/courses/#{empty_schedule.course_id}/tests/#{empty_schedule.id}/assess")
 
-      assert html =~ "Assessment Complete"
-      assert html =~ ~s|href="/courses/#{course.id}/tests"|
+      assert html =~ "Questions not ready yet"
+      refute html =~ "Assessment Complete"
+      assert html =~ ~s|href="/courses/#{course.id}"|
     end
   end
 end
