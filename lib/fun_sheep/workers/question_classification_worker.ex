@@ -87,7 +87,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     # this way before the name was bumped).
     case ensure_assistant() do
       {:ok, _id} ->
-        case Agents.chat(@assistant_name, prompt, %{
+        case agents_impl().chat(@assistant_name, prompt, %{
                source: "question_classification_worker",
                metadata: %{question_id: question.id, chapter_id: question.chapter_id}
              }) do
@@ -264,7 +264,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   defp provision_assistant do
     # Race-safe: if a peer just created the assistant, we'll re-resolve
     # instead of fighting a 422.
-    case Agents.resolve_or_create_assistant(assistant_attrs()) do
+    case agents_impl().resolve_or_create_assistant(assistant_attrs()) do
       {:ok, id} ->
         :persistent_term.put({__MODULE__, :assistant_id}, id)
         {:ok, id}
@@ -272,5 +272,12 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
       {:error, _} = err ->
         err
     end
+  end
+
+  # Routes Agents calls through a configurable impl so tests can stub the
+  # Interactor round-trip without real HTTP. Production always resolves to
+  # `FunSheep.Interactor.Agents`; tests set this to a Mox-backed stub.
+  defp agents_impl do
+    Application.get_env(:fun_sheep, :interactor_agents_impl, Agents)
   end
 end

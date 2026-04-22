@@ -33,6 +33,13 @@ config :logger, level: :warning
 # Interactor configuration - always mock in tests
 config :fun_sheep, interactor_mock: true
 
+# Workers route Agents calls through a configurable impl. Default is the real
+# `FunSheep.Interactor.Agents` — which, under `interactor_mock: true`, produces
+# mock Interactor responses via `FunSheep.Interactor.Client`. Tests that want
+# fine-grained control over the Interactor round-trip opt in by doing
+# `Application.put_env(:fun_sheep, :interactor_agents_impl, FunSheep.Interactor.AgentsMock)`
+# in their setup (with matching `on_exit` reset), then use Mox expectations.
+
 # Storage backend
 config :fun_sheep, :storage_backend, FunSheep.Storage.Local
 
