@@ -190,7 +190,11 @@ defmodule FunSheepWeb.AdminUsersLive do
           </thead>
           <tbody>
             <tr :for={u <- @users} class="border-t border-[#F5F5F7]">
-              <td class="px-4 py-3 font-medium text-[#1C1C1E]">{u.email}</td>
+              <td class="px-4 py-3 font-medium text-[#1C1C1E]">
+                <.link navigate={~p"/admin/users/#{u.id}"} class="hover:text-[#4CD964]">
+                  {u.email}
+                </.link>
+              </td>
               <td class="px-4 py-3 text-[#1C1C1E]">{u.display_name || "—"}</td>
               <td class="px-4 py-3"><.role_badge role={u.role} /></td>
               <td class="px-4 py-3">
