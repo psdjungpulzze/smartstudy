@@ -9,9 +9,7 @@ defmodule FunSheep.Workers.TOCEscalationWorkerTest do
 
   defp create_course(attrs \\ %{}) do
     {:ok, course} =
-      Courses.create_course(
-        Map.merge(%{name: "Biology", subject: "Biology", grade: "10"}, attrs)
-      )
+      Courses.create_course(Map.merge(%{name: "Biology", subject: "Biology", grade: "10"}, attrs))
 
     course
   end
