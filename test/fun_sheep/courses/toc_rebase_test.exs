@@ -353,4 +353,342 @@ defmodule FunSheep.Courses.TOCRebaseTest do
       assert old.superseded_at != nil
     end
   end
+
+  describe "decide_action/3 — community approval router" do
+    test "no current TOC → :auto_apply (first-run courses)" do
+      course = create_course()
+
+      {:ok, new_toc} =
+        TOCRebase.propose(course.id, "textbook_full", %{
+          chapters: Enum.map(1..20, &%{"name" => "Ch #{&1}"}),
+          ocr_char_count: 50_000
+        })
+
+      assert TOCRebase.decide_action(new_toc, nil, nil) == :auto_apply
+    end
+
+    test "overwhelming improvement (web → textbook_full) is auto_apply when safe" do
+      course = create_course()
+      user_role = create_user_role()
+
+      # Current: web-discovered 16 chapters (score ~low)
+      {:ok, cur} =
+        TOCRebase.propose(course.id, "web", %{
+          chapters: Enum.map(1..16, &%{"name" => "Ch #{&1}"}),
+          ocr_char_count: 5_000
+        })
+
+      {:ok, _} = TOCRebase.apply(cur, course.id)
+
+      # Create attempts on ch1 only — so it's the only "locked" chapter.
+      [ch1 | _] = FunSheep.Courses.list_chapters_by_course(course.id)
+      create_question_with_attempt(course, ch1, user_role)
+
+      current = TOCRebase.current(course.id)
+
+      # New: textbook_full 42 chapters that INCLUDES Ch 1 → safe.
+      new_chapters = [%{"name" => "Ch 1"} | Enum.map(2..42, &%{"name" => "Ch #{&1}"})]
+
+      {:ok, new_toc} =
+        TOCRebase.propose(course.id, "textbook_full", %{
+          chapters: new_chapters,
+          ocr_char_count: 100_000
+        })
+
+      assert TOCRebase.decide_action(new_toc, current, user_role.id) == :auto_apply
+    end
+
+    test "insufficient improvement → :no_change" do
+      course = create_course()
+
+      chapters_10 = Enum.map(1..10, &%{"name" => "Ch #{&1}"})
+      chapters_11 = Enum.map(1..11, &%{"name" => "Ch #{&1}"})
+
+      {:ok, cur} =
+        TOCRebase.propose(course.id, "web", %{chapters: chapters_10, ocr_char_count: 5_000})
+
+      {:ok, _} = TOCRebase.apply(cur, course.id)
+      current = TOCRebase.current(course.id)
+
+      {:ok, new_toc} =
+        TOCRebase.propose(course.id, "web", %{chapters: chapters_11, ocr_char_count: 5_500})
+
+      assert TOCRebase.decide_action(new_toc, current, nil) == :no_change
+    end
+
+    test "not-safe rebase → :pending_admin regardless of authority" do
+      course = create_course()
+      user_role = create_user_role()
+
+      # Set up current TOC with a chapter the student has attempted.
+      {:ok, cur} =
+        TOCRebase.propose(course.id, "web", %{
+          chapters: [%{"name" => "Legacy Unique Topic"}],
+          ocr_char_count: 5_000
+        })
+
+      {:ok, _} = TOCRebase.apply(cur, course.id)
+      current = TOCRebase.current(course.id)
+
+      [ch1] = FunSheep.Courses.list_chapters_by_course(course.id)
+      create_question_with_attempt(course, ch1, user_role)
+
+      # New TOC has nothing in common — would orphan ch1.
+      {:ok, new_toc} =
+        TOCRebase.propose(course.id, "textbook_full", %{
+          chapters: Enum.map(1..42, &%{"name" => "Totally Different Topic #{&1}"}),
+          ocr_char_count: 100_000
+        })
+
+      assert {:pending, :needs_admin_approval} =
+               TOCRebase.decide_action(new_toc, current, nil)
+    end
+
+    test "material + safe, creator inactive, no active users → :pending_admin" do
+      course = create_course(%{created_by_id: create_user_role().id})
+
+      # Current web TOC.
+      {:ok, cur} =
+        TOCRebase.propose(course.id, "web", %{
+          chapters: Enum.map(1..10, &%{"name" => "Ch #{&1}"}),
+          ocr_char_count: 3_000
+        })
+
+      {:ok, _} = TOCRebase.apply(cur, course.id)
+      current = TOCRebase.current(course.id)
+
+      # New textbook_partial — material gain, but not 5× (so below
+      # auto_apply_gate). No attempts yet anywhere = safe.
+      {:ok, new_toc} =
+        TOCRebase.propose(course.id, "textbook_partial", %{
+          chapters: Enum.map(1..15, &%{"name" => "Ch #{&1}"}),
+          ocr_char_count: 8_000
+        })
+
+      assert {:pending, :needs_admin_approval} =
+               TOCRebase.decide_action(new_toc, current, nil)
+    end
+  end
+
+  describe "active_on?/2 + active_users_for/1" do
+    test "user with <5 attempts in 30d is NOT active" do
+      course = create_course()
+      user_role = create_user_role()
+
+      {:ok, ch} =
+        FunSheep.Courses.create_chapter(%{name: "X", position: 1, course_id: course.id})
+
+      # 4 attempts only.
+      for n <- 1..4 do
+        {:ok, q} =
+          FunSheep.Questions.create_question(%{
+            content: "q#{n}",
+            answer: "A",
+            question_type: :short_answer,
+            difficulty: :easy,
+            course_id: course.id,
+            chapter_id: ch.id,
+            validation_status: :passed
+          })
+
+        FunSheep.Questions.create_question_attempt(%{
+          user_role_id: user_role.id,
+          question_id: q.id,
+          answer_given: "A",
+          is_correct: true
+        })
+      end
+
+      refute TOCRebase.active_on?(user_role.id, course.id)
+    end
+
+    test "user with ≥5 attempts in 30d IS active" do
+      course = create_course()
+      user_role = create_user_role()
+
+      {:ok, ch} =
+        FunSheep.Courses.create_chapter(%{name: "X", position: 1, course_id: course.id})
+
+      for n <- 1..5 do
+        {:ok, q} =
+          FunSheep.Questions.create_question(%{
+            content: "q#{n}",
+            answer: "A",
+            question_type: :short_answer,
+            difficulty: :easy,
+            course_id: course.id,
+            chapter_id: ch.id,
+            validation_status: :passed
+          })
+
+        FunSheep.Questions.create_question_attempt(%{
+          user_role_id: user_role.id,
+          question_id: q.id,
+          answer_given: "A",
+          is_correct: true
+        })
+      end
+
+      assert TOCRebase.active_on?(user_role.id, course.id)
+      assert user_role.id in TOCRebase.active_users_for(course.id)
+    end
+  end
+
+  describe "can_approve?/3" do
+    setup do
+      course = create_course()
+      user_role = create_user_role()
+      {:ok, course} = FunSheep.Courses.update_course(course, %{created_by_id: user_role.id})
+
+      # Make the creator active.
+      {:ok, ch} =
+        FunSheep.Courses.create_chapter(%{name: "X", position: 1, course_id: course.id})
+
+      for n <- 1..5 do
+        {:ok, q} =
+          FunSheep.Questions.create_question(%{
+            content: "q#{n}",
+            answer: "A",
+            question_type: :short_answer,
+            difficulty: :easy,
+            course_id: course.id,
+            chapter_id: ch.id,
+            validation_status: :passed
+          })
+
+        FunSheep.Questions.create_question_attempt(%{
+          user_role_id: user_role.id,
+          question_id: q.id,
+          answer_given: "A",
+          is_correct: true
+        })
+      end
+
+      {:ok, new_toc} =
+        TOCRebase.propose(course.id, "textbook_full", %{
+          chapters: Enum.map(1..30, &%{"name" => "Ch #{&1}"}),
+          ocr_char_count: 60_000
+        })
+
+      {:ok, course} = TOCRebase.mark_pending(course, new_toc, user_role.id)
+
+      %{course: course, creator: user_role, toc: new_toc}
+    end
+
+    test "admin always can approve", %{course: course, toc: toc} do
+      assert TOCRebase.can_approve?(%{"role" => "admin"}, course, toc)
+    end
+
+    test "active creator can approve", %{course: course, creator: creator, toc: toc} do
+      assert TOCRebase.can_approve?(
+               %{"user_role_id" => creator.id, "role" => "user"},
+               course,
+               toc
+             )
+    end
+
+    test "random inactive user cannot approve inside creator window", %{
+      course: course,
+      toc: toc
+    } do
+      other = create_user_role()
+
+      refute TOCRebase.can_approve?(
+               %{"user_role_id" => other.id, "role" => "user"},
+               course,
+               toc
+             )
+    end
+
+    test "nil user never approves", %{course: course, toc: toc} do
+      refute TOCRebase.can_approve?(nil, course, toc)
+    end
+  end
+
+  describe "acknowledge!/3 + needs_acknowledgement?/2" do
+    test "needs_acknowledgement? is true after a new rebase, false after dismissal" do
+      course = create_course()
+      user_role = create_user_role()
+
+      {:ok, toc} =
+        TOCRebase.propose(course.id, "web", %{
+          chapters: [%{"name" => "A"}],
+          ocr_char_count: 500
+        })
+
+      {:ok, _} = TOCRebase.apply(toc, course.id)
+      reloaded_course = FunSheep.Courses.get_course!(course.id)
+
+      assert TOCRebase.needs_acknowledgement?(user_role.id, reloaded_course)
+
+      {:ok, _} = TOCRebase.acknowledge!(user_role.id, course.id, toc.id)
+
+      refute TOCRebase.needs_acknowledgement?(user_role.id, reloaded_course)
+    end
+
+    test "acknowledge! is idempotent (upsert)" do
+      course = create_course()
+      user_role = create_user_role()
+
+      {:ok, toc} =
+        TOCRebase.propose(course.id, "web", %{
+          chapters: [%{"name" => "A"}],
+          ocr_char_count: 500
+        })
+
+      {:ok, _} = TOCRebase.apply(toc, course.id)
+
+      assert {:ok, _} = TOCRebase.acknowledge!(user_role.id, course.id, toc.id)
+      assert {:ok, _} = TOCRebase.acknowledge!(user_role.id, course.id, toc.id)
+    end
+  end
+
+  describe "adoptable_by?/2 + adopt!/2" do
+    test "active user can adopt a course with no creator" do
+      course = create_course(%{created_by_id: nil})
+      user_role = create_user_role()
+
+      # Seed 5 attempts so user is active.
+      {:ok, ch} =
+        FunSheep.Courses.create_chapter(%{name: "X", position: 1, course_id: course.id})
+
+      for n <- 1..5 do
+        {:ok, q} =
+          FunSheep.Questions.create_question(%{
+            content: "q#{n}",
+            answer: "A",
+            question_type: :short_answer,
+            difficulty: :easy,
+            course_id: course.id,
+            chapter_id: ch.id,
+            validation_status: :passed
+          })
+
+        FunSheep.Questions.create_question_attempt(%{
+          user_role_id: user_role.id,
+          question_id: q.id,
+          answer_given: "A",
+          is_correct: true
+        })
+      end
+
+      reloaded = FunSheep.Courses.get_course!(course.id)
+      assert TOCRebase.adoptable_by?(user_role.id, reloaded)
+    end
+
+    test "creator themselves cannot adopt their own course" do
+      creator = create_user_role()
+      course = create_course(%{created_by_id: creator.id})
+      refute TOCRebase.adoptable_by?(creator.id, course)
+    end
+
+    test "adopt! promotes the user to creator" do
+      old_creator = create_user_role()
+      new_creator = create_user_role()
+      course = create_course(%{created_by_id: old_creator.id})
+
+      {:ok, updated} = TOCRebase.adopt!(course, new_creator.id)
+      assert updated.created_by_id == new_creator.id
+    end
+  end
 end

@@ -122,6 +122,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   defp apply_discovery(course, chapters, ocr_text) do
     course_id = course.id
     source = source_label(course, chapters)
+    uploader_id = infer_uploader_id(course_id)
 
     {:ok, new_toc} =
       TOCRebase.propose(course_id, source, %{
@@ -131,42 +132,37 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
 
     current = TOCRebase.current(course_id)
 
-    case TOCRebase.compare(new_toc, current) do
-      verdict when verdict in [:no_current, :new_better] ->
+    case TOCRebase.decide_action(new_toc, current, uploader_id) do
+      :auto_apply ->
         broadcast(course_id, %{sub_step: "Rebasing course onto discovered textbook structure..."})
+        run_apply(course_id, new_toc, source, length(chapters))
 
-        case TOCRebase.apply(new_toc, course_id) do
-          {:ok, stats} ->
-            Logger.info(
-              "[EnrichDiscovery] Rebased #{course_id}: #{stats.kept} kept, " <>
-                "#{stats.created} created, #{stats.orphaned} orphaned, " <>
-                "#{stats.deleted} deleted (source=#{source})"
-            )
+      {:pending, reason} ->
+        {:ok, _} =
+          Courses.get_course!(course_id)
+          |> TOCRebase.mark_pending(new_toc, uploader_id)
 
-            # Eagerly generate questions for brand-new chapters so students
-            # don't hit empty topics. Preserved chapters keep their existing
-            # questions — skip them to avoid redundant generation.
-            enqueue_per_chapter_generation(course_id, stats.new_chapter_ids)
-
-            mark_discovery_complete(Courses.get_course!(course_id), length(chapters))
-
-          {:error, reason} ->
-            Logger.error(
-              "[EnrichDiscovery] TOC rebase failed for #{course_id}: #{inspect(reason)}"
-            )
-
-            Courses.update_course(course, %{
-              processing_status: "failed",
-              processing_step: "Could not restructure chapters. Please try again."
-            })
-        end
-
-      other ->
-        # Candidate stored but not applied — surface via admin UI
-        # (or auto-upgrade later if a stronger discovery comes in).
         Logger.info(
-          "[EnrichDiscovery] TOC candidate kept for #{course_id}: #{other} " <>
+          "[EnrichDiscovery] TOC candidate pending for #{course_id}: #{reason} " <>
             "(score=#{new_toc.score} vs current=#{current && current.score})"
+        )
+
+        broadcast(course_id, %{
+          pending_toc: %{reason: reason, new_chapter_count: new_toc.chapter_count}
+        })
+
+        # Leave the current TOC in place — don't touch chapters. The
+        # course processing still "completes" so the student can keep
+        # using what's there; the banner will invite approval.
+        mark_discovery_complete(
+          Courses.get_course!(course_id),
+          (current && current.chapter_count) || length(chapters)
+        )
+
+      :no_change ->
+        Logger.info(
+          "[EnrichDiscovery] TOC candidate kept (no-op) for #{course_id}: " <>
+            "score=#{new_toc.score} vs current=#{current && current.score}"
         )
 
         mark_discovery_complete(
@@ -176,6 +172,46 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     end
 
     :ok
+  end
+
+  defp run_apply(course_id, new_toc, source, chapter_count) do
+    case TOCRebase.apply(new_toc, course_id) do
+      {:ok, stats} ->
+        Logger.info(
+          "[EnrichDiscovery] Auto-applied #{course_id}: #{stats.kept} kept, " <>
+            "#{stats.created} created, #{stats.orphaned} orphaned, " <>
+            "#{stats.deleted} deleted (source=#{source})"
+        )
+
+        # Eagerly generate questions for brand-new chapters so students
+        # don't hit empty topics. Preserved chapters keep their existing
+        # questions — skip them to avoid redundant generation.
+        enqueue_per_chapter_generation(course_id, stats.new_chapter_ids)
+
+        mark_discovery_complete(Courses.get_course!(course_id), chapter_count)
+
+      {:error, reason} ->
+        Logger.error("[EnrichDiscovery] TOC rebase failed for #{course_id}: #{inspect(reason)}")
+
+        Courses.update_course(Courses.get_course!(course_id), %{
+          processing_status: "failed",
+          processing_step: "Could not restructure chapters. Please try again."
+        })
+    end
+  end
+
+  # Best-effort: the most recent uploaded material's user_role is our
+  # proxy for "who triggered this discovery". Falls back to nil — the
+  # decision logic handles nil uploader_id.
+  defp infer_uploader_id(course_id) do
+    Content.list_materials_by_course(course_id)
+    |> Enum.filter(&(&1.ocr_status == :completed and &1.material_kind in @structure_kinds))
+    |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+    |> List.first()
+    |> case do
+      nil -> nil
+      material -> material.user_role_id
+    end
   end
 
   # Fire one AIQuestionGenerationWorker job per brand-new chapter (10

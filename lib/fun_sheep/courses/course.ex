@@ -28,14 +28,23 @@ defmodule FunSheep.Courses.Course do
     field :external_id, :string
     field :external_synced_at, :utc_datetime
 
+    # A TOC rebase proposal waiting for approval. When non-nil, the course
+    # has a candidate DiscoveredTOC that didn't auto-apply (material change
+    # with risk to existing attempts). UI surfaces this as a banner to the
+    # creator / active users; escalates through tiers over time.
+    field :pending_toc_proposed_at, :utc_datetime
+
     belongs_to :school, FunSheep.Geo.School
     belongs_to :created_by, FunSheep.Accounts.UserRole
     belongs_to :textbook, FunSheep.Courses.Textbook
+    belongs_to :pending_toc, FunSheep.Courses.DiscoveredTOC
+    belongs_to :pending_toc_proposed_by, FunSheep.Accounts.UserRole
 
     has_many :chapters, FunSheep.Courses.Chapter
     has_many :questions, FunSheep.Questions.Question
     has_many :uploaded_materials, FunSheep.Content.UploadedMaterial
     has_many :test_schedules, FunSheep.Assessments.TestSchedule
+    has_many :discovered_tocs, FunSheep.Courses.DiscoveredTOC
 
     timestamps(type: :utc_datetime)
   end
@@ -60,9 +69,14 @@ defmodule FunSheep.Courses.Course do
       :custom_textbook_name,
       :external_provider,
       :external_id,
-      :external_synced_at
+      :external_synced_at,
+      :pending_toc_id,
+      :pending_toc_proposed_by_id,
+      :pending_toc_proposed_at
     ])
     |> validate_required([:name, :subject, :grade])
     |> foreign_key_constraint(:school_id)
+    |> foreign_key_constraint(:pending_toc_id)
+    |> foreign_key_constraint(:pending_toc_proposed_by_id)
   end
 end
