@@ -453,12 +453,14 @@ defmodule FunSheepWeb.PracticeLive do
       <%!-- Header --%>
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-4">
-          <.link
-            navigate={~p"/courses/#{@course.id}"}
-            class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+          <button
+            type="button"
+            onclick="history.back()"
+            class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors cursor-pointer"
+            aria-label="Go back"
           >
             <.icon name="hero-arrow-left" class="w-6 h-6" />
-          </.link>
+          </button>
           <div>
             <h1 class="text-2xl font-bold text-[#1C1C1E]">Practice Mode</h1>
             <p class="text-sm text-[#8E8E93]">{@course.name}</p>

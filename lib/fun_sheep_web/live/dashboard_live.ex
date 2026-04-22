@@ -297,6 +297,13 @@ defmodule FunSheepWeb.DashboardLive do
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id
 
+    # North Star I-8: the path does not stop at 80%. A final "master every
+    # skill" step stays active until the readiness snapshot says every
+    # in-scope skill has reached mastery (per I-9).
+    all_mastered? =
+      has_readiness and
+        FunSheep.Assessments.ReadinessCalculator.all_skills_mastered?(assigns.test.readiness)
+
     steps = [
       %{
         label: "Assessment",
@@ -310,7 +317,7 @@ defmodule FunSheepWeb.DashboardLive do
         desc: "Focus on what needs work",
         icon: "🎯",
         done: has_readiness && readiness >= 40,
-        path: ~p"/courses/#{course_id}/quick-test"
+        path: ~p"/courses/#{course_id}/practice"
       },
       %{
         label: "Study Guide",
@@ -329,6 +336,13 @@ defmodule FunSheepWeb.DashboardLive do
             do: ~p"/courses/#{course_id}/tests/#{schedule_id}/format-test",
             else: ~p"/courses/#{course_id}/tests/#{schedule_id}/format"
           )
+      },
+      %{
+        label: "Master Every Skill",
+        desc: "Keep drilling weak skills until you're 100% ready",
+        icon: "🏁",
+        done: all_mastered?,
+        path: ~p"/courses/#{course_id}/practice"
       }
     ]
 
