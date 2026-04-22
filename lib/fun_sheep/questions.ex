@@ -109,6 +109,39 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  Re-enqueues a validation job for every question still in `:pending` for
+  the given course. Intended as a manual recovery step after upstream LLM
+  outages cause Oban to exhaust retries and drop the original jobs —
+  otherwise those questions remain `:pending` forever and the course
+  never finalizes.
+
+  Returns `{:ok, enqueued_count}`. Batches in chunks of 10 to match the
+  validator's preferred batch size.
+
+  Typical usage from a remote iex on the worker host:
+
+      iex> FunSheep.Questions.requeue_pending_validations("<course_id>")
+      {:ok, 2449}
+  """
+  @spec requeue_pending_validations(String.t()) :: {:ok, non_neg_integer()}
+  def requeue_pending_validations(course_id) when is_binary(course_id) do
+    ids =
+      from(q in Question,
+        where: q.course_id == ^course_id and q.validation_status == :pending,
+        select: q.id
+      )
+      |> Repo.all()
+
+    ids
+    |> Enum.chunk_every(10)
+    |> Enum.each(fn batch ->
+      FunSheep.Workers.QuestionValidationWorker.enqueue(batch, course_id: course_id)
+    end)
+
+    {:ok, length(ids)}
+  end
+
+  @doc """
   Returns a map of `%{validation_status => count}` for a course. Powers the
   UI during the validation phase — lets the user see how many questions are
   pending, approved, flagged, or rejected without running the full query on

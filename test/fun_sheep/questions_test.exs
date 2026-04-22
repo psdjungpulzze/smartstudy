@@ -1,5 +1,6 @@
 defmodule FunSheep.QuestionsTest do
   use FunSheep.DataCase, async: true
+  use Oban.Testing, repo: FunSheep.Repo
 
   alias FunSheep.Courses
   alias FunSheep.Questions
@@ -202,6 +203,44 @@ defmodule FunSheep.QuestionsTest do
 
       assert Questions.count_questions_by_course(course.id) == 1
       assert Questions.count_all_questions_by_course(course.id) == 3
+    end
+  end
+
+  describe "requeue_pending_validations/1" do
+    # Use :manual so we can assert the job was enqueued without actually
+    # running the validator (which would hit Interactor).
+    test "enqueues validation jobs for every :pending question and returns count" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        course = create_course()
+        create_question(course, %{content: "pend1", validation_status: :pending})
+        create_question(course, %{content: "pend2", validation_status: :pending})
+        create_question(course, %{content: "pass1", validation_status: :passed})
+
+        {:ok, count} = Questions.requeue_pending_validations(course.id)
+
+        assert count == 2
+        assert_enqueued(worker: FunSheep.Workers.QuestionValidationWorker, queue: :ai)
+      end)
+    end
+
+    test "returns 0 when nothing is pending" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        course = create_course()
+        create_question(course, %{content: "p", validation_status: :passed})
+
+        assert {:ok, 0} = Questions.requeue_pending_validations(course.id)
+      end)
+    end
+
+    test "scopes to the given course id" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        course1 = create_course()
+        course2 = create_course()
+        create_question(course1, %{content: "c1", validation_status: :pending})
+        create_question(course2, %{content: "c2", validation_status: :pending})
+
+        assert {:ok, 1} = Questions.requeue_pending_validations(course1.id)
+      end)
     end
   end
 
