@@ -515,6 +515,76 @@ defmodule FunSheep.Questions do
   does not have enough fresh questions to fill a session, previously-seen
   questions backfill the remainder.
   """
+
+  @doc """
+  Returns per-skill deficit scores for a user in a course.
+  `deficit = 1 - correct/total` in [0.0, 1.0]. Higher = weaker.
+  Returns `%{section_id => %{correct, total, deficit}}`.
+  """
+  def skill_deficits(user_role_id, course_id) do
+    from(q in Question,
+      join: qa in QuestionAttempt,
+      on: qa.question_id == q.id,
+      where:
+        qa.user_role_id == ^user_role_id and
+          q.course_id == ^course_id and
+          not is_nil(q.section_id) and
+          q.classification_status in ^@adaptive_classifications,
+      group_by: q.section_id,
+      select: %{
+        section_id: q.section_id,
+        correct: fragment("COUNT(*) FILTER (WHERE ?)", qa.is_correct),
+        total: count(qa.id)
+      }
+    )
+    |> Repo.all()
+    |> Map.new(fn row ->
+      deficit =
+        if row.total > 0 do
+          Float.round(1.0 - row.correct / row.total, 4)
+        else
+          0.0
+        end
+
+      {row.section_id, Map.put(row, :deficit, deficit)}
+    end)
+  end
+
+  @doc """
+  Questions suitable for interleaved review — pulled from sections where the
+  student has demonstrated competence (deficit below `review_floor`, default
+  0.3). Recently-attempted excluded. North Star I-6.
+  """
+  def list_review_candidates(user_role_id, course_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 20)
+    review_floor = Keyword.get(opts, :review_floor, 0.3)
+    exclude_ids = Keyword.get(opts, :exclude, [])
+
+    deficits = skill_deficits(user_role_id, course_id)
+
+    mastered_section_ids =
+      deficits
+      |> Enum.filter(fn {_id, %{deficit: d, total: total}} ->
+        total >= 2 and d <= review_floor
+      end)
+      |> Enum.map(fn {id, _} -> id end)
+
+    if mastered_section_ids == [] do
+      []
+    else
+      Question
+      |> where([q], q.course_id == ^course_id)
+      |> where([q], q.validation_status in ^@student_visible)
+      |> tagged_for_adaptive()
+      |> where([q], q.section_id in ^mastered_section_ids)
+      |> maybe_exclude_question_ids(exclude_ids)
+      |> order_by([q], asc: fragment("random()"))
+      |> limit(^limit)
+      |> preload([:chapter, :section])
+      |> Repo.all()
+    end
+  end
+
   def list_questions_for_quick_test(user_role_id, course_id \\ nil, limit \\ 20)
   def list_questions_for_quick_test(nil, _course_id, _limit), do: []
 
