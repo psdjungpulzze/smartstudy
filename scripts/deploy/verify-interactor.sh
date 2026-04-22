@@ -21,7 +21,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 ENV_FILE="${1:-$ROOT/.env.prod}"
 
-REQUIRED_ASSISTANTS=(course_discovery web_search question_gen question_extract question_validator)
+REQUIRED_ASSISTANTS=(course_discovery web_search question_gen question_extract question_quality_reviewer question_skill_tagger)
 
 # --- Colors ---------------------------------------------------------------
 if [ -t 1 ]; then

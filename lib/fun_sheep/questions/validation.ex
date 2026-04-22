@@ -10,7 +10,7 @@ defmodule FunSheep.Questions.Validation do
 
   A question is only shown to students when `validation_status == :passed`.
 
-  This module builds the prompt, calls the `question_validator` Interactor
+  This module builds the prompt, calls the `question_quality_reviewer` Interactor
   assistant, parses the structured response, and applies the verdict.
   """
 
@@ -23,13 +23,12 @@ defmodule FunSheep.Questions.Validation do
   @passed_threshold 95.0
   @review_threshold 70.0
 
-  # Renamed from "question_validator" to force re-provisioning. The original
-  # assistant was registered as gpt-4o with max_tokens 4000 before we moved to
-  # gpt-4o-mini/2000 for cost and stability; the Interactor API only applies
-  # `assistant_attrs` on first provision, so the old name would stay on the
-  # expensive/slow config. Bumping the name is safer than asking ops to delete
-  # the old row by hand.
-  @assistant_name "question_validator_v2"
+  # Interactor only applies `assistant_attrs` on first provision, so the only
+  # safe way to push a config change (model, prompt, token cap) is to register
+  # under a new name. Prior names: "question_validator" (gpt-4o/4000 tokens),
+  # "question_validator_v2" (gpt-4o-mini/2000 tokens). If config must change
+  # again, pick another descriptive name rather than reusing a prior one.
+  @assistant_name "question_quality_reviewer"
 
   @assistant_system_prompt """
   You are a strict curriculum validator. Your job is to evaluate whether each
@@ -75,16 +74,17 @@ defmodule FunSheep.Questions.Validation do
     course = load_course(hd(questions).course_id)
     prompt = build_batch_prompt(course, questions)
 
-    # Auto-provision the assistant on first call — same pattern as Tutor.
-    _ = ensure_assistant()
-
-    case Agents.chat(@assistant_name, prompt, %{
-           source: "questions_validation_context",
-           metadata: %{course_id: course.id, kind: "question_validation"}
-         }) do
-      {:ok, response} ->
-        parse_batch_response(response, questions)
-
+    # Provisioning failures must short-circuit — otherwise Agents.chat/3 hits
+    # Interactor with an unknown assistant name and returns :assistant_not_found
+    # for every call until the operator intervenes.
+    with {:ok, _id} <- ensure_assistant(),
+         {:ok, response} <-
+           Agents.chat(@assistant_name, prompt, %{
+             source: "questions_validation_context",
+             metadata: %{course_id: course.id, kind: "question_validation"}
+           }) do
+      parse_batch_response(response, questions)
+    else
       {:error, reason} = err ->
         Logger.error("[Validation] Assistant unavailable: #{inspect(reason)}")
         err
@@ -137,7 +137,7 @@ defmodule FunSheep.Questions.Validation do
   @behaviour FunSheep.Interactor.AssistantSpec
 
   @doc """
-  Configuration used to register the `question_validator` assistant on
+  Configuration used to register the `question_quality_reviewer` assistant on
   Interactor. Exposed for scripts/preflight checks.
   """
   @impl FunSheep.Interactor.AssistantSpec
@@ -155,7 +155,7 @@ defmodule FunSheep.Questions.Validation do
   end
 
   @doc """
-  Ensures the `question_validator` assistant exists on Interactor. Caches the
+  Ensures the `question_quality_reviewer` assistant exists on Interactor. Caches the
   resolved id in `persistent_term`. Safe to call repeatedly — subsequent
   calls are a single `persistent_term` lookup.
 

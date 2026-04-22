@@ -14,7 +14,7 @@ defmodule FunSheep.Interactor.AssistantSpec do
 
         @impl true
         def assistant_attrs, do: %{
-          name: "question_validator",
+          name: "question_quality_reviewer",
           description: "…",
           llm_provider: "openai",
           llm_model: "gpt-4o-mini",
