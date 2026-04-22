@@ -163,6 +163,7 @@ defmodule FunSheep.Workers.ParentRequestEmailWorkerTest do
       # Null the email on the parent record via raw update to simulate
       # bad data — real validation blocks this.
       import Ecto.Query
+
       from(u in FunSheep.Accounts.UserRole, where: u.id == ^parent.id)
       |> Repo.update_all(set: [email: nil])
 

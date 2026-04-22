@@ -62,7 +62,9 @@ defmodule FunSheepWeb.Emails.ParentRequestEmailTest do
     end
 
     test "renders the student's reason text for :other" do
-      {req, _s, _p} = build_request(%{reason_code: :other, reason_text: "I want to beat my rival"})
+      {req, _s, _p} =
+        build_request(%{reason_code: :other, reason_text: "I want to beat my rival"})
+
       assert {:ok, email} = ParentRequestEmail.build(req)
       assert email.html_body =~ "I want to beat my rival"
       assert email.text_body =~ "I want to beat my rival"
@@ -85,7 +87,13 @@ defmodule FunSheepWeb.Emails.ParentRequestEmailTest do
     test "renders the upcoming-test line when present" do
       {req, _s, _p} =
         build_request(%{
-          metadata: %{"upcoming_test" => %{"name" => "Chem Unit 3", "date" => "2026-05-01", "days_away" => 9}}
+          metadata: %{
+            "upcoming_test" => %{
+              "name" => "Chem Unit 3",
+              "date" => "2026-05-01",
+              "days_away" => 9
+            }
+          }
         })
 
       assert {:ok, email} = ParentRequestEmail.build(req)
@@ -96,6 +104,7 @@ defmodule FunSheepWeb.Emails.ParentRequestEmailTest do
       {req, _s, parent} = build_request(%{})
       # Null out the email
       import Ecto.Query
+
       from(u in FunSheep.Accounts.UserRole, where: u.id == ^parent.id)
       |> Repo.update_all(set: [email: nil])
 
@@ -104,7 +113,9 @@ defmodule FunSheepWeb.Emails.ParentRequestEmailTest do
     end
 
     test "HTML-escapes the student's reason text" do
-      {req, _s, _p} = build_request(%{reason_code: :other, reason_text: "<script>alert(1)</script>"})
+      {req, _s, _p} =
+        build_request(%{reason_code: :other, reason_text: "<script>alert(1)</script>"})
+
       assert {:ok, email} = ParentRequestEmail.build(req)
       refute email.html_body =~ "<script>alert(1)</script>"
       assert email.html_body =~ "&lt;script&gt;"

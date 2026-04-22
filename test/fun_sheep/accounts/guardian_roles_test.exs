@@ -74,7 +74,10 @@ defmodule FunSheep.Accounts.GuardianRolesTest do
       link(mom, student, :parent)
       link(teacher, student, :teacher)
 
-      ids = Accounts.list_active_guardian_roles_for_student(student.id, only: :parent) |> Enum.map(& &1.id)
+      ids =
+        Accounts.list_active_guardian_roles_for_student(student.id, only: :parent)
+        |> Enum.map(& &1.id)
+
       assert ids == [mom.id]
     end
 
@@ -86,7 +89,10 @@ defmodule FunSheep.Accounts.GuardianRolesTest do
       link(mom, student, :parent)
       link(teacher, student, :teacher)
 
-      ids = Accounts.list_active_guardian_roles_for_student(student.id, only: :teacher) |> Enum.map(& &1.id)
+      ids =
+        Accounts.list_active_guardian_roles_for_student(student.id, only: :teacher)
+        |> Enum.map(& &1.id)
+
       assert ids == [teacher.id]
     end
 

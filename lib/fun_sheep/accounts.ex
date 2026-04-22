@@ -252,8 +252,11 @@ defmodule FunSheep.Accounts do
 
     query =
       case Keyword.get(opts, :only) do
-        nil -> query
-        type when type in [:parent, :teacher] -> where(query, [sg, _ur], sg.relationship_type == ^type)
+        nil ->
+          query
+
+        type when type in [:parent, :teacher] ->
+          where(query, [sg, _ur], sg.relationship_type == ^type)
       end
 
     Repo.all(query)

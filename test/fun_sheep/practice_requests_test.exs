@@ -91,7 +91,9 @@ defmodule FunSheep.PracticeRequestsTest do
       assert Map.has_key?(req.metadata, "streak_days")
       assert Map.has_key?(req.metadata, "captured_at")
 
-      assert_received {:telemetry, [:fun_sheep, :practice_request, :created], _, %{request_id: rid}}
+      assert_received {:telemetry, [:fun_sheep, :practice_request, :created], _,
+                       %{request_id: rid}}
+
       assert rid == req.id
     end
 
@@ -99,7 +101,9 @@ defmodule FunSheep.PracticeRequestsTest do
       %{student: s, parent: p} = setup_pair()
 
       {:ok, _} = PracticeRequests.create(s.id, p.id, %{reason_code: :streak})
-      assert {:error, :already_pending} = PracticeRequests.create(s.id, p.id, %{reason_code: :streak})
+
+      assert {:error, :already_pending} =
+               PracticeRequests.create(s.id, p.id, %{reason_code: :streak})
     end
 
     test "enforces 48-hour cooldown after a decline" do
@@ -109,7 +113,8 @@ defmodule FunSheep.PracticeRequestsTest do
       {:ok, _} = PracticeRequests.decline(req.id, "maybe later")
 
       # Within the cooldown window, creation fails.
-      assert {:error, :decline_cooldown} = PracticeRequests.create(s.id, p.id, %{reason_code: :streak})
+      assert {:error, :decline_cooldown} =
+               PracticeRequests.create(s.id, p.id, %{reason_code: :streak})
     end
 
     test "allows a new request after the 48h cooldown lapses" do
@@ -119,7 +124,8 @@ defmodule FunSheep.PracticeRequestsTest do
       {:ok, declined} = PracticeRequests.decline(req.id, nil)
 
       # Backdate the decision by 49 hours to simulate cooldown expiry.
-      far_past = DateTime.add(DateTime.utc_now(), -49 * 3600, :second) |> DateTime.truncate(:second)
+      far_past =
+        DateTime.add(DateTime.utc_now(), -49 * 3600, :second) |> DateTime.truncate(:second)
 
       Ecto.Changeset.change(declined, decided_at: far_past, updated_at: far_past)
       |> FunSheep.Repo.update!()
@@ -176,7 +182,9 @@ defmodule FunSheep.PracticeRequestsTest do
       %{student: s, parent: p} = setup_pair()
       {:ok, req} = PracticeRequests.create(s.id, p.id, %{reason_code: :streak})
 
-      assert {:ok, accepted} = PracticeRequests.accept(req.id, %{subscription_id: Ecto.UUID.generate()})
+      assert {:ok, accepted} =
+               PracticeRequests.accept(req.id, %{subscription_id: Ecto.UUID.generate()})
+
       assert accepted.status == :accepted
       assert not is_nil(accepted.decided_at)
 

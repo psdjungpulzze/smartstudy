@@ -108,7 +108,8 @@ defmodule FunSheep.Workers.ParentRequestEmailWorker do
   ## Timezone + quiet-hours logic (§9.3)
 
   @doc false
-  def resolve_timezone(%Request{guardian: %{timezone: tz}}) when is_binary(tz) and tz != "", do: tz
+  def resolve_timezone(%Request{guardian: %{timezone: tz}}) when is_binary(tz) and tz != "",
+    do: tz
 
   def resolve_timezone(%Request{student: %{timezone: tz}}) when is_binary(tz) and tz != "", do: tz
 
@@ -160,7 +161,10 @@ defmodule FunSheep.Workers.ParentRequestEmailWorker do
   end
 
   defp next_seven_local(%DateTime{} = local) do
-    target_date = if local.hour >= @quiet_end, do: Date.add(DateTime.to_date(local), 1), else: DateTime.to_date(local)
+    target_date =
+      if local.hour >= @quiet_end,
+        do: Date.add(DateTime.to_date(local), 1),
+        else: DateTime.to_date(local)
 
     %DateTime{
       year: target_date.year,

@@ -34,8 +34,14 @@ defmodule FunSheep.Workers.RequestExpiryWorkerTest do
   end
 
   defp backdate_expires_at(request_id, hours_in_past) do
-    past = DateTime.add(DateTime.utc_now(), -hours_in_past * 3600, :second) |> DateTime.truncate(:second)
-    Request |> Repo.get!(request_id) |> Ecto.Changeset.change(expires_at: past) |> Repo.update!()
+    past =
+      DateTime.add(DateTime.utc_now(), -hours_in_past * 3600, :second)
+      |> DateTime.truncate(:second)
+
+    Request
+    |> Repo.get!(request_id)
+    |> Ecto.Changeset.change(expires_at: past)
+    |> Repo.update!()
   end
 
   test "expires only requests whose expires_at is in the past" do
