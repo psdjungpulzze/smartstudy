@@ -161,6 +161,7 @@ defmodule FunSheepWeb.Router do
       live "/interactor/agents", AdminInteractorAgentsLive, :index
       live "/interactor/profiles", AdminInteractorProfilesLive, :index
       live "/interactor/credentials", AdminInteractorCredentialsLive, :index
+      live "/billing", AdminBillingLive, :index
     end
   end
 
