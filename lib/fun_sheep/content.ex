@@ -372,6 +372,24 @@ defmodule FunSheep.Content do
     |> Repo.all()
   end
 
+
+  @doc """
+  Video-type sources linked to a specific section (skill). Used by the
+  practice UI on wrong-answer / "I don't know" events — North Star I-14.
+  Returns `[]` when no videos are linked (honesty, I-16).
+  """
+  def list_videos_for_section(nil), do: []
+
+  def list_videos_for_section(section_id) do
+    from(ds in DiscoveredSource,
+      where:
+        ds.section_id == ^section_id and ds.source_type == "video" and
+          not is_nil(ds.url),
+      order_by: [desc: ds.confidence_score]
+    )
+    |> Repo.all()
+  end
+
   @doc """
   Lists sources that are ready to be scraped (status = "discovered").
   """
