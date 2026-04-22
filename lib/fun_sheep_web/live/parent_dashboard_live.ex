@@ -752,7 +752,9 @@ defmodule FunSheepWeb.ParentDashboardLive do
           >
             <p class="text-sm font-extrabold text-gray-900 truncate">{student.name}</p>
             <p class="text-[11px] text-gray-500 mt-0.5">
-              <span :if={student.grade}>{gettext("Grade")} {student.grade}  · </span>
+              <%= if student.grade do %>
+                {gettext("Grade")} {student.grade} ·
+              <% end %>
               {student.upcoming_count} {gettext("upcoming")}
             </p>
             <p class="text-xs text-gray-700 mt-2">
