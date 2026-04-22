@@ -686,6 +686,26 @@ defmodule FunSheep.Courses do
     |> Repo.all()
   end
 
+
+  @doc "All sections for any of the given chapter IDs."
+  def list_sections_by_chapters([]), do: []
+
+  def list_sections_by_chapters(chapter_ids) when is_list(chapter_ids) do
+    from(s in Section,
+      where: s.chapter_id in ^chapter_ids,
+      order_by: [asc: s.chapter_id, asc: s.position]
+    )
+    |> Repo.all()
+  end
+
+  @doc "Batched section lookup by ID, with chapter preloaded."
+  def list_sections_by_ids([]), do: []
+
+  def list_sections_by_ids(ids) when is_list(ids) do
+    from(s in Section, where: s.id in ^ids, preload: [:chapter])
+    |> Repo.all()
+  end
+
   def get_section!(id), do: Repo.get!(Section, id)
 
   def create_section(attrs \\ %{}) do

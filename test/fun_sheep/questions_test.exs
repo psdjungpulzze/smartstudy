@@ -10,19 +10,50 @@ defmodule FunSheep.QuestionsTest do
   end
 
   defp create_question(course, attrs \\ %{}) do
+    # Auto-attach section + trusted classification so the created question is
+    # adaptive-eligible (North Star I-1). Tests that want an untagged question
+    # override :section_id / :classification_status.
+    {chapter_id, section_id} = ensure_section(course, attrs[:chapter_id])
+
     defaults = %{
       content: "What is 2 + 2?",
       answer: "4",
       question_type: :multiple_choice,
       difficulty: :medium,
       course_id: course.id,
-      # Default to :passed so existing listing tests see the question. Tests
-      # that need pending/failed explicitly override this.
+      chapter_id: chapter_id,
+      section_id: section_id,
+      classification_status: :admin_reviewed,
       validation_status: :passed
     }
 
     {:ok, question} = Questions.create_question(Map.merge(defaults, attrs))
     question
+  end
+
+  defp ensure_section(course, nil) do
+    {:ok, ch} =
+      Courses.create_chapter(%{
+        name: "Auto Chapter #{System.unique_integer([:positive])}",
+        position: 1,
+        course_id: course.id
+      })
+
+    {:ok, sec} =
+      Courses.create_section(%{name: "Auto Section", position: 1, chapter_id: ch.id})
+
+    {ch.id, sec.id}
+  end
+
+  defp ensure_section(_course, chapter_id) do
+    {:ok, sec} =
+      Courses.create_section(%{
+        name: "Auto Section #{System.unique_integer([:positive])}",
+        position: 1,
+        chapter_id: chapter_id
+      })
+
+    {chapter_id, sec.id}
   end
 
   describe "create_question/1" do

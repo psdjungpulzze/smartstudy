@@ -24,11 +24,10 @@ defmodule FunSheepWeb.AssessmentLiveTest do
     course = ContentFixtures.create_course(%{created_by_id: user_role.id})
 
     {:ok, chapter} =
-      FunSheep.Courses.create_chapter(%{
-        name: "Chapter 1",
-        position: 1,
-        course_id: course.id
-      })
+      FunSheep.Courses.create_chapter(%{name: "Chapter 1", position: 1, course_id: course.id})
+
+    {:ok, section} =
+      FunSheep.Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: chapter.id})
 
     {:ok, _q1} =
       FunSheep.Questions.create_question(%{
@@ -39,7 +38,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
         difficulty: :easy,
         options: %{"A" => "Mitochondria", "B" => "Nucleus", "C" => "Ribosome", "D" => "Golgi"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, _q2} =
@@ -56,7 +57,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
           "D" => "None"
         },
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, _q3} =
@@ -73,7 +76,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
           "D" => "Photosynthesis"
         },
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, schedule} =

@@ -429,8 +429,17 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       end)
 
     enqueue_validation(inserted_ids, course.id)
+    enqueue_classification(inserted_ids)
 
     count
+  end
+
+  # Hand AI-generated questions to the classifier so they pick up a skill
+  # tag (section_id) and become adaptive-eligible. See North Star I-1.
+  defp enqueue_classification([]), do: :ok
+
+  defp enqueue_classification(ids) do
+    FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(ids)
   end
 
   defp enqueue_validation([], _course_id), do: :ok

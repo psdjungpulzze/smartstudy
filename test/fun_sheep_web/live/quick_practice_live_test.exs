@@ -20,6 +20,18 @@ defmodule FunSheepWeb.QuickPracticeLiveTest do
   end
 
   defp add_question(course_id, content) do
+    # Auto-create a chapter + section so each question carries a skill tag
+    # required by adaptive flows (North Star I-1).
+    {:ok, ch} =
+      FunSheep.Courses.create_chapter(%{
+        name: "Ch #{System.unique_integer([:positive])}",
+        position: 1,
+        course_id: course_id
+      })
+
+    {:ok, sec} =
+      FunSheep.Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: ch.id})
+
     {:ok, q} =
       Questions.create_question(%{
         validation_status: :passed,
@@ -28,7 +40,10 @@ defmodule FunSheepWeb.QuickPracticeLiveTest do
         question_type: :multiple_choice,
         difficulty: :easy,
         options: %{"A" => "yes", "B" => "no"},
-        course_id: course_id
+        course_id: course_id,
+        chapter_id: ch.id,
+        section_id: sec.id,
+        classification_status: :admin_reviewed
       })
 
     q
