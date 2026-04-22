@@ -51,7 +51,9 @@ defmodule FunSheep.ImpersonationTest do
     test "admin cannot impersonate a suspended user" do
       admin = create(:admin, "a3@x.com")
       target = create(:student, "sus@x.com")
-      {:ok, suspended} = Admin.suspend_user(target, %{"user_role_id" => admin.id, "email" => admin.email})
+
+      {:ok, suspended} =
+        Admin.suspend_user(target, %{"user_role_id" => admin.id, "email" => admin.email})
 
       assert {:error, :target_suspended} = Admin.start_impersonation(admin, suspended)
     end

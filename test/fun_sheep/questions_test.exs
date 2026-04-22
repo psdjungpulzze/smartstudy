@@ -220,6 +220,7 @@ defmodule FunSheep.QuestionsTest do
 
     test "returns all-zero map for a course with no questions" do
       course = create_course()
+
       assert Questions.count_by_validation_status(course.id) == %{
                pending: 0,
                passed: 0,

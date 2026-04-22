@@ -79,7 +79,9 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
          }) do
       {:ok, response} ->
         case parse_response(response) do
-          {:ok, parsed} -> apply_classification(question, sections, parsed)
+          {:ok, parsed} ->
+            apply_classification(question, sections, parsed)
+
           {:error, reason} ->
             Logger.warning("[QClassify] Parse failed for #{question.id}: #{inspect(reason)}")
             {:error, :parse_failed}
@@ -174,8 +176,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
       classification_status: :ai_classified,
       classification_confidence: confidence,
       classified_at: now,
-      metadata:
-        Map.merge(question.metadata || %{}, %{"classification" => stringify(meta)})
+      metadata: Map.merge(question.metadata || %{}, %{"classification" => stringify(meta)})
     })
     |> Repo.update()
   end
@@ -188,8 +189,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
       classification_status: :low_confidence,
       classification_confidence: confidence,
       classified_at: now,
-      metadata:
-        Map.merge(question.metadata || %{}, %{"classification" => stringify(meta)})
+      metadata: Map.merge(question.metadata || %{}, %{"classification" => stringify(meta)})
     })
     |> Repo.update()
   end

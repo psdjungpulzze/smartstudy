@@ -174,7 +174,6 @@ defmodule FunSheepWeb.AuthController do
     end
   end
 
-
   defp ensure_local_user_role(interactor_user_id, role, email, display_name) do
     # user_roles.role is an Ecto.Enum [:student, :parent, :teacher, :admin].
     db_role = if role in ~w(student parent teacher admin), do: role, else: "student"

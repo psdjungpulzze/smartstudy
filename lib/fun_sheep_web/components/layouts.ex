@@ -148,7 +148,11 @@ defmodule FunSheepWeb.Layouts do
           %{label: "Users", path: "/admin/users", icon: "hero-users"},
           %{label: "Courses", path: "/admin/courses", icon: "hero-book-open"},
           %{label: "Materials", path: "/admin/materials", icon: "hero-document-text"},
-          %{label: "Review", path: "/admin/questions/review", icon: "hero-clipboard-document-check"}
+          %{
+            label: "Review",
+            path: "/admin/questions/review",
+            icon: "hero-clipboard-document-check"
+          }
         ]
 
       _ ->

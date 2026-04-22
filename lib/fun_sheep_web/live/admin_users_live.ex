@@ -91,7 +91,10 @@ defmodule FunSheepWeb.AdminUsersLive do
       {:ok, _} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Promoted to admin. (Run `mix funsheep.admin.grant` if you also need the Interactor-side metadata.role claim.)")
+         |> put_flash(
+           :info,
+           "Promoted to admin. (Run `mix funsheep.admin.grant` if you also need the Interactor-side metadata.role claim.)"
+         )
          |> load_users()}
 
       {:error, _} ->

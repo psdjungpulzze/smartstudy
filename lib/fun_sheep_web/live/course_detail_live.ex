@@ -1277,7 +1277,9 @@ defmodule FunSheepWeb.CourseDetailLive do
     chapters = assigns.course.chapters || []
     chapters_count = length(chapters)
     question_count = assigns.question_count || 0
-    validation_counts = assigns.validation_counts || %{pending: 0, passed: 0, needs_review: 0, failed: 0}
+
+    validation_counts =
+      assigns.validation_counts || %{pending: 0, passed: 0, needs_review: 0, failed: 0}
 
     web_search_done = meta["web_search_complete"] == true
 

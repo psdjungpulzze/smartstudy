@@ -11,8 +11,13 @@ defmodule FunSheep.Questions.ClassificationTest do
 
   defp setup_course do
     {:ok, course} = Courses.create_course(%{name: "Math 101", subject: "Math", grade: "10"})
-    {:ok, chapter} = Courses.create_chapter(%{name: "Fractions", position: 1, course_id: course.id})
-    {:ok, section} = Courses.create_section(%{name: "Adding Fractions", position: 1, chapter_id: chapter.id})
+
+    {:ok, chapter} =
+      Courses.create_chapter(%{name: "Fractions", position: 1, course_id: course.id})
+
+    {:ok, section} =
+      Courses.create_section(%{name: "Adding Fractions", position: 1, chapter_id: chapter.id})
+
     %{course: course, chapter: chapter, section: section}
   end
 
@@ -35,13 +40,25 @@ defmodule FunSheep.Questions.ClassificationTest do
       %{course: course, chapter: chapter, section: section} = setup_course()
 
       eligible =
-        insert_question(course, %{chapter_id: chapter.id, section_id: section.id, classification_status: :admin_reviewed})
+        insert_question(course, %{
+          chapter_id: chapter.id,
+          section_id: section.id,
+          classification_status: :admin_reviewed
+        })
 
       ai_tagged =
-        insert_question(course, %{chapter_id: chapter.id, section_id: section.id, classification_status: :ai_classified})
+        insert_question(course, %{
+          chapter_id: chapter.id,
+          section_id: section.id,
+          classification_status: :ai_classified
+        })
 
       _low =
-        insert_question(course, %{chapter_id: chapter.id, section_id: section.id, classification_status: :low_confidence})
+        insert_question(course, %{
+          chapter_id: chapter.id,
+          section_id: section.id,
+          classification_status: :low_confidence
+        })
 
       _untagged =
         insert_question(course, %{chapter_id: chapter.id, classification_status: :uncategorized})
@@ -61,8 +78,18 @@ defmodule FunSheep.Questions.ClassificationTest do
     test "counts tagged / untagged / low-confidence per course and per chapter" do
       %{course: course, chapter: chapter, section: section} = setup_course()
 
-      insert_question(course, %{chapter_id: chapter.id, section_id: section.id, classification_status: :admin_reviewed})
-      insert_question(course, %{chapter_id: chapter.id, section_id: section.id, classification_status: :ai_classified})
+      insert_question(course, %{
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
+      })
+
+      insert_question(course, %{
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :ai_classified
+      })
+
       insert_question(course, %{chapter_id: chapter.id, classification_status: :low_confidence})
       insert_question(course, %{chapter_id: chapter.id, classification_status: :uncategorized})
 

@@ -40,7 +40,11 @@ defmodule FunSheepWeb.LiveHelpers do
             |> attach_hook(:save_request_path, :handle_params, &save_request_path/3)
             |> attach_hook(:gate_onboarding, :handle_params, &gate_onboarding/3)
             |> attach_hook(:tutorial_events, :handle_event, &handle_tutorial_event/3)
-            |> attach_hook(:gamification_modal_events, :handle_event, &handle_gamification_event/3)
+            |> attach_hook(
+              :gamification_modal_events,
+              :handle_event,
+              &handle_gamification_event/3
+            )
             |> assign(:show_tutorial, false)
             |> assign(:tutorial_config, nil)
 

@@ -190,7 +190,10 @@ defmodule FunSheep.Admin do
   and suspended targets (suspended users can't be impersonated — use the
   audit log to investigate their activity instead).
   """
-  def start_impersonation(%UserRole{role: :admin, suspended_at: nil} = admin, %UserRole{} = target) do
+  def start_impersonation(
+        %UserRole{role: :admin, suspended_at: nil} = admin,
+        %UserRole{} = target
+      ) do
     cond do
       admin.id == target.id ->
         {:error, :cannot_impersonate_self}

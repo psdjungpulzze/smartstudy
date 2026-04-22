@@ -290,7 +290,10 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
   defp edit_form(assigns) do
     assigns =
       assigns
-      |> assign(:suggested_explanation, suggested_explanation(assigns.question.validation_report || %{}))
+      |> assign(
+        :suggested_explanation,
+        suggested_explanation(assigns.question.validation_report || %{})
+      )
       |> assign(:corrected_answer, corrected_answer(assigns.question.validation_report || %{}))
 
     ~H"""
@@ -361,7 +364,9 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
   # --- View helpers ---
 
-  defp course_label(%Question{course: %{name: name, grade: grade}}), do: "#{name} · Grade #{grade}"
+  defp course_label(%Question{course: %{name: name, grade: grade}}),
+    do: "#{name} · Grade #{grade}"
+
   defp course_label(_), do: ""
 
   defp score(%{"topic_relevance_score" => s}) when is_number(s), do: s

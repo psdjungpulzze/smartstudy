@@ -293,9 +293,11 @@ defmodule FunSheepWeb.DashboardLive do
   defp study_path(assigns) do
     readiness = if assigns.test.readiness, do: assigns.test.readiness.aggregate_score, else: nil
     has_readiness = readiness != nil
+
     all_mastered? =
       has_readiness and
         FunSheep.Assessments.ReadinessCalculator.all_skills_mastered?(assigns.test.readiness)
+
     has_format = assigns.test.test.format_template_id != nil
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id

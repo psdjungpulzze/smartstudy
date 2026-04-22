@@ -276,5 +276,4 @@ defmodule FunSheep.Tutor do
       |> Enum.reject(&is_nil/1)
     end
   end
-
 end

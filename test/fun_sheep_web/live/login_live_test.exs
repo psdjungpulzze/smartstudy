@@ -30,5 +30,4 @@ defmodule FunSheepWeb.LoginLiveTest do
       refute html =~ "Create an account"
     end
   end
-
 end

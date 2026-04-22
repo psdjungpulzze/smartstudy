@@ -163,7 +163,6 @@ defmodule FunSheep.Learning do
     |> Repo.all()
   end
 
-
   @doc """
   Flat list of hobby names for prompt injection (tutor, question gen).
   Returns `[]` when the user has no hobbies set — caller must treat the

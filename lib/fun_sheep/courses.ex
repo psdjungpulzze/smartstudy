@@ -686,7 +686,6 @@ defmodule FunSheep.Courses do
     |> Repo.all()
   end
 
-
   @doc "All sections for any of the given chapter IDs."
   def list_sections_by_chapters([]), do: []
 

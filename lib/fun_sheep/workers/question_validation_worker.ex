@@ -170,8 +170,9 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       explanation_fixable?(verdict["explanation"])
   end
 
-  defp answer_fixable?(%{"correct" => false, "corrected_answer" => a}) when is_binary(a) and a != "",
-    do: true
+  defp answer_fixable?(%{"correct" => false, "corrected_answer" => a})
+       when is_binary(a) and a != "",
+       do: true
 
   defp answer_fixable?(_), do: false
 

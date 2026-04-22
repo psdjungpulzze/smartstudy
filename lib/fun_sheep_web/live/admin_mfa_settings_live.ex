@@ -312,5 +312,4 @@ defmodule FunSheepWeb.AdminMfaSettingsLive do
     </div>
     """
   end
-
 end
