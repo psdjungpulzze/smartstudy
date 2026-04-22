@@ -61,37 +61,16 @@ defmodule FunSheepWeb.GuardianInviteLive do
     role = socket.assigns.current_role
     user_role = socket.assigns.user_role
 
-    relationship_type =
-      case role do
-        "parent" -> :parent
-        "teacher" -> :teacher
-        _ -> :parent
-      end
-
-    case Accounts.invite_guardian(user_role.id, String.trim(email), relationship_type) do
-      {:ok, _sg} ->
-        socket =
-          socket
-          |> assign(invite_email: "", invite_error: nil, invite_success: "Invitation sent!")
-          |> load_data(role, socket.assigns.current_user)
-
-        {:noreply, socket}
-
-      {:error, :student_not_found} ->
+    cond do
+      is_nil(user_role) ->
         {:noreply,
-         assign(socket, invite_error: "No student found with that email.", invite_success: nil)}
+         assign(socket, invite_error: "You must be signed in to invite.", invite_success: nil)}
 
-      {:error, :already_linked} ->
-        {:noreply,
-         assign(socket, invite_error: "Already linked to this student.", invite_success: nil)}
+      role == "student" ->
+        handle_student_invite(socket, user_role, email)
 
-      {:error, :already_invited} ->
-        {:noreply,
-         assign(socket, invite_error: "Invitation already pending.", invite_success: nil)}
-
-      {:error, _changeset} ->
-        {:noreply,
-         assign(socket, invite_error: "Failed to send invitation.", invite_success: nil)}
+      true ->
+        handle_guardian_invite(socket, role, user_role, email)
     end
   end
 
@@ -128,6 +107,95 @@ defmodule FunSheepWeb.GuardianInviteLive do
     end
   end
 
+  defp handle_guardian_invite(socket, role, user_role, email) do
+    relationship_type =
+      case role do
+        "parent" -> :parent
+        "teacher" -> :teacher
+        _ -> :parent
+      end
+
+    case Accounts.invite_guardian(user_role.id, String.trim(email), relationship_type) do
+      {:ok, _sg} ->
+        socket =
+          socket
+          |> assign(invite_email: "", invite_error: nil, invite_success: "Invitation sent!")
+          |> load_data(role, socket.assigns.current_user)
+
+        {:noreply, socket}
+
+      {:error, :student_not_found} ->
+        {:noreply,
+         assign(socket, invite_error: "No student found with that email.", invite_success: nil)}
+
+      {:error, :already_linked} ->
+        {:noreply,
+         assign(socket, invite_error: "Already linked to this student.", invite_success: nil)}
+
+      {:error, :already_invited} ->
+        {:noreply,
+         assign(socket, invite_error: "Invitation already pending.", invite_success: nil)}
+
+      {:error, _changeset} ->
+        {:noreply,
+         assign(socket, invite_error: "Failed to send invitation.", invite_success: nil)}
+    end
+  end
+
+  defp handle_student_invite(socket, user_role, email) do
+    # Students invite a parent via the email-based flow; teacher links
+    # are established by the teacher from their own dashboard.
+    case Accounts.invite_guardian_by_student(user_role.id, email, :parent) do
+      {:ok, %{guardian_id: nil}} ->
+        socket =
+          socket
+          |> assign(
+            invite_email: "",
+            invite_error: nil,
+            invite_success:
+              "Invitation sent to #{String.trim(email)}. They'll get an email with a link to accept."
+          )
+          |> load_data("student", socket.assigns.current_user)
+
+        {:noreply, socket}
+
+      {:ok, _sg} ->
+        socket =
+          socket
+          |> assign(
+            invite_email: "",
+            invite_error: nil,
+            invite_success:
+              "Invitation sent! They already have a FunSheep account — they'll see it in their Guardians page."
+          )
+          |> load_data("student", socket.assigns.current_user)
+
+        {:noreply, socket}
+
+      {:error, :invalid_email} ->
+        {:noreply,
+         assign(socket, invite_error: "Please enter a valid email address.", invite_success: nil)}
+
+      {:error, :already_linked} ->
+        {:noreply,
+         assign(socket,
+           invite_error: "You're already linked with that grown-up.",
+           invite_success: nil
+         )}
+
+      {:error, :already_invited} ->
+        {:noreply,
+         assign(socket,
+           invite_error: "An invitation to that email is already pending.",
+           invite_success: nil
+         )}
+
+      {:error, _other} ->
+        {:noreply,
+         assign(socket, invite_error: "Failed to send invitation.", invite_success: nil)}
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -152,6 +220,9 @@ defmodule FunSheepWeb.GuardianInviteLive do
           user_role={@user_role}
           guardians={assigns[:guardians] || []}
           pending_invites={@pending_invites}
+          invite_email={@invite_email}
+          invite_error={@invite_error}
+          invite_success={@invite_success}
         />
       <% end %>
     </div>
@@ -265,10 +336,41 @@ defmodule FunSheepWeb.GuardianInviteLive do
   attr :user_role, :any, required: true
   attr :guardians, :list, required: true
   attr :pending_invites, :list, required: true
+  attr :invite_email, :string, required: true
+  attr :invite_error, :string, default: nil
+  attr :invite_success, :string, default: nil
 
   defp student_view(assigns) do
     ~H"""
     <div class="mt-8">
+      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
+        <h2 class="text-lg font-semibold text-[#1C1C1E] mb-1">Invite a grown-up</h2>
+        <p class="text-sm text-[#8E8E93] mb-4">
+          Enter a parent or guardian's email. We'll send them a link to join and unlock
+          unlimited practice for you.
+        </p>
+        <form phx-submit="invite" class="flex flex-col sm:flex-row gap-3 sm:items-start">
+          <div class="flex-1">
+            <input
+              type="email"
+              name="email"
+              value={@invite_email}
+              placeholder="grown-up@example.com"
+              required
+              class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none transition-colors"
+            />
+            <p :if={@invite_error} class="text-sm text-[#FF3B30] mt-2 px-4">{@invite_error}</p>
+            <p :if={@invite_success} class="text-sm text-[#4CD964] mt-2 px-4">{@invite_success}</p>
+          </div>
+          <button
+            type="submit"
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 rounded-full shadow-md transition-colors"
+          >
+            Send invite
+          </button>
+        </form>
+      </div>
+
       <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Pending Invitations</h2>
         <%= if @pending_invites == [] do %>
@@ -279,28 +381,49 @@ defmodule FunSheepWeb.GuardianInviteLive do
               :for={sg <- @pending_invites}
               class="flex items-center justify-between p-4 bg-[#F5F5F7] rounded-xl"
             >
-              <div>
-                <p class="font-medium text-[#1C1C1E]">
-                  {sg.guardian.display_name || sg.guardian.email}
-                </p>
-                <p class="text-sm text-[#8E8E93]">{sg.guardian.email} - {sg.relationship_type}</p>
-              </div>
-              <div class="flex gap-2">
-                <button
-                  phx-click="accept"
-                  phx-value-id={sg.id}
-                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-4 py-2 rounded-full shadow-md transition-colors text-sm"
-                >
-                  Accept
-                </button>
-                <button
-                  phx-click="reject"
-                  phx-value-id={sg.id}
-                  class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-4 py-2 rounded-full shadow-sm border border-gray-200 transition-colors text-sm"
-                >
-                  Reject
-                </button>
-              </div>
+              <%= if sg.guardian do %>
+                <div>
+                  <p class="font-medium text-[#1C1C1E]">
+                    {sg.guardian.display_name || sg.guardian.email}
+                  </p>
+                  <p class="text-sm text-[#8E8E93]">{sg.guardian.email} - {sg.relationship_type}</p>
+                </div>
+                <div class="flex gap-2">
+                  <button
+                    phx-click="accept"
+                    phx-value-id={sg.id}
+                    class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-4 py-2 rounded-full shadow-md transition-colors text-sm"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    phx-click="reject"
+                    phx-value-id={sg.id}
+                    class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-4 py-2 rounded-full shadow-sm border border-gray-200 transition-colors text-sm"
+                  >
+                    Reject
+                  </button>
+                </div>
+              <% else %>
+                <div>
+                  <p class="font-medium text-[#1C1C1E]">{sg.invited_email}</p>
+                  <p class="text-sm text-[#8E8E93]">
+                    Waiting for them to sign up · {sg.relationship_type}
+                  </p>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs font-medium px-3 py-1 rounded-full bg-[#FFCC00] text-[#1C1C1E]">
+                    Email sent
+                  </span>
+                  <button
+                    phx-click="revoke"
+                    phx-value-id={sg.id}
+                    class="text-sm text-[#FF3B30] hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              <% end %>
             </div>
           </div>
         <% end %>
