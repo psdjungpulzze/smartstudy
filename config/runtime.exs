@@ -158,7 +158,7 @@ if config_env() == :prod do
   # for Lifeline/Pruner plugins and Oban's internal Peer/Notifier traffic.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      [default: 10, ocr: 8, ai: 5, pdf_ocr: 3, ingest: 1, integrations: 3]
+      [default: 10, ocr: 8, ai: 5, pdf_ocr: 3, ingest: 1, integrations: 3, notifications: 2]
     else
       false
     end
@@ -176,7 +176,11 @@ if config_env() == :prod do
       {Oban.Plugins.Cron,
        crontab: [
          {"0 * * * *", FunSheep.Workers.RequestExpiryWorker},
-         {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker}
+         {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker},
+         # Parent weekly digest scheduler (spec §8.1) — Sunday 18:00 UTC.
+         # Scheduler fans out per-recipient jobs; each inner worker
+         # decides what to do.
+         {"0 18 * * SUN", FunSheep.Workers.ParentDigestScheduler}
        ]}
     ]
 
