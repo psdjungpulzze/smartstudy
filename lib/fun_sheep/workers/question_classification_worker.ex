@@ -9,7 +9,17 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   `:low_confidence` and surface to the admin review queue.
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 3
+  # `unique` prevents duplicate classification jobs from piling up when the
+  # same chapter or batch is enqueued by multiple callers. Order is normalized
+  # in `enqueue_for_questions/1`.
+  use Oban.Worker,
+    queue: :ai,
+    max_attempts: 3,
+    unique: [
+      period: 120,
+      fields: [:worker, :args],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.Question
@@ -51,7 +61,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   end
 
   def enqueue_for_questions(question_ids) when is_list(question_ids) and question_ids != [] do
-    %{"question_ids" => question_ids} |> new() |> Oban.insert()
+    %{"question_ids" => Enum.sort(question_ids)} |> new() |> Oban.insert()
   end
 
   def enqueue_for_questions(_), do: {:ok, :noop}

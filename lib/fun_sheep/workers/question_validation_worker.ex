@@ -21,7 +21,17 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
        the course is ready to finalize (all questions settled).
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 3
+  # `unique` prevents accidental duplicate enqueues of the same batch from
+  # stacking on the :ai queue. Order is normalized on enqueue so two callers
+  # passing the same ids in different order collapse to one job.
+  use Oban.Worker,
+    queue: :ai,
+    max_attempts: 3,
+    unique: [
+      period: 120,
+      fields: [:worker, :args],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.{Question, Validation}
@@ -63,8 +73,10 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   def enqueue([], _opts), do: :ok
 
   def enqueue(question_ids, opts) when is_list(question_ids) do
+    # Normalize id order so duplicate enqueues with the same members collapse
+    # under the `unique` constraint regardless of caller order.
     args =
-      %{"question_ids" => question_ids}
+      %{"question_ids" => Enum.sort(question_ids)}
       |> put_if(:course_id, opts[:course_id])
       |> put_if(:retry_round, opts[:retry_round])
 
