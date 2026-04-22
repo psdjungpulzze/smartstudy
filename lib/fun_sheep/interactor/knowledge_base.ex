@@ -66,7 +66,7 @@ defmodule FunSheep.Interactor.KnowledgeBase do
     Application.get_env(:fun_sheep, :interactor_ukb_url, "http://localhost:4005")
   end
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)

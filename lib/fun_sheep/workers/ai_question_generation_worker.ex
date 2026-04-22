@@ -19,7 +19,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   use Oban.Worker, queue: :ai, max_attempts: 3
 
-  alias FunSheep.{Courses, Content, Repo}
+  alias FunSheep.{Courses, Content, Learning, Repo}
   alias FunSheep.Questions
   alias FunSheep.Questions.Question
   alias FunSheep.Interactor.Agents
@@ -144,12 +144,24 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
     figures = collect_figures(course.id, args["source_material_id"])
 
+    hobbies = student_hobbies_for_course(course, args["user_role_id"])
+
     %{
       material_text: material_text |> String.slice(0, 8000),
       existing_questions: existing_questions,
       chapter_names: Enum.map(course.chapters, & &1.name),
-      figures: figures
+      figures: figures,
+      hobbies: hobbies
     }
+  end
+
+  defp student_hobbies_for_course(course, explicit_user_role_id) do
+    user_role_id = explicit_user_role_id || Map.get(course, :created_by_id)
+
+    case user_role_id do
+      nil -> []
+      id -> Learning.hobby_names_for_user(id)
+    end
   end
 
   # Gather available SourceFigures for the course so the generator can
@@ -281,6 +293,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       end
 
     figures_section = build_figures_section(context[:figures] || [])
+    hobby_section = build_hobby_section(context[:hobbies] || [])
 
     visual_rule =
       if (context[:figures] || []) == [] do
@@ -323,10 +336,28 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       chapters_section <>
       material_section <>
       figures_section <>
+      hobby_section <>
       existing_section <>
       instructions <>
       visual_rule <>
       format
+  end
+
+  defp build_hobby_section([]), do: ""
+
+  defp build_hobby_section(hobbies) do
+    """
+    STUDENT'S HOBBIES / INTERESTS: #{Enum.join(hobbies, ", ")}
+
+    When a hobby framing illuminates the concept, use it — e.g. KPOP ->
+    follower counts, soccer -> match stats, video games -> XP/levels.
+    When you do weave a hobby into a question, set `hobby_context` in the
+    JSON to a short note explaining which hobby and how.
+
+    If a hobby framing would feel forced, write a plain question and omit
+    `hobby_context`. A forced reference is worse than none.
+
+    """
   end
 
   defp build_figures_section([]), do: ""
@@ -401,6 +432,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
               options: q_data["options"],
               difficulty: normalize_difficulty(q_data["difficulty"]),
               explanation: q_data["explanation"],
+              hobby_context: sanitize_hobby_context(q_data["hobby_context"]),
               is_generated: true,
               course_id: course.id,
               chapter_id: if(chapter, do: chapter.id),
@@ -484,6 +516,17 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   defp maybe_put_meta(map, _k, nil), do: map
   defp maybe_put_meta(map, k, v), do: Map.put(map, k, v)
+
+  # I-11/I-16: only accept trimmed non-empty strings; everything else -> nil.
+  defp sanitize_hobby_context(nil), do: nil
+  defp sanitize_hobby_context(""), do: nil
+
+  defp sanitize_hobby_context(value) when is_binary(value) do
+    trimmed = String.trim(value)
+    if trimmed == "", do: nil, else: String.slice(trimmed, 0, 500)
+  end
+
+  defp sanitize_hobby_context(_), do: nil
 
   # Returns :ok when the question is safe to insert, {:error, reason} when it
   # references a visual we cannot render. Catches cases where the LLM writes

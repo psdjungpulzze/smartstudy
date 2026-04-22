@@ -68,7 +68,7 @@ defmodule FunSheep.Interactor.UserDatabase do
     Application.get_env(:fun_sheep, :interactor_udb_url, "http://localhost:4007")
   end
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)

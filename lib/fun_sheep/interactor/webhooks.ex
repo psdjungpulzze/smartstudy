@@ -34,5 +34,5 @@ defmodule FunSheep.Interactor.Webhooks do
     end
   end
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 end

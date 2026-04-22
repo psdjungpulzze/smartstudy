@@ -241,9 +241,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
     ocr_done = course.ocr_total_count == 0 or course.ocr_completed_count >= course.ocr_total_count
 
     if ocr_done do
-      Logger.info(
-        "[Discovery] Discovery + OCR both complete, advancing course #{course_id}"
-      )
+      Logger.info("[Discovery] Discovery + OCR both complete, advancing course #{course_id}")
 
       Courses.advance_to_extraction(course_id)
     else

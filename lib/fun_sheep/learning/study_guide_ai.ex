@@ -13,7 +13,7 @@ defmodule FunSheep.Learning.StudyGuideAI do
 
   require Logger
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
   @doc """
   Generates an explanation for why a question's answer is correct,

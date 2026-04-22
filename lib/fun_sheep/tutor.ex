@@ -11,7 +11,7 @@ defmodule FunSheep.Tutor do
   """
 
   alias FunSheep.Interactor.{Agents, KnowledgeBase, Profiles}
-  alias FunSheep.{Questions, Courses}
+  alias FunSheep.{Questions, Courses, Learning}
   alias FunSheep.Tutor.Session
 
   require Logger
@@ -38,6 +38,20 @@ defmodule FunSheep.Tutor do
   - Use simple language appropriate for the student's grade level
   - If the question has options, reference them by letter (A, B, C, D)
   - Always explain the underlying concept, not just the mechanics
+
+  ## Personalization with Hobbies
+  When the context lists the student's hobbies/interests, WEAVE THEM into
+  analogies and examples. If they like KPOP/BTS, frame percentage problems
+  around follower counts or chart positions. If they like soccer, use
+  player stats. Use a hobby framing only where it actually illuminates
+  the concept — forced references are worse than none. If no hobbies are
+  listed, use plain examples.
+
+  ## Weak Skills
+  When the context lists weak skills, be patient on those topics and
+  connect the current question to the broader skill if relevant. Never
+  call the student "weak" or imply judgment — just acknowledge it's an
+  area they're building up.
 
   ## Context
   You will receive context about:
@@ -219,7 +233,9 @@ defmodule FunSheep.Tutor do
               time_seconds: a.time_taken_seconds
             }
           end),
-        profile: profile
+        profile: profile,
+        hobbies: Learning.hobby_names_for_user(user_role_id),
+        weak_skills: weak_skill_names_for(user_role_id, course.id)
       },
       stats: %{
         total_attempts: if(stats, do: stats.total_attempts, else: 0),
@@ -238,4 +254,27 @@ defmodule FunSheep.Tutor do
   Returns the PubSub topic for a tutor session.
   """
   def topic(session_id), do: "tutor:#{session_id}"
+
+  defp weak_skill_names_for(user_role_id, course_id) do
+    deficits = Questions.skill_deficits(user_role_id, course_id)
+
+    section_ids =
+      deficits
+      |> Enum.filter(fn {_id, d} -> d.total >= 2 and d.deficit >= 0.4 end)
+      |> Enum.map(fn {id, _} -> id end)
+
+    if section_ids == [] do
+      []
+    else
+      section_ids
+      |> Enum.map(fn id ->
+        case FunSheep.Repo.get(FunSheep.Courses.Section, id) do
+          nil -> nil
+          section -> section.name
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+    end
+  end
+
 end

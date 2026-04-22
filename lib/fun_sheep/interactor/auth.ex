@@ -95,7 +95,7 @@ defmodule FunSheep.Interactor.Auth do
     end
   end
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
   defp interactor_url,
     do: Application.get_env(:fun_sheep, :interactor_url, "https://auth.interactor.com")

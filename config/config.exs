@@ -82,7 +82,7 @@ config :fun_sheep, Oban,
 
 # Interactor integration (billing, auth, agents)
 config :fun_sheep,
-  interactor_mock: true,
+  interactor_mock: false,
   interactor_core_url: "https://core.interactor.com",
   interactor_billing_url: "https://billing.interactor.com",
   stripe_publishable_key: "mock"

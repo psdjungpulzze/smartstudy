@@ -169,7 +169,7 @@ defmodule FunSheep.Interactor.Client do
   defp base_url,
     do: Application.get_env(:fun_sheep, :interactor_core_url, "https://core.interactor.com")
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
