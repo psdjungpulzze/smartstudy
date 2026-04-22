@@ -122,9 +122,7 @@ defmodule FunSheep.PracticeRequests.Request do
   defp validate_reason_text(changeset) do
     case get_field(changeset, :reason_code) do
       :other ->
-        validate_required(changeset, [:reason_text],
-          message: "is required when reason is Other"
-        )
+        validate_required(changeset, [:reason_text], message: "is required when reason is Other")
 
       _ ->
         changeset

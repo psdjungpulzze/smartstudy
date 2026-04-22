@@ -560,44 +560,44 @@ defmodule FunSheepWeb.AdminAIUsageLive do
     <div class="bg-white rounded-2xl shadow-md overflow-hidden">
       <h2 class="font-semibold text-[#1C1C1E] px-5 py-4">{@title}</h2>
       <div class="overflow-x-auto">
-      <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
-          <tr>
-            <th class="text-left px-4 py-3">Key</th>
-            <th class="text-right px-4 py-3">Calls</th>
-            <th class="text-right px-4 py-3">Prompt</th>
-            <th class="text-right px-4 py-3">Completion</th>
-            <th class="text-right px-4 py-3">Total</th>
-            <th class="text-right px-4 py-3">Est. cost</th>
-            <th class="text-right px-4 py-3">Avg ms</th>
-            <th class="text-right px-4 py-3">p95 ms</th>
-            <th class="text-right px-4 py-3">Errors</th>
-            <th class="text-left px-4 py-3">Last seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={row <- @rows} class="border-t border-[#F5F5F7]">
-            <td class="px-4 py-3 font-medium text-[#1C1C1E]">{row.key || "—"}</td>
-            <td class="px-4 py-3 text-right">{format_int(row.calls)}</td>
-            <td class="px-4 py-3 text-right">{format_int(row.prompt_tokens)}</td>
-            <td class="px-4 py-3 text-right">{format_int(row.completion_tokens)}</td>
-            <td class="px-4 py-3 text-right font-medium">{format_int(row.total_tokens)}</td>
-            <td class="px-4 py-3 text-right">{Pricing.format_cost_cents(row.est_cost_cents)}</td>
-            <td class="px-4 py-3 text-right">{format_ms(row.avg_ms)}</td>
-            <td class="px-4 py-3 text-right">{format_ms(row.p95_ms)}</td>
-            <td class={[
-              "px-4 py-3 text-right",
-              row.errors > 0 && "text-[#FF3B30] font-medium"
-            ]}>
-              {format_int(row.errors)}
-            </td>
-            <td class="px-4 py-3 text-[#8E8E93]">{format_dt(row.last_seen)}</td>
-          </tr>
-          <tr :if={@rows == []}>
-            <td colspan="10" class="px-4 py-8 text-center text-[#8E8E93]">{@empty}</td>
-          </tr>
-        </tbody>
-      </table>
+        <table class="w-full text-sm min-w-[640px]">
+          <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
+            <tr>
+              <th class="text-left px-4 py-3">Key</th>
+              <th class="text-right px-4 py-3">Calls</th>
+              <th class="text-right px-4 py-3">Prompt</th>
+              <th class="text-right px-4 py-3">Completion</th>
+              <th class="text-right px-4 py-3">Total</th>
+              <th class="text-right px-4 py-3">Est. cost</th>
+              <th class="text-right px-4 py-3">Avg ms</th>
+              <th class="text-right px-4 py-3">p95 ms</th>
+              <th class="text-right px-4 py-3">Errors</th>
+              <th class="text-left px-4 py-3">Last seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={row <- @rows} class="border-t border-[#F5F5F7]">
+              <td class="px-4 py-3 font-medium text-[#1C1C1E]">{row.key || "—"}</td>
+              <td class="px-4 py-3 text-right">{format_int(row.calls)}</td>
+              <td class="px-4 py-3 text-right">{format_int(row.prompt_tokens)}</td>
+              <td class="px-4 py-3 text-right">{format_int(row.completion_tokens)}</td>
+              <td class="px-4 py-3 text-right font-medium">{format_int(row.total_tokens)}</td>
+              <td class="px-4 py-3 text-right">{Pricing.format_cost_cents(row.est_cost_cents)}</td>
+              <td class="px-4 py-3 text-right">{format_ms(row.avg_ms)}</td>
+              <td class="px-4 py-3 text-right">{format_ms(row.p95_ms)}</td>
+              <td class={[
+                "px-4 py-3 text-right",
+                row.errors > 0 && "text-[#FF3B30] font-medium"
+              ]}>
+                {format_int(row.errors)}
+              </td>
+              <td class="px-4 py-3 text-[#8E8E93]">{format_dt(row.last_seen)}</td>
+            </tr>
+            <tr :if={@rows == []}>
+              <td colspan="10" class="px-4 py-8 text-center text-[#8E8E93]">{@empty}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
     """
@@ -610,36 +610,36 @@ defmodule FunSheepWeb.AdminAIUsageLive do
     <div class="bg-white rounded-2xl shadow-md overflow-hidden mb-6">
       <h2 class="font-semibold text-[#1C1C1E] px-5 py-4">Recent errors</h2>
       <div class="overflow-x-auto">
-      <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
-          <tr>
-            <th class="text-left px-4 py-3">When</th>
-            <th class="text-left px-4 py-3">Assistant</th>
-            <th class="text-left px-4 py-3">Source</th>
-            <th class="text-left px-4 py-3">Error</th>
-            <th class="text-right px-4 py-3">Duration</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            :for={call <- @recent_errors}
-            class="border-t border-[#F5F5F7] hover:bg-[#F5F5F7] cursor-pointer"
-            phx-click="open_drawer"
-            phx-value-id={call.id}
-          >
-            <td class="px-4 py-3 text-[#8E8E93]">{format_dt(call.inserted_at)}</td>
-            <td class="px-4 py-3">{call.assistant_name || "—"}</td>
-            <td class="px-4 py-3">{call.source}</td>
-            <td class="px-4 py-3 text-[#FF3B30] truncate max-w-md">{truncate(call.error, 80)}</td>
-            <td class="px-4 py-3 text-right">{format_ms(call.duration_ms)}</td>
-          </tr>
-          <tr :if={@recent_errors == []}>
-            <td colspan="5" class="px-4 py-8 text-center text-[#8E8E93]">
-              No errors in this window.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+        <table class="w-full text-sm min-w-[640px]">
+          <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
+            <tr>
+              <th class="text-left px-4 py-3">When</th>
+              <th class="text-left px-4 py-3">Assistant</th>
+              <th class="text-left px-4 py-3">Source</th>
+              <th class="text-left px-4 py-3">Error</th>
+              <th class="text-right px-4 py-3">Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              :for={call <- @recent_errors}
+              class="border-t border-[#F5F5F7] hover:bg-[#F5F5F7] cursor-pointer"
+              phx-click="open_drawer"
+              phx-value-id={call.id}
+            >
+              <td class="px-4 py-3 text-[#8E8E93]">{format_dt(call.inserted_at)}</td>
+              <td class="px-4 py-3">{call.assistant_name || "—"}</td>
+              <td class="px-4 py-3">{call.source}</td>
+              <td class="px-4 py-3 text-[#FF3B30] truncate max-w-md">{truncate(call.error, 80)}</td>
+              <td class="px-4 py-3 text-right">{format_ms(call.duration_ms)}</td>
+            </tr>
+            <tr :if={@recent_errors == []}>
+              <td colspan="5" class="px-4 py-8 text-center text-[#8E8E93]">
+                No errors in this window.
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
     """
@@ -652,42 +652,42 @@ defmodule FunSheepWeb.AdminAIUsageLive do
     <div class="bg-white rounded-2xl shadow-md overflow-hidden mb-6">
       <h2 class="font-semibold text-[#1C1C1E] px-5 py-4">Top 25 most expensive calls</h2>
       <div class="overflow-x-auto">
-      <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
-          <tr>
-            <th class="text-left px-4 py-3">When</th>
-            <th class="text-left px-4 py-3">Assistant</th>
-            <th class="text-left px-4 py-3">Source</th>
-            <th class="text-right px-4 py-3">Tokens</th>
-            <th class="text-right px-4 py-3">Est. cost</th>
-            <th class="text-left px-4 py-3">Model</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            :for={call <- @top_calls}
-            class="border-t border-[#F5F5F7] hover:bg-[#F5F5F7] cursor-pointer"
-            phx-click="open_drawer"
-            phx-value-id={call.id}
-          >
-            <td class="px-4 py-3 text-[#8E8E93]">{format_dt(call.inserted_at)}</td>
-            <td class="px-4 py-3">{call.assistant_name || "—"}</td>
-            <td class="px-4 py-3">{call.source}</td>
-            <td class="px-4 py-3 text-right font-medium">{format_int(call.total_tokens)}</td>
-            <td class="px-4 py-3 text-right">
-              {Pricing.format_cost_cents(
-                Pricing.cost_cents(call.model, call.prompt_tokens, call.completion_tokens)
-              )}
-            </td>
-            <td class="px-4 py-3 text-[#8E8E93]">{call.model || "—"}</td>
-          </tr>
-          <tr :if={@top_calls == []}>
-            <td colspan="6" class="px-4 py-8 text-center text-[#8E8E93]">
-              No calls in this window.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+        <table class="w-full text-sm min-w-[640px]">
+          <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
+            <tr>
+              <th class="text-left px-4 py-3">When</th>
+              <th class="text-left px-4 py-3">Assistant</th>
+              <th class="text-left px-4 py-3">Source</th>
+              <th class="text-right px-4 py-3">Tokens</th>
+              <th class="text-right px-4 py-3">Est. cost</th>
+              <th class="text-left px-4 py-3">Model</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              :for={call <- @top_calls}
+              class="border-t border-[#F5F5F7] hover:bg-[#F5F5F7] cursor-pointer"
+              phx-click="open_drawer"
+              phx-value-id={call.id}
+            >
+              <td class="px-4 py-3 text-[#8E8E93]">{format_dt(call.inserted_at)}</td>
+              <td class="px-4 py-3">{call.assistant_name || "—"}</td>
+              <td class="px-4 py-3">{call.source}</td>
+              <td class="px-4 py-3 text-right font-medium">{format_int(call.total_tokens)}</td>
+              <td class="px-4 py-3 text-right">
+                {Pricing.format_cost_cents(
+                  Pricing.cost_cents(call.model, call.prompt_tokens, call.completion_tokens)
+                )}
+              </td>
+              <td class="px-4 py-3 text-[#8E8E93]">{call.model || "—"}</td>
+            </tr>
+            <tr :if={@top_calls == []}>
+              <td colspan="6" class="px-4 py-8 text-center text-[#8E8E93]">
+                No calls in this window.
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
     """
