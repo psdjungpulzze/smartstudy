@@ -21,6 +21,8 @@ defmodule FunSheep.Application do
         {Registry, keys: :unique, name: FunSheep.Tutor.SessionRegistry},
         # Cache for in-progress assessment state (survives LiveView reconnects)
         FunSheep.Assessments.StateCache,
+        # ETS-backed cache for cohort percentile bands (spec §6.3)
+        FunSheep.Assessments.CohortCache,
         # Background job processing
         {Oban, Application.fetch_env!(:fun_sheep, Oban)}
       ] ++
