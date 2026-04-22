@@ -236,5 +236,4 @@ defmodule FunSheep.ContentTest do
       assert_raise Ecto.NoResultsError, fn -> Content.get_ocr_page!(page.id) end
     end
   end
-
 end

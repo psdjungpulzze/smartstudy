@@ -142,7 +142,8 @@ defmodule FunSheepWeb.QuestionBankLive do
                  question.course_id,
                  "#{question.id}-#{entry.uuid}#{Path.extname(entry.client_name)}"
                ]),
-             {:ok, stored_key} <- FunSheep.Storage.put(key, binary, content_type: entry.client_type) do
+             {:ok, stored_key} <-
+               FunSheep.Storage.put(key, binary, content_type: entry.client_type) do
           figure_id = create_user_figure(socket, question, stored_key, entry.client_name)
           {:ok, figure_id}
         else
@@ -397,7 +398,10 @@ defmodule FunSheepWeb.QuestionBankLive do
               </button>
             </div>
 
-            <p :for={err <- upload_errors(@uploads.question_figure)} class="text-sm text-[#FF3B30] mt-1">
+            <p
+              :for={err <- upload_errors(@uploads.question_figure)}
+              class="text-sm text-[#FF3B30] mt-1"
+            >
               {upload_error_message(err)}
             </p>
           </div>
