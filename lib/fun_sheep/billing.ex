@@ -264,6 +264,137 @@ defmodule FunSheep.Billing do
     }
   end
 
+  ## Flow A usage helpers (§7.3)
+  ##
+  ## Roll up existing `TestUsage` data. Do NOT introduce a parallel counter
+  ## table. Used by the student usage meter (§4.1) and by
+  ## `FunSheep.PracticeRequests` to gate the 70%/85%/100% surfaces.
+
+  @doc """
+  Returns weekly usage for a student:
+  `%{used, limit, remaining, resets_at}`.
+
+  `:resets_at` is a sliding-window timestamp — when the oldest of the
+  current weekly tests ages past 7 days (the moment the student regains
+  exactly one free slot). If the student is under the limit, returns
+  the current time.
+  """
+  def weekly_usage(user_role_id) do
+    used = count_weekly_tests(user_role_id)
+    limit = @weekly_free_tests
+    remaining = max(0, limit - used)
+
+    %{
+      used: used,
+      limit: limit,
+      remaining: remaining,
+      resets_at: compute_weekly_resets_at(user_role_id, used, limit)
+    }
+  end
+
+  @doc """
+  Returns lifetime usage for a student:
+  `%{used, limit, remaining}`.
+  """
+  def lifetime_usage(user_role_id) do
+    used = count_total_tests(user_role_id)
+    limit = @initial_free_tests
+    %{used: used, limit: limit, remaining: max(0, limit - used)}
+  end
+
+  @doc """
+  Returns the pill/dashboard state per §4.1:
+
+    * `:paid`           — user has an active paid subscription
+    * `:not_applicable` — non-student role (parent/teacher/admin)
+    * `:fresh`          — 0–50% of weekly cap used
+    * `:warming`        — 50–70%
+    * `:nudge`          — 70–85% (soft pre-prompt threshold)
+    * `:ask`            — 85–99% (Ask card unlocks)
+    * `:hardwall`       — 100%+ (soft hard-wall)
+  """
+  def usage_state(user_role_id) do
+    cond do
+      paid_subscription?(user_role_id) -> :paid
+      not student_role?(user_role_id) -> :not_applicable
+      true -> free_tier_state(user_role_id)
+    end
+  end
+
+  @doc """
+  Returns `true` if the student can start a new test right now.
+
+  Paid subscribers and non-student roles always return `true`. Free-tier
+  students return `true` while under both the lifetime cap and the
+  weekly cap — matching the existing `check_test_allowance/2` logic.
+  """
+  def can_start_test?(user_role_id) do
+    case usage_state(user_role_id) do
+      :paid ->
+        true
+
+      :not_applicable ->
+        true
+
+      :hardwall ->
+        false
+
+      _ ->
+        count_total_tests(user_role_id) < @initial_free_tests
+    end
+  end
+
+  defp paid_subscription?(user_role_id) do
+    case get_subscription(user_role_id) do
+      %Subscription{} = sub -> Subscription.paid?(sub)
+      nil -> false
+    end
+  end
+
+  defp student_role?(user_role_id) do
+    case FunSheep.Accounts.get_user_role(user_role_id) do
+      %{role: :student} -> true
+      _ -> false
+    end
+  end
+
+  defp free_tier_state(user_role_id) do
+    %{used: used, limit: limit} = weekly_usage(user_role_id)
+    # §4.1 thresholds — `>=` at each boundary so 17/20 (exactly 85%)
+    # advances into `:ask`, matching the spec's "at 85%" Ask-card trigger.
+    ratio = if limit == 0, do: 1.0, else: used / limit
+
+    cond do
+      ratio >= 1.0 -> :hardwall
+      ratio >= 0.85 -> :ask
+      ratio >= 0.7 -> :nudge
+      ratio >= 0.5 -> :warming
+      true -> :fresh
+    end
+  end
+
+  defp compute_weekly_resets_at(_user_role_id, used, limit) when used < limit do
+    DateTime.utc_now() |> DateTime.truncate(:second)
+  end
+
+  defp compute_weekly_resets_at(user_role_id, _used, _limit) do
+    week_ago = DateTime.add(DateTime.utc_now(), -7, :day)
+
+    oldest =
+      from(t in TestUsage,
+        where: t.user_role_id == ^user_role_id and t.inserted_at >= ^week_ago,
+        order_by: [asc: t.inserted_at],
+        limit: 1,
+        select: t.inserted_at
+      )
+      |> Repo.one()
+
+    case oldest do
+      nil -> DateTime.utc_now() |> DateTime.truncate(:second)
+      ts -> DateTime.add(ts, 7, :day) |> DateTime.truncate(:second)
+    end
+  end
+
   ## Query Helpers
 
   defp count_total_tests(user_role_id) do
