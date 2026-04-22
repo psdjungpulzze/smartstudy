@@ -12,13 +12,15 @@ defmodule FunSheep.Assessments do
     TestSchedule,
     TestFormatTemplate,
     ReadinessScore,
-    ReadinessCalculator
+    ReadinessCalculator,
+    ScopeReadiness
   }
 
   alias FunSheep.{Courses, Questions}
   alias FunSheep.Accounts.UserRole
   alias FunSheep.Assessments.CohortCache
   alias FunSheep.Questions.QuestionAttempt
+  alias FunSheep.Workers.AIQuestionGenerationWorker
 
   @cohort_min_size 20
 
@@ -116,10 +118,54 @@ defmodule FunSheep.Assessments do
     |> Repo.preload(:course)
   end
 
+  @doc """
+  Creates a test schedule and, on success, ensures every chapter in its scope
+  has question generation queued.
+
+  Assessments used to enter the world with a scope whose chapters had no
+  questions. The student would then hit `AssessmentLive`, which reactively
+  enqueued generation on first visit — giving them a dead-end "Questions not
+  ready yet" screen. Queuing at creation time makes generation lead the
+  student rather than trail them; `AIQuestionGenerationWorker`'s Oban
+  uniqueness (5-min window) prevents this from compounding with the engine's
+  reactive enqueue or with repeat creations.
+  """
   def create_test_schedule(attrs \\ %{}) do
-    %TestSchedule{}
-    |> TestSchedule.changeset(attrs)
-    |> Repo.insert()
+    with {:ok, schedule} <-
+           %TestSchedule{}
+           |> TestSchedule.changeset(attrs)
+           |> Repo.insert() do
+      ensure_generation_queued(schedule)
+      {:ok, schedule}
+    end
+  end
+
+  @doc """
+  Classifies the readiness of a test schedule's scope. See
+  `FunSheep.Assessments.ScopeReadiness` for the possible return values.
+  """
+  @spec scope_readiness(TestSchedule.t()) :: ScopeReadiness.readiness()
+  def scope_readiness(%TestSchedule{} = schedule), do: ScopeReadiness.check(schedule)
+
+  @doc """
+  Enqueues `AIQuestionGenerationWorker` once per chapter that is below the
+  readiness threshold. Silent no-op when every chapter already has enough
+  questions. Returns the list of chapter IDs that were enqueued (useful for
+  tests and for logging).
+  """
+  @spec ensure_generation_queued(TestSchedule.t()) :: [binary()]
+  def ensure_generation_queued(%TestSchedule{} = schedule) do
+    missing = ScopeReadiness.chapters_needing_generation(schedule)
+
+    Enum.each(missing, fn chapter_id ->
+      AIQuestionGenerationWorker.enqueue(schedule.course_id,
+        chapter_id: chapter_id,
+        count: 10,
+        mode: "from_material"
+      )
+    end)
+
+    missing
   end
 
   def update_test_schedule(%TestSchedule{} = test_schedule, attrs) do

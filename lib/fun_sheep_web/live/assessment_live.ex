@@ -15,6 +15,10 @@ defmodule FunSheepWeb.AssessmentLive do
     role = socket.assigns.current_user["role"]
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
 
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(FunSheep.PubSub, "course:#{course_id}")
+    end
+
     # On reconnect, try to restore cached state instead of resetting
     case StateCache.get(user_role_id, schedule_id) do
       {:ok, cached} ->
@@ -50,7 +54,8 @@ defmodule FunSheepWeb.AssessmentLive do
             start_time: 0,
             question_sources: [],
             enabled_sources: MapSet.new(),
-            phase: :blocked
+            phase: :blocked,
+            readiness: nil
           )
 
         {:ok, socket}
@@ -78,7 +83,8 @@ defmodule FunSheepWeb.AssessmentLive do
       enabled_sources: cached.enabled_sources,
       assessment_complete: cached.assessment_complete,
       summary: cached.summary,
-      phase: cached.phase
+      phase: cached.phase,
+      readiness: nil
     )
   end
 
@@ -91,6 +97,21 @@ defmodule FunSheepWeb.AssessmentLive do
       question_sources
       |> Enum.map(& &1.material_id)
       |> MapSet.new()
+
+    readiness = Assessments.scope_readiness(schedule)
+
+    # Route to one of three top-level phases:
+    #   :readiness_block — upstream pipeline hasn't produced enough visible
+    #                      questions for this scope; no point entering the
+    #                      engine yet (render_readiness_block/1 explains
+    #                      what's happening and what the student can do)
+    #   :setup          — multiple source materials to filter
+    #   :testing        — single source (or none); engine kicks off now
+    initial_phase =
+      case readiness do
+        :ready -> if(question_sources != [], do: :setup, else: :testing)
+        _ -> :readiness_block
+      end
 
     socket =
       socket
@@ -108,12 +129,13 @@ defmodule FunSheepWeb.AssessmentLive do
         start_time: System.monotonic_time(:second),
         question_sources: question_sources,
         enabled_sources: enabled_sources,
-        phase: if(question_sources != [], do: :setup, else: :testing)
+        phase: initial_phase,
+        readiness: readiness
       )
 
-    # If no sources to filter, start immediately
+    # If no sources to filter and scope is ready, start immediately
     socket =
-      if socket.assigns.phase == :testing do
+      if initial_phase == :testing do
         state = Engine.start_assessment(schedule)
 
         socket
@@ -243,6 +265,59 @@ defmodule FunSheepWeb.AssessmentLive do
     {:noreply, socket}
   end
 
+  # Student clicked "Generate now" on the readiness-block screen. Re-enqueue
+  # generation for every chapter still below threshold. Idempotent — the
+  # worker's Oban uniqueness (5-min window) collapses duplicates.
+  def handle_event("retry_generation", _params, socket) do
+    Assessments.ensure_generation_queued(socket.assigns.schedule)
+    {:noreply, socket}
+  end
+
+  @impl true
+  # Course-level pipeline event: discovery/OCR/generation/validation all
+  # broadcast `{:processing_update, ...}` on `course:{id}`. Any such event
+  # might have just tipped the scope into `:ready`; re-check and transition
+  # if so. No-op when the assessment is already underway (`phase == :testing`
+  # with an engine state) — we don't want a late broadcast to boot the
+  # student out of an in-flight question.
+  def handle_info({:processing_update, _data}, socket) do
+    {:noreply, maybe_transition_on_readiness(socket)}
+  end
+
+  # Finer-grained per-chapter signal emitted by
+  # `QuestionValidationWorker`/`QuestionClassificationWorker` whenever a
+  # question transitions into student-visible + adaptive-eligible.
+  def handle_info({:questions_ready, %{chapter_ids: _ids}}, socket) do
+    {:noreply, maybe_transition_on_readiness(socket)}
+  end
+
+  def handle_info(_other, socket), do: {:noreply, socket}
+
+  defp maybe_transition_on_readiness(%{assigns: %{phase: :readiness_block}} = socket) do
+    readiness = Assessments.scope_readiness(socket.assigns.schedule)
+
+    cond do
+      readiness == :ready and socket.assigns.question_sources != [] ->
+        assign(socket, readiness: readiness, phase: :setup)
+
+      readiness == :ready ->
+        state = Engine.start_assessment(socket.assigns.schedule)
+
+        socket
+        |> assign(engine_state: state, phase: :testing, readiness: readiness)
+        |> advance_to_next_question()
+        |> save_state_to_cache()
+
+      true ->
+        # Still blocked, but the specific sub-state may have changed
+        # (e.g., `:course_not_ready` → `:scope_partial`). Refresh the assign
+        # so the UI updates its messaging.
+        assign(socket, readiness: readiness)
+    end
+  end
+
+  defp maybe_transition_on_readiness(socket), do: socket
+
   defp advance_to_next_question(socket) do
     state = socket.assigns.engine_state
 
@@ -365,6 +440,7 @@ defmodule FunSheepWeb.AssessmentLive do
       |> Map.put_new(:assessment_complete, false)
       |> Map.put_new(:no_questions_available, false)
       |> Map.put_new(:summary, nil)
+      |> Map.put_new(:readiness, nil)
 
     ~H"""
     <div class="max-w-3xl mx-auto">
@@ -402,28 +478,32 @@ defmodule FunSheepWeb.AssessmentLive do
           </div>
         </div>
 
-        <%= if @phase == :setup do %>
-          <.render_source_setup
-            question_sources={@question_sources}
-            enabled_sources={@enabled_sources}
-            schedule={@schedule}
-          />
-        <% else %>
-          <%= cond do %>
-            <% @no_questions_available -> %>
-              <.render_no_questions schedule={@schedule} course_id={@course_id} />
-            <% @assessment_complete -> %>
-              <.render_summary summary={@summary} schedule={@schedule} />
-            <% true -> %>
-              <.render_question
-                question={@current_question}
-                selected_answer={@selected_answer}
-                feedback={@feedback}
-                question_number={@question_number}
-                engine_state={@engine_state}
-                question_stats={assigns[:current_question_stats]}
-              />
-          <% end %>
+        <%= cond do %>
+          <% @phase == :readiness_block -> %>
+            <.render_readiness_block
+              readiness={@readiness}
+              schedule={@schedule}
+              course_id={@course_id}
+            />
+          <% @phase == :setup -> %>
+            <.render_source_setup
+              question_sources={@question_sources}
+              enabled_sources={@enabled_sources}
+              schedule={@schedule}
+            />
+          <% @no_questions_available -> %>
+            <.render_no_questions schedule={@schedule} course_id={@course_id} />
+          <% @assessment_complete -> %>
+            <.render_summary summary={@summary} schedule={@schedule} />
+          <% true -> %>
+            <.render_question
+              question={@current_question}
+              selected_answer={@selected_answer}
+              feedback={@feedback}
+              question_number={@question_number}
+              engine_state={@engine_state}
+              question_stats={assigns[:current_question_stats]}
+            />
         <% end %>
       </div>
     </div>
@@ -523,6 +603,139 @@ defmodule FunSheepWeb.AssessmentLive do
     </div>
     """
   end
+
+  attr :readiness, :any, required: true
+  attr :schedule, :map, required: true
+  attr :course_id, :string, required: true
+
+  defp render_readiness_block(assigns) do
+    copy = readiness_copy(assigns.readiness)
+    retry_chapter_count = retry_chapter_count(assigns.readiness)
+
+    assigns =
+      assign(assigns,
+        heading: copy.heading,
+        body: copy.body,
+        tone: copy.tone,
+        show_retry?: copy.show_retry?,
+        retry_chapter_count: retry_chapter_count
+      )
+
+    ~H"""
+    <div class="bg-white rounded-2xl shadow-md p-8 text-center">
+      <.icon
+        name={readiness_icon(@tone)}
+        class={"w-16 h-16 mx-auto mb-4 #{readiness_icon_class(@tone)}"}
+      />
+      <h2 class="text-2xl font-bold text-[#1C1C1E]">{@heading}</h2>
+      <p class="text-[#8E8E93] mt-3 max-w-md mx-auto">{@body}</p>
+      <div :if={@show_retry? and @retry_chapter_count > 0} class="mt-4 text-sm text-[#8E8E93]">
+        {@retry_chapter_count} chapter{if @retry_chapter_count != 1, do: "s"} will generate questions now.
+      </div>
+      <div class="flex justify-center gap-3 mt-6">
+        <.link
+          navigate={~p"/courses/#{@course_id}"}
+          class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
+        >
+          Back to Course
+        </.link>
+        <button
+          :if={@show_retry?}
+          phx-click="retry_generation"
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+        >
+          Generate Questions Now
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  # Readiness → UI copy. Each branch of `ScopeReadiness.check/1` has a
+  # distinct message so the student knows *why* they're blocked and what to
+  # do next — instead of the old catch-all "Questions not ready yet".
+  defp readiness_copy({:course_not_ready, stage}) do
+    %{
+      heading: "Course is still processing",
+      body:
+        "Your course is still being built (#{humanize_stage(stage)}). " <>
+          "Questions will be ready as soon as processing finishes — usually a few minutes.",
+      tone: :info,
+      show_retry?: false
+    }
+  end
+
+  defp readiness_copy({:course_failed, reason}) do
+    detail =
+      case reason do
+        r when is_binary(r) and r != "" -> " " <> r
+        _ -> ""
+      end
+
+    %{
+      heading: "Course processing failed",
+      body:
+        "We couldn't finish building this course.#{detail} " <>
+          "Open the course page to retry or contact support.",
+      tone: :error,
+      show_retry?: false
+    }
+  end
+
+  defp readiness_copy({:scope_empty, _chapter_ids}) do
+    %{
+      heading: "No questions for the selected chapters",
+      body:
+        "None of the chapters assigned to this test have questions yet. " <>
+          "You can generate them now — it usually takes a few minutes.",
+      tone: :warning,
+      show_retry?: true
+    }
+  end
+
+  defp readiness_copy({:scope_partial, %{missing: missing}}) do
+    count = length(missing)
+
+    %{
+      heading: "Some chapters still need questions",
+      body:
+        "#{count} of the chapters in this test don't have enough questions yet. " <>
+          "You can generate more now, or start with what's ready.",
+      tone: :warning,
+      show_retry?: true
+    }
+  end
+
+  defp readiness_copy(_other) do
+    # Should never fire for `:ready` (we wouldn't be rendering this block).
+    # Kept as a safety net so unexpected shapes still show an honest message.
+    %{
+      heading: "Questions not ready yet",
+      body: "We're preparing your questions. Please check back in a few minutes.",
+      tone: :info,
+      show_retry?: true
+    }
+  end
+
+  defp retry_chapter_count({:scope_empty, ids}), do: length(ids)
+  defp retry_chapter_count({:scope_partial, %{missing: missing}}), do: length(missing)
+  defp retry_chapter_count(_), do: 0
+
+  defp readiness_icon(:error), do: "hero-exclamation-triangle"
+  defp readiness_icon(:warning), do: "hero-clock"
+  defp readiness_icon(_), do: "hero-clock"
+
+  defp readiness_icon_class(:error), do: "text-[#FF3B30]"
+  defp readiness_icon_class(:warning), do: "text-[#FFCC00]"
+  defp readiness_icon_class(_), do: "text-[#4CD964]"
+
+  defp humanize_stage(:pending), do: "queued"
+  defp humanize_stage(:processing), do: "starting up"
+  defp humanize_stage(:discovering), do: "discovering chapters"
+  defp humanize_stage(:extracting), do: "extracting questions from your materials"
+  defp humanize_stage(:generating), do: "generating questions"
+  defp humanize_stage(:validating), do: "validating questions"
+  defp humanize_stage(_other), do: "processing"
 
   attr :schedule, :map, required: true
   attr :course_id, :string, required: true
