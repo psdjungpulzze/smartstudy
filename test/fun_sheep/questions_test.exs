@@ -10,19 +10,50 @@ defmodule FunSheep.QuestionsTest do
   end
 
   defp create_question(course, attrs \\ %{}) do
+    # Auto-attach section + trusted classification so the created question is
+    # adaptive-eligible (North Star I-1). Tests that want an untagged question
+    # override :section_id / :classification_status.
+    {chapter_id, section_id} = ensure_section(course, attrs[:chapter_id])
+
     defaults = %{
       content: "What is 2 + 2?",
       answer: "4",
       question_type: :multiple_choice,
       difficulty: :medium,
       course_id: course.id,
-      # Default to :passed so existing listing tests see the question. Tests
-      # that need pending/failed explicitly override this.
+      chapter_id: chapter_id,
+      section_id: section_id,
+      classification_status: :admin_reviewed,
       validation_status: :passed
     }
 
     {:ok, question} = Questions.create_question(Map.merge(defaults, attrs))
     question
+  end
+
+  defp ensure_section(course, nil) do
+    {:ok, ch} =
+      Courses.create_chapter(%{
+        name: "Auto Chapter #{System.unique_integer([:positive])}",
+        position: 1,
+        course_id: course.id
+      })
+
+    {:ok, sec} =
+      Courses.create_section(%{name: "Auto Section", position: 1, chapter_id: ch.id})
+
+    {ch.id, sec.id}
+  end
+
+  defp ensure_section(_course, chapter_id) do
+    {:ok, sec} =
+      Courses.create_section(%{
+        name: "Auto Section #{System.unique_integer([:positive])}",
+        position: 1,
+        chapter_id: chapter_id
+      })
+
+    {chapter_id, sec.id}
   end
 
   describe "create_question/1" do
@@ -171,6 +202,30 @@ defmodule FunSheep.QuestionsTest do
 
       assert Questions.count_questions_by_course(course.id) == 1
       assert Questions.count_all_questions_by_course(course.id) == 3
+    end
+  end
+
+  describe "count_by_validation_status/1" do
+    test "returns counts bucketed by status with zero-fill" do
+      course = create_course()
+      create_question(course, %{content: "p1", validation_status: :passed})
+      create_question(course, %{content: "p2", validation_status: :passed})
+      create_question(course, %{content: "r1", validation_status: :needs_review})
+      create_question(course, %{content: "f1", validation_status: :failed})
+
+      counts = Questions.count_by_validation_status(course.id)
+
+      assert counts == %{pending: 0, passed: 2, needs_review: 1, failed: 1}
+    end
+
+    test "returns all-zero map for a course with no questions" do
+      course = create_course()
+      assert Questions.count_by_validation_status(course.id) == %{
+               pending: 0,
+               passed: 0,
+               needs_review: 0,
+               failed: 0
+             }
     end
   end
 

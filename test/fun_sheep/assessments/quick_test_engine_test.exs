@@ -10,11 +10,11 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
     course = ContentFixtures.create_course(%{created_by_id: user_role.id})
 
     {:ok, chapter} =
-      Courses.create_chapter(%{
-        name: "Chapter 1",
-        position: 1,
-        course_id: course.id
-      })
+      Courses.create_chapter(%{name: "Chapter 1", position: 1, course_id: course.id})
+
+    # Skill tag required for adaptive flows — North Star I-1.
+    {:ok, section} =
+      Courses.create_section(%{name: "Ch1 Sec 1", position: 1, chapter_id: chapter.id})
 
     {:ok, q1} =
       Questions.create_question(%{
@@ -25,7 +25,9 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         difficulty: :easy,
         options: %{"A" => "4", "B" => "5", "C" => "6", "D" => "7"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -37,7 +39,9 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         difficulty: :easy,
         options: %{"A" => "5", "B" => "6", "C" => "7", "D" => "8"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q3} =
@@ -48,7 +52,9 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         question_type: :true_false,
         difficulty: :easy,
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     %{user_role: user_role, course: course, chapter: chapter, q1: q1, q2: q2, q3: q3}

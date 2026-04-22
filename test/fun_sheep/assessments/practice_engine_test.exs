@@ -10,11 +10,10 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
     course = ContentFixtures.create_course(%{created_by_id: user_role.id})
 
     {:ok, chapter} =
-      Courses.create_chapter(%{
-        name: "Chapter 1",
-        position: 1,
-        course_id: course.id
-      })
+      Courses.create_chapter(%{name: "Chapter 1", position: 1, course_id: course.id})
+
+    {:ok, section} =
+      Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: chapter.id})
 
     {:ok, q1} =
       Questions.create_question(%{
@@ -25,7 +24,9 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
         difficulty: :easy,
         options: %{"A" => "4", "B" => "5", "C" => "6", "D" => "7"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -37,7 +38,9 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
         difficulty: :easy,
         options: %{"A" => "5", "B" => "6", "C" => "7", "D" => "8"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     # Create wrong attempts so these show as weak questions

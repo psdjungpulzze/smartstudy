@@ -36,6 +36,13 @@ defmodule FunSheep.Questions.Question do
     field :validation_report, :map, default: %{}
     field :validated_at, :utc_datetime
 
+    field :classification_status, Ecto.Enum,
+      values: [:uncategorized, :ai_classified, :admin_reviewed, :low_confidence],
+      default: :uncategorized
+
+    field :classification_confidence, :float
+    field :classified_at, :utc_datetime
+
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :chapter, FunSheep.Courses.Chapter
     belongs_to :section, FunSheep.Courses.Section
@@ -72,6 +79,9 @@ defmodule FunSheep.Questions.Question do
       :validation_score,
       :validation_report,
       :validated_at,
+      :classification_status,
+      :classification_confidence,
+      :classified_at,
       :course_id,
       :chapter_id,
       :section_id,

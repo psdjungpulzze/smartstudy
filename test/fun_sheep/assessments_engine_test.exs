@@ -9,18 +9,17 @@ defmodule FunSheep.Assessments.EngineTest do
     course = ContentFixtures.create_course(%{created_by_id: user_role.id})
 
     {:ok, chapter1} =
-      FunSheep.Courses.create_chapter(%{
-        name: "Chapter 1",
-        position: 1,
-        course_id: course.id
-      })
+      FunSheep.Courses.create_chapter(%{name: "Chapter 1", position: 1, course_id: course.id})
 
     {:ok, chapter2} =
-      FunSheep.Courses.create_chapter(%{
-        name: "Chapter 2",
-        position: 2,
-        course_id: course.id
-      })
+      FunSheep.Courses.create_chapter(%{name: "Chapter 2", position: 2, course_id: course.id})
+
+    # Skill tags (sections) required for adaptive flows — North Star I-1.
+    {:ok, section1} =
+      FunSheep.Courses.create_section(%{name: "Ch1 Sec 1", position: 1, chapter_id: chapter1.id})
+
+    {:ok, section2} =
+      FunSheep.Courses.create_section(%{name: "Ch2 Sec 1", position: 1, chapter_id: chapter2.id})
 
     # Create questions for chapter 1
     {:ok, q1} =
@@ -31,7 +30,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :easy,
         course_id: course.id,
-        chapter_id: chapter1.id
+        chapter_id: chapter1.id,
+        section_id: section1.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -42,7 +43,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :medium,
         course_id: course.id,
-        chapter_id: chapter1.id
+        chapter_id: chapter1.id,
+        section_id: section1.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q3} =
@@ -53,7 +56,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :hard,
         course_id: course.id,
-        chapter_id: chapter1.id
+        chapter_id: chapter1.id,
+        section_id: section1.id,
+        classification_status: :admin_reviewed
       })
 
     # Create questions for chapter 2
@@ -65,7 +70,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :easy,
         course_id: course.id,
-        chapter_id: chapter2.id
+        chapter_id: chapter2.id,
+        section_id: section2.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, schedule} =

@@ -22,6 +22,75 @@ defmodule FunSheep.Questions do
   # variants below.
   @student_visible [:passed]
 
+  # North Star invariant I-1: a question enters adaptive flows only when it
+  # carries a fine-grained skill tag (section_id set AND classification
+  # trusted). `:uncategorized` and `:low_confidence` rows are excluded so
+  # diagnostic signals aren't built on thin evidence (invariant I-15).
+  @adaptive_classifications [:ai_classified, :admin_reviewed]
+
+  @doc """
+  Scopes a query to adaptive-eligible questions — carrying a section tag and
+  a trusted classification. See North Star invariants I-1 and I-15.
+  """
+  def tagged_for_adaptive(query \\ Question) do
+    query
+    |> where([q], not is_nil(q.section_id))
+    |> where([q], q.classification_status in ^@adaptive_classifications)
+  end
+
+  @doc """
+  Returns classification coverage for a course so backfills can see the real
+  gap before running AI.
+  """
+  def classification_coverage(course_id) do
+    base = from(q in Question, where: q.course_id == ^course_id)
+
+    rows =
+      from(q in base,
+        group_by: q.classification_status,
+        select: {q.classification_status, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    total = rows |> Map.values() |> Enum.sum()
+    tagged = Map.get(rows, :ai_classified, 0) + Map.get(rows, :admin_reviewed, 0)
+    low_confidence = Map.get(rows, :low_confidence, 0)
+    untagged = Map.get(rows, :uncategorized, 0)
+
+    by_chapter =
+      from(q in base,
+        join: c in FunSheep.Courses.Chapter,
+        on: c.id == q.chapter_id,
+        group_by: [c.id, c.name, c.position],
+        order_by: c.position,
+        select: %{
+          chapter_id: c.id,
+          chapter_name: c.name,
+          total: count(q.id),
+          tagged:
+            fragment(
+              "COUNT(*) FILTER (WHERE ? IN ('ai_classified', 'admin_reviewed'))",
+              q.classification_status
+            ),
+          untagged:
+            fragment(
+              "COUNT(*) FILTER (WHERE ? = 'uncategorized')",
+              q.classification_status
+            )
+        }
+      )
+      |> Repo.all()
+
+    %{
+      total: total,
+      tagged: tagged,
+      untagged: untagged,
+      low_confidence: low_confidence,
+      by_chapter: by_chapter
+    }
+  end
+
   def count_questions_by_course(course_id) do
     Question
     |> where([q], q.course_id == ^course_id)
@@ -37,6 +106,30 @@ defmodule FunSheep.Questions do
     Question
     |> where([q], q.course_id == ^course_id)
     |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Returns a map of `%{validation_status => count}` for a course. Powers the
+  UI during the validation phase — lets the user see how many questions are
+  pending, approved, flagged, or rejected without running the full query on
+  the client.
+  """
+  def count_by_validation_status(course_id) do
+    counts =
+      from(q in Question,
+        where: q.course_id == ^course_id,
+        group_by: q.validation_status,
+        select: {q.validation_status, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    %{
+      pending: Map.get(counts, :pending, 0),
+      passed: Map.get(counts, :passed, 0),
+      needs_review: Map.get(counts, :needs_review, 0),
+      failed: Map.get(counts, :failed, 0)
+    }
   end
 
   @doc """
@@ -204,6 +297,10 @@ defmodule FunSheep.Questions do
     where(query, [q], q.section_id == ^section_id)
   end
 
+  defp maybe_filter_section(query, %{section_id: section_id}) when not is_nil(section_id) do
+    where(query, [q], q.section_id == ^section_id)
+  end
+
   defp maybe_filter_section(query, _), do: query
 
   defp maybe_filter_difficulty(query, %{"difficulty" => difficulty}) when difficulty != "" do
@@ -234,6 +331,12 @@ defmodule FunSheep.Questions do
   end
 
   def get_question!(id), do: Repo.get!(Question, id)
+
+  @doc """
+  Non-raising variant. Used by the assessment engine to look up a just-answered
+  question without crashing the session if the row was deleted mid-flight.
+  """
+  def get_question(id), do: Repo.get(Question, id)
 
   @doc "Gets a question with chapter and stats preloaded (for tutor context)."
   def get_question_with_context!(id) do
@@ -379,6 +482,8 @@ defmodule FunSheep.Questions do
       where:
         q.course_id == ^course_id and
           q.validation_status in ^@student_visible and
+          not is_nil(q.section_id) and
+          q.classification_status in ^@adaptive_classifications and
           qa.user_role_id == ^user_role_id and
           qa.is_correct == false,
       group_by: [q.id, cq.question_id],
@@ -440,7 +545,10 @@ defmodule FunSheep.Questions do
     from(q in Question,
       left_join: qa in QuestionAttempt,
       on: qa.question_id == q.id and qa.user_role_id == ^user_role_id,
-      where: q.validation_status in ^@student_visible,
+      where:
+        q.validation_status in ^@student_visible and
+          not is_nil(q.section_id) and
+          q.classification_status in ^@adaptive_classifications,
       group_by: q.id,
       order_by: [
         # Wrong answers first (0), then unseen (1), then correct (2)
@@ -666,7 +774,9 @@ defmodule FunSheep.Questions do
     Question
     |> where([q], q.course_id == ^course_id)
     |> where([q], q.validation_status in ^@student_visible)
+    |> tagged_for_adaptive()
     |> maybe_filter_chapter(filters)
+    |> maybe_filter_section(filters)
     |> maybe_filter_difficulty(filters)
     |> maybe_filter_question_type(filters)
     |> maybe_filter_source_material(filters)
