@@ -837,4 +837,100 @@ defmodule FunSheepWeb.DashboardLive do
   end
 
   defp subject_emoji(_), do: "📘"
+
+  # ââ Skill Breakdown: per-section status cards ââââââââââââââââââââââââââââââ
+
+  # Renders a per-skill status list for the current test's readiness
+  # snapshot. North Star I-8/I-9/I-10: show exactly where the student
+  # stands on each in-scope skill, so the "practice until 100%" loop
+  # has a visible endpoint.
+  defp skill_breakdown(%{test: %{readiness: nil}} = assigns), do: ~H""
+
+  defp skill_breakdown(%{test: %{readiness: readiness}} = assigns)
+       when is_map_key(readiness, :skill_scores) do
+    skills = enrich_skill_breakdown(readiness.skill_scores || %{})
+    assigns = assign(assigns, :skills, skills)
+
+    ~H"""
+    <div :if={@skills != []}>
+      <h2 class="text-sm font-extrabold text-gray-400 uppercase tracking-wider mb-3 sm:mb-4">
+        Skill Breakdown
+      </h2>
+      <div class="space-y-2">
+        <div
+          :for={skill <- @skills}
+          class={[
+            "rounded-2xl p-3 sm:p-4 border flex items-center justify-between gap-3",
+            skill_card_bg(skill.status)
+          ]}
+        >
+          <div class="min-w-0">
+            <p class="font-bold text-sm text-gray-900 truncate">{skill.name}</p>
+            <p class="text-xs text-gray-500 mt-0.5">
+              {skill.correct}/{skill.total} correct Â· {skill_status_label(skill.status)}
+            </p>
+          </div>
+          <span class={["text-xs font-bold px-3 py-1 rounded-full shrink-0", skill_badge_cls(skill.status)]}>
+            {skill_status_short(skill.status)}
+          </span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp skill_breakdown(assigns), do: ~H""
+
+  defp enrich_skill_breakdown(skill_scores) do
+    ids = Map.keys(skill_scores)
+    sections = FunSheep.Courses.list_sections_by_ids(ids)
+    section_map = Map.new(sections, &{&1.id, &1})
+
+    skill_scores
+    |> Enum.map(fn {section_id, data} ->
+      section = Map.get(section_map, section_id)
+
+      %{
+        id: section_id,
+        name: if(section, do: section.name, else: "Skill"),
+        status: skill_status_atom(data),
+        correct: Map.get(data, :correct) || Map.get(data, "correct") || 0,
+        total: Map.get(data, :total) || Map.get(data, "total") || 0
+      }
+    end)
+    |> Enum.sort_by(fn s -> {skill_status_order(s.status), s.name} end)
+  end
+
+  defp skill_status_atom(%{status: s}) when is_atom(s), do: s
+  defp skill_status_atom(%{"status" => s}) when is_binary(s), do: String.to_atom(s)
+  defp skill_status_atom(_), do: :insufficient_data
+
+  defp skill_status_order(:weak), do: 0
+  defp skill_status_order(:probing), do: 1
+  defp skill_status_order(:insufficient_data), do: 2
+  defp skill_status_order(:mastered), do: 3
+  defp skill_status_order(_), do: 4
+
+  defp skill_status_label(:weak), do: "Needs practice"
+  defp skill_status_label(:probing), do: "In progress"
+  defp skill_status_label(:insufficient_data), do: "Not enough data yet"
+  defp skill_status_label(:mastered), do: "Mastered"
+  defp skill_status_label(_), do: "Unknown"
+
+  defp skill_status_short(:weak), do: "Weak"
+  defp skill_status_short(:probing), do: "Probing"
+  defp skill_status_short(:insufficient_data), do: "New"
+  defp skill_status_short(:mastered), do: "â Mastered"
+  defp skill_status_short(_), do: "-"
+
+  defp skill_card_bg(:weak), do: "bg-red-50 border-red-100"
+  defp skill_card_bg(:probing), do: "bg-amber-50 border-amber-100"
+  defp skill_card_bg(:mastered), do: "bg-green-50 border-green-100"
+  defp skill_card_bg(_), do: "bg-white border-gray-100"
+
+  defp skill_badge_cls(:weak), do: "bg-[#FF3B30] text-white"
+  defp skill_badge_cls(:probing), do: "bg-[#FFCC00] text-gray-900"
+  defp skill_badge_cls(:mastered), do: "bg-[#4CD964] text-white"
+  defp skill_badge_cls(_), do: "bg-gray-100 text-gray-600"
+
 end
