@@ -7,9 +7,7 @@ defmodule FunSheep.Courses.TOCRebaseTest do
 
   defp create_course(attrs \\ %{}) do
     {:ok, course} =
-      Courses.create_course(
-        Map.merge(%{name: "Biology", subject: "Biology", grade: "10"}, attrs)
-      )
+      Courses.create_course(Map.merge(%{name: "Biology", subject: "Biology", grade: "10"}, attrs))
 
     course
   end
@@ -195,14 +193,24 @@ defmodule FunSheep.Courses.TOCRebaseTest do
   describe "compare/2" do
     test ":no_current when there's no prior applied TOC" do
       course = create_course()
-      {:ok, new} = TOCRebase.propose(course.id, "web", %{chapters: [%{"name" => "a"}], ocr_char_count: 100})
+
+      {:ok, new} =
+        TOCRebase.propose(course.id, "web", %{chapters: [%{"name" => "a"}], ocr_char_count: 100})
+
       assert TOCRebase.compare(new, nil) == :no_current
     end
 
     test ":current_better_or_equal when new scores lower" do
       course = create_course()
-      {:ok, high} = TOCRebase.propose(course.id, "textbook_full", %{chapters: Enum.map(1..20, &%{"name" => "Ch #{&1}"}), ocr_char_count: 50_000})
-      {:ok, low} = TOCRebase.propose(course.id, "web", %{chapters: [%{"name" => "a"}], ocr_char_count: 100})
+
+      {:ok, high} =
+        TOCRebase.propose(course.id, "textbook_full", %{
+          chapters: Enum.map(1..20, &%{"name" => "Ch #{&1}"}),
+          ocr_char_count: 50_000
+        })
+
+      {:ok, low} =
+        TOCRebase.propose(course.id, "web", %{chapters: [%{"name" => "a"}], ocr_char_count: 100})
 
       # high was inserted first — mark it applied so compare/2 sees it as current.
       {:ok, _} = TOCRebase.apply(high, course.id)
@@ -216,11 +224,14 @@ defmodule FunSheep.Courses.TOCRebaseTest do
       chapters_current = Enum.map(1..10, &%{"name" => "Ch #{&1}"})
       chapters_new = Enum.map(1..11, &%{"name" => "Ch #{&1}"})
 
-      {:ok, cur} = TOCRebase.propose(course.id, "web", %{chapters: chapters_current, ocr_char_count: 5_000})
+      {:ok, cur} =
+        TOCRebase.propose(course.id, "web", %{chapters: chapters_current, ocr_char_count: 5_000})
+
       {:ok, _} = TOCRebase.apply(cur, course.id)
       current = TOCRebase.current(course.id)
 
-      {:ok, new} = TOCRebase.propose(course.id, "web", %{chapters: chapters_new, ocr_char_count: 5_500})
+      {:ok, new} =
+        TOCRebase.propose(course.id, "web", %{chapters: chapters_new, ocr_char_count: 5_500})
 
       assert TOCRebase.compare(new, current) == :insufficient_gain
     end
@@ -229,12 +240,19 @@ defmodule FunSheep.Courses.TOCRebaseTest do
       course = create_course()
       chapters = Enum.map(1..16, &%{"name" => "Ch #{&1}"})
 
-      {:ok, web} = TOCRebase.propose(course.id, "web", %{chapters: chapters, ocr_char_count: 5_000})
+      {:ok, web} =
+        TOCRebase.propose(course.id, "web", %{chapters: chapters, ocr_char_count: 5_000})
+
       {:ok, _} = TOCRebase.apply(web, course.id)
       current = TOCRebase.current(course.id)
 
       rich_chapters = Enum.map(1..42, &%{"name" => "Ch #{&1}"})
-      {:ok, better} = TOCRebase.propose(course.id, "textbook_full", %{chapters: rich_chapters, ocr_char_count: 100_000})
+
+      {:ok, better} =
+        TOCRebase.propose(course.id, "textbook_full", %{
+          chapters: rich_chapters,
+          ocr_char_count: 100_000
+        })
 
       assert TOCRebase.compare(better, current) == :new_better
     end
