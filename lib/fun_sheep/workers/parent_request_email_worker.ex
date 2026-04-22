@@ -18,7 +18,6 @@ defmodule FunSheep.Workers.ParentRequestEmailWorker do
   use Oban.Worker, queue: :default, max_attempts: 5
 
   alias FunSheep.Mailer
-  alias FunSheep.PracticeRequests
   alias FunSheep.PracticeRequests.Request
   alias FunSheep.Repo
   alias FunSheepWeb.Emails.ParentRequestEmail
