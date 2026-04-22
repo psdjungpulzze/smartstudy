@@ -32,3 +32,23 @@ Future feature ideas and upgrade plans. Items here are not prioritized or commit
 ### Textbook Upload Bonus
 - If someone uploads a textbook for a course that **has no textbook already uploaded**, they receive bonus credit
 - Reward details TBD
+
+---
+
+## School Platform Integrations
+
+Integrate with the platforms students, parents, and teachers already use to manage schoolwork, so assignments, schedules, and announcements flow into FunSheep automatically instead of requiring manual upload.
+
+### Google Classroom
+- Pull in courses, assignments, due dates, and materials from the student's Google Classroom account
+- Auto-create/match FunSheep courses from Google Classroom classes
+- Sync assignment deadlines into FunSheep's test/assignment schedule
+
+### ParentSquare
+- Ingest announcements, schedules, and teacher communications
+- Surface relevant school events and deadlines inside FunSheep for parents
+
+### Student Portals (district / school "kids' portal" systems)
+- Integrate with common district portals students use to manage coursework (e.g., PowerSchool, Schoology, Canvas, Infinite Campus — exact list TBD)
+- Import grades, assignments, syllabi, and test schedules where the portal's API allows
+- Requires per-portal research on available APIs and auth flows
