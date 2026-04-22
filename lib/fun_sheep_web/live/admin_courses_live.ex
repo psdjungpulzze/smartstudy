@@ -69,6 +69,31 @@ defmodule FunSheepWeb.AdminCoursesLive do
      |> load_courses()}
   end
 
+  # Enqueues the EnrichDiscoveryWorker which:
+  #   1. Re-runs AI discovery over the course's OCR'd materials
+  #   2. Calls TOCRebase.propose → compare → apply (attempt-safe)
+  #   3. Fires per-chapter question generation for any brand-new chapters
+  # Use this to recover courses whose TOC got locked in before the rebasing
+  # system existed (e.g., stuck at 16 web-discovered chapters when the
+  # textbook has 42).
+  def handle_event("rediscover_toc", %{"id" => course_id}, socket) do
+    case %{course_id: course_id}
+         |> FunSheep.Workers.EnrichDiscoveryWorker.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Re-running TOC discovery. Check the course in a minute for updated chapters."
+         )
+         |> load_courses()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not enqueue rediscovery: #{inspect(reason)}")}
+    end
+  end
+
   defp load_courses(socket) do
     opts = [
       search: socket.assigns.search,
@@ -167,6 +192,16 @@ defmodule FunSheepWeb.AdminCoursesLive do
                   title="Re-enqueues validation jobs for every :pending question on this course. Use after an Interactor outage leaves questions stuck."
                 >
                   Requeue
+                </button>
+                <button
+                  type="button"
+                  phx-click="rediscover_toc"
+                  phx-value-id={c.id}
+                  data-confirm="Re-run TOC discovery from uploaded textbook? Preserved chapters keep existing questions; new chapters will trigger AI question generation."
+                  class="px-3 py-1 rounded-full text-xs font-medium text-[#007AFF] border border-[#007AFF]/30 hover:bg-blue-50 mr-2"
+                  title="Enqueues EnrichDiscoveryWorker: re-discovers chapters from OCR'd textbook, rebases TOC non-destructively (attempts preserved), generates questions for any brand-new chapters."
+                >
+                  Rediscover
                 </button>
                 <button
                   type="button"
