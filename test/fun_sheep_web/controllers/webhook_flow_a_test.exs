@@ -38,7 +38,9 @@ defmodule FunSheepWeb.WebhookFlowATest do
     :ok
   end
 
-  test "subscription.activated with metadata stamps paid_by and accepts the request", %{conn: conn} do
+  test "subscription.activated with metadata stamps paid_by and accepts the request", %{
+    conn: conn
+  } do
     student = create_role(:student, %{display_name: "Kid"})
     parent = create_role(:parent, %{display_name: "Mom"})
     link_parent(parent, student)
