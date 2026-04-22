@@ -254,7 +254,14 @@ defmodule FunSheep.Courses.TOCRebaseTest do
           ocr_char_count: 50_000
         })
 
-      {:ok, %{kept: 1, created: 1, orphaned: 0, deleted: 0}} = TOCRebase.apply(new_toc, course.id)
+      {:ok, stats} = TOCRebase.apply(new_toc, course.id)
+      assert stats.kept == 1
+      assert stats.created == 1
+      assert stats.orphaned == 0
+      assert stats.deleted == 0
+      # One brand-new chapter was created — its id comes back so the worker
+      # can target question generation at just that chapter.
+      assert [_new_id] = stats.new_chapter_ids
 
       # The old chapter_id must still exist (with its question_attempts intact).
       reloaded = Courses.list_chapters_by_course(course.id)

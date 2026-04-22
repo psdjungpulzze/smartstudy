@@ -143,6 +143,11 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
                 "#{stats.deleted} deleted (source=#{source})"
             )
 
+            # Eagerly generate questions for brand-new chapters so students
+            # don't hit empty topics. Preserved chapters keep their existing
+            # questions — skip them to avoid redundant generation.
+            enqueue_per_chapter_generation(course_id, stats.new_chapter_ids)
+
             mark_discovery_complete(Courses.get_course!(course_id), length(chapters))
 
           {:error, reason} ->
@@ -171,6 +176,29 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     end
 
     :ok
+  end
+
+  # Fire one AIQuestionGenerationWorker job per brand-new chapter (10
+  # questions each). Chapters carried forward from the old TOC already
+  # have their own questions — we leave those alone so students don't
+  # see duplicates and the validator doesn't re-chew 2000 tokens on
+  # settled content. The course-level `trigger_question_generation`
+  # that runs later will still do its broader pass for coverage.
+  defp enqueue_per_chapter_generation(_course_id, []), do: :ok
+
+  defp enqueue_per_chapter_generation(course_id, chapter_ids) do
+    Enum.each(chapter_ids, fn chapter_id ->
+      FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
+        chapter_id: chapter_id,
+        count: 10,
+        mode: "from_material"
+      )
+    end)
+
+    Logger.info(
+      "[EnrichDiscovery] Enqueued question generation for " <>
+        "#{length(chapter_ids)} new chapter(s) on course #{course_id}"
+    )
   end
 
   defp mark_discovery_complete(course, chapter_count) do

@@ -95,4 +95,30 @@ defmodule FunSheepWeb.AdminCoursesLiveTest do
       end)
     end
   end
+
+  describe "rediscover_toc action" do
+    test "Rediscover button renders for every course", %{conn: conn} do
+      _course = create_course()
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses")
+
+      assert html =~ "phx-click=\"rediscover_toc\""
+      assert html =~ "Rediscover"
+    end
+
+    test "clicking Rediscover enqueues EnrichDiscoveryWorker", %{conn: _conn} do
+      # Same pattern as the Requeue test above — exercise the enqueue
+      # path directly so we don't fight LiveView/Oban-manual-mode timing.
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        course = create_course()
+
+        {:ok, _job} =
+          %{course_id: course.id}
+          |> FunSheep.Workers.EnrichDiscoveryWorker.new()
+          |> Oban.insert()
+
+        assert_enqueued(worker: FunSheep.Workers.EnrichDiscoveryWorker, queue: :ai)
+      end)
+    end
+  end
 end

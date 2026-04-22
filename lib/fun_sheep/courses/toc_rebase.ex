@@ -193,7 +193,7 @@ defmodule FunSheep.Courses.TOCRebase do
       chapters_with_attempts = chapter_ids_with_attempts(course_id)
 
       plan = plan_rebase(new_toc.chapters, current_chapters, chapters_with_attempts)
-      execute_plan(plan, course_id)
+      created_ids = execute_plan(plan, course_id)
 
       mark_applied(new_toc, course_id)
 
@@ -201,7 +201,12 @@ defmodule FunSheep.Courses.TOCRebase do
         kept: length(plan.matched),
         created: length(plan.created),
         orphaned: length(plan.orphans),
-        deleted: length(plan.deletes)
+        deleted: length(plan.deletes),
+        # Chapter ids that were inserted fresh during this rebase. Callers
+        # use this to proactively enqueue question generation for just the
+        # new chapters (e.g., after a 16→42 chapter expansion, we don't
+        # want to regenerate questions for the 16 preserved chapters).
+        new_chapter_ids: created_ids
       }
     end)
   end
@@ -287,22 +292,26 @@ defmodule FunSheep.Courses.TOCRebase do
     end)
 
     # 2. Create brand-new chapters for unmatched new-TOC entries.
+    # Collect the inserted ids so the caller can proactively enqueue
+    # question generation for just these (not the preserved ones).
     next_position = length(matched) + 1
 
-    created
-    |> Enum.with_index(next_position)
-    |> Enum.each(fn {new_ch, position} ->
-      {:ok, chapter} =
-        %Chapter{}
-        |> Chapter.changeset(%{
-          name: Map.get(new_ch, "name") || "Unnamed Chapter",
-          position: position,
-          course_id: course_id
-        })
-        |> Repo.insert()
+    created_ids =
+      created
+      |> Enum.with_index(next_position)
+      |> Enum.map(fn {new_ch, position} ->
+        {:ok, chapter} =
+          %Chapter{}
+          |> Chapter.changeset(%{
+            name: Map.get(new_ch, "name") || "Unnamed Chapter",
+            position: position,
+            course_id: course_id
+          })
+          |> Repo.insert()
 
-      sync_sections(chapter.id, Map.get(new_ch, "sections") || [])
-    end)
+        sync_sections(chapter.id, Map.get(new_ch, "sections") || [])
+        chapter.id
+      end)
 
     # 3. Mark orphans (current chapters with attempts but no match in the
     # new TOC). They stay in the DB; `orphaned_at` surfaces them in the
@@ -320,7 +329,7 @@ defmodule FunSheep.Courses.TOCRebase do
     # 4. Delete empty orphans (no attempts — safe to drop).
     Enum.each(deletes, fn chapter -> Repo.delete!(chapter) end)
 
-    :ok
+    created_ids
   end
 
   # For each new-TOC section name: match to an existing section (by
