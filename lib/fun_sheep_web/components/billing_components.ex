@@ -520,12 +520,13 @@ defmodule FunSheepWeb.BillingComponents do
         >
           Upgrade Now
         </.link>
-        <.link
-          navigate={"/courses/#{@course_id}"}
-          class="px-6 py-2 rounded-full border border-[#E5E5EA] dark:border-[#3A3A3C] text-[#1C1C1E] dark:text-white font-medium hover:bg-[#F5F5F7] dark:hover:bg-[#1C1C1E] transition-colors"
+        <button
+          type="button"
+          onclick={"var r = document.referrer; if (r && new URL(r).origin === location.origin && r !== location.href) { history.back() } else { location.href = '/courses/#{@course_id}' }"}
+          class="px-6 py-2 rounded-full border border-[#E5E5EA] dark:border-[#3A3A3C] text-[#1C1C1E] dark:text-white font-medium hover:bg-[#F5F5F7] dark:hover:bg-[#1C1C1E] transition-colors cursor-pointer"
         >
-          Back to Course
-        </.link>
+          Back
+        </button>
       </div>
 
       <div class="bg-[#F5F5F7] dark:bg-[#1C1C1E] rounded-xl p-4 max-w-sm mx-auto">
