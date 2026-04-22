@@ -39,26 +39,36 @@ find_port() {
 
 sweep_orphans() {
   # Find orphaned `mix phx.server` processes (PPID == 1) and kill them.
-  # Scoped by command string so we don't touch unrelated Erlang VMs.
-  local sweep_log="${LOGFILE%.log}.sweep.log"
-  local orphans
-  orphans=$(ps -eo pid,ppid,cmd 2>/dev/null | awk '$3 ~ /mix phx.server$/ && $2 == 1 { print $1 }')
+  # Scoped by matching the full command line (not just the beam.smp argv[0])
+  # so we don't touch unrelated Erlang VMs.
+  local orphans=""
+  for pid in $(pgrep -f "mix phx.server$" 2>/dev/null); do
+    local ppid
+    ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [ "$ppid" = "1" ]; then
+      orphans="$orphans $pid"
+    fi
+  done
+  orphans=$(echo "$orphans" | sed 's/^ *//')
   if [ -n "$orphans" ]; then
     echo "Sweeping orphaned mix phx.server processes: $orphans" >&2
     # shellcheck disable=SC2086
-    echo "$orphans" | xargs -r kill 2>/dev/null || true
+    kill $orphans 2>/dev/null || true
     # Brief grace period then SIGKILL any survivors.
     sleep 2
     # shellcheck disable=SC2086
-    echo "$orphans" | xargs -r -I{} sh -c 'kill -0 {} 2>/dev/null && kill -9 {}' 2>/dev/null || true
+    for pid in $orphans; do
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    done
     # Clean any pidfiles whose PIDs no longer exist.
     for f in /tmp/funsheep-vt-*.pid; do
       [ -f "$f" ] || continue
-      local pid
-      pid=$(cat "$f" 2>/dev/null)
-      [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && rm -f "$f" "${f%.pid}.port"
+      local stale_pid
+      stale_pid=$(cat "$f" 2>/dev/null)
+      if [ -n "$stale_pid" ] && ! kill -0 "$stale_pid" 2>/dev/null; then
+        rm -f "$f" "${f%.pid}.port"
+      fi
     done
-    : > "$sweep_log" 2>/dev/null || true
   fi
 }
 
