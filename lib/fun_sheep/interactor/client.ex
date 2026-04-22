@@ -49,6 +49,23 @@ defmodule FunSheep.Interactor.Client do
   end
 
   @doc """
+  Performs a DELETE request to the given Interactor API path.
+
+  Returns `{:ok, body}` or `{:error, reason}`.
+  In mock mode returns `{:ok, %{"data" => %{"deleted" => true}}}`.
+  """
+  @spec delete(String.t()) :: {:ok, map()} | {:error, term()}
+  def delete(path) do
+    if mock_mode?() do
+      {:ok, %{"data" => %{"deleted" => true}}}
+    else
+      with {:ok, token} <- FunSheep.Interactor.Auth.get_token() do
+        do_delete(path, token, 0)
+      end
+    end
+  end
+
+  @doc """
   Performs a PUT request to the given Interactor API path with a JSON body.
   """
   @spec put(String.t(), map()) :: {:ok, map()} | {:error, term()}
@@ -113,6 +130,22 @@ defmodule FunSheep.Interactor.Client do
     end
   end
 
+  defp do_delete(path, token, attempt) do
+    case Req.delete(base_url() <> path, headers: auth_headers(token)) do
+      {:ok, %{status: status, body: resp_body}} when status in [200, 202, 204] ->
+        {:ok, resp_body}
+
+      {:ok, %{status: 429} = resp} ->
+        maybe_retry(:delete, {path, token}, resp, attempt)
+
+      {:ok, %{status: status, body: resp_body}} ->
+        {:error, {status, resp_body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # --- Rate limit retry logic ---
 
   defp maybe_retry(_method, _args, %{status: 429, body: body}, attempt)
@@ -135,6 +168,7 @@ defmodule FunSheep.Interactor.Client do
       {:get, {path, token}} -> do_get(path, token, attempt + 1)
       {:post, {path, req_body, token}} -> do_post(path, req_body, token, attempt + 1)
       {:put, {path, req_body, token}} -> do_put(path, req_body, token, attempt + 1)
+      {:delete, {path, token}} -> do_delete(path, token, attempt + 1)
     end
   end
 

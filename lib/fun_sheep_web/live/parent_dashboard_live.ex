@@ -179,6 +179,29 @@ defmodule FunSheepWeb.ParentDashboardLive do
         </p>
       </div>
 
+      <%!-- ── Connected apps ── --%>
+      <div class="animate-slide-up">
+        <.link
+          navigate={~p"/integrations"}
+          class="block bg-white rounded-2xl border border-gray-100 p-5 hover:border-[#4CD964] transition-colors"
+        >
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-[#E8F8EB] flex items-center justify-center text-xl">
+              🔗
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold text-gray-900 text-sm">
+                School apps
+              </h3>
+              <p class="text-gray-500 text-xs">
+                Auto-import your child's courses and tests.
+              </p>
+            </div>
+            <span class="text-[#4CD964] text-xs font-medium">Manage →</span>
+          </div>
+        </.link>
+      </div>
+
       <%!-- ── Empty State ── --%>
       <div :if={@students == []} class="animate-slide-up">
         <div class="bg-white rounded-2xl border border-gray-100 p-6 sm:p-8 text-center">
