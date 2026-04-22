@@ -23,7 +23,13 @@ defmodule FunSheep.Questions.Validation do
   @passed_threshold 95.0
   @review_threshold 70.0
 
-  @assistant_name "question_validator"
+  # Renamed from "question_validator" to force re-provisioning. The original
+  # assistant was registered as gpt-4o with max_tokens 4000 before we moved to
+  # gpt-4o-mini/2000 for cost and stability; the Interactor API only applies
+  # `assistant_attrs` on first provision, so the old name would stay on the
+  # expensive/slow config. Bumping the name is safer than asking ops to delete
+  # the old row by hand.
+  @assistant_name "question_validator_v2"
 
   @assistant_system_prompt """
   You are a strict curriculum validator. Your job is to evaluate whether each
@@ -103,6 +109,9 @@ defmodule FunSheep.Questions.Validation do
   def apply_verdict(%Question{} = question, verdict) when is_map(verdict) do
     {status, score} = derive_status(verdict)
 
+    course = load_course(question.course_id)
+    valid_chapter_ids = MapSet.new(course.chapters, & &1.id)
+
     attrs =
       %{
         validation_status: status,
@@ -110,7 +119,7 @@ defmodule FunSheep.Questions.Validation do
         validation_report: verdict,
         validated_at: DateTime.utc_now() |> DateTime.truncate(:second)
       }
-      |> maybe_accept_categorization(verdict)
+      |> maybe_accept_categorization(verdict, valid_chapter_ids)
       |> maybe_accept_explanation(question, verdict)
 
     question
@@ -376,18 +385,33 @@ defmodule FunSheep.Questions.Validation do
   defp topic_score(_), do: 0.0
 
   # Apply suggested chapter only when the assistant is confident it belongs
-  # elsewhere (confidence >= 80) AND we have a concrete chapter id.
-  defp maybe_accept_categorization(attrs, %{
-         "categorization" => %{
-           "suggested_chapter_id" => new_id,
-           "confidence" => conf
-         }
-       })
+  # elsewhere (confidence >= 80), we have a concrete chapter id, AND the id
+  # actually exists on this course. The validator occasionally hallucinates
+  # UUIDs — persisting them triggers questions_chapter_id_fkey violations
+  # that leave the question stuck in :pending forever (seen 2026-04-22).
+  defp maybe_accept_categorization(
+         attrs,
+         %{
+           "categorization" => %{
+             "suggested_chapter_id" => new_id,
+             "confidence" => conf
+           }
+         },
+         valid_chapter_ids
+       )
        when is_binary(new_id) and is_number(conf) and conf >= 80 do
-    Map.put(attrs, :chapter_id, new_id)
+    if MapSet.member?(valid_chapter_ids, new_id) do
+      Map.put(attrs, :chapter_id, new_id)
+    else
+      Logger.warning(
+        "[Validation] Ignoring suggested_chapter_id #{inspect(new_id)}: not in course chapters"
+      )
+
+      attrs
+    end
   end
 
-  defp maybe_accept_categorization(attrs, _), do: attrs
+  defp maybe_accept_categorization(attrs, _, _), do: attrs
 
   # If the question has no explanation yet and the validator provided a valid
   # one, accept it. Never overwrite an existing explanation — those go through

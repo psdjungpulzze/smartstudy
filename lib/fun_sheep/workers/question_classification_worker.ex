@@ -20,6 +20,10 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
 
   @default_confidence_threshold 0.85
 
+  # Versioned name so a prompt/model change triggers a fresh assistant on
+  # Interactor. Bump the suffix when `assistant_attrs` changes materially.
+  @assistant_name "question_classifier_v1"
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
     questions = load_questions(args)
@@ -74,7 +78,9 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   defp classify_one(question, sections) do
     prompt = build_prompt(question, sections)
 
-    case Agents.chat("question_classifier", prompt, %{
+    _ = ensure_assistant()
+
+    case Agents.chat(@assistant_name, prompt, %{
            metadata: %{question_id: question.id, chapter_id: question.chapter_id}
          }) do
       {:ok, response} ->
@@ -202,5 +208,62 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
       :classification_confidence_threshold,
       @default_confidence_threshold
     )
+  end
+
+  @doc """
+  Configuration used to register the `#{@assistant_name}` assistant on
+  Interactor. Exposed for scripts/preflight checks.
+  """
+  def assistant_attrs do
+    %{
+      name: @assistant_name,
+      description:
+        "Classifies a question into one of a chapter's existing sections (skill tag). Returns a JSON verdict with section_id and confidence.",
+      system_prompt:
+        "You are a curriculum skill tagger. Given a question and the list of sections in its chapter, pick the single best existing section. If nothing fits, return null and propose a name. Always return a low confidence when unsure.",
+      llm_provider: "openai",
+      llm_model: "gpt-4o-mini",
+      llm_config: %{temperature: 0.1, max_tokens: 400},
+      metadata: %{app: "funsheep", role: "question_classifier"}
+    }
+  end
+
+  @doc """
+  Ensures the classifier assistant exists on Interactor. Safe to call
+  repeatedly — cached in `persistent_term`.
+  """
+  def ensure_assistant do
+    case :persistent_term.get({__MODULE__, :assistant_id}, nil) do
+      nil ->
+        provision_assistant()
+
+      id ->
+        {:ok, id}
+    end
+  end
+
+  defp provision_assistant do
+    case Agents.resolve_assistant(@assistant_name) do
+      {:ok, id} ->
+        :persistent_term.put({__MODULE__, :assistant_id}, id)
+        {:ok, id}
+
+      {:error, _} ->
+        case Agents.create_assistant(assistant_attrs()) do
+          {:ok, %{"data" => %{"id" => id}}} ->
+            :persistent_term.put({__MODULE__, :assistant_id}, id)
+            Logger.info("[QClassify] Created #{@assistant_name} assistant: #{id}")
+            {:ok, id}
+
+          {:ok, %{"id" => id}} ->
+            :persistent_term.put({__MODULE__, :assistant_id}, id)
+            Logger.info("[QClassify] Created #{@assistant_name} assistant: #{id}")
+            {:ok, id}
+
+          {:error, reason} = err ->
+            Logger.error("[QClassify] Failed to create #{@assistant_name}: #{inspect(reason)}")
+            err
+        end
+    end
   end
 end
