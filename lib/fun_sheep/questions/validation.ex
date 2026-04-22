@@ -134,10 +134,13 @@ defmodule FunSheep.Questions.Validation do
   """
   def thresholds, do: %{passed: @passed_threshold, review: @review_threshold}
 
+  @behaviour FunSheep.Interactor.AssistantSpec
+
   @doc """
   Configuration used to register the `question_validator` assistant on
   Interactor. Exposed for scripts/preflight checks.
   """
+  @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
     %{
       name: @assistant_name,

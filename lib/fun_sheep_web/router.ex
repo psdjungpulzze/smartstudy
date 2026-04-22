@@ -158,6 +158,7 @@ defmodule FunSheepWeb.Router do
       live "/usage/ai", AdminAIUsageLive, :index
       live "/jobs/failures", AdminJobsLive, :index
       live "/flags", AdminFlagsLive, :index
+      live "/interactor/agents", AdminInteractorAgentsLive, :index
     end
   end
 
