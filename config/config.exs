@@ -9,7 +9,8 @@ import Config
 
 config :fun_sheep,
   ecto_repos: [FunSheep.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  env: Atom.to_string(config_env())
 
 # Configure the endpoint
 config :fun_sheep, FunSheepWeb.Endpoint,

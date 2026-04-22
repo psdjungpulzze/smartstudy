@@ -23,6 +23,7 @@ defmodule FunSheep.Interactor.Agents do
   the assistant list and caching the mapping in `persistent_term`.
   """
 
+  alias FunSheep.AIUsage
   alias FunSheep.Interactor.Client
 
   require Logger
@@ -61,21 +62,65 @@ defmodule FunSheep.Interactor.Agents do
   def chat(assistant_name, prompt, opts \\ %{}) do
     timeout = opts[:timeout] || @response_timeout
     metadata = opts[:metadata] || %{}
+    source = opts[:source] || assistant_name
     external_user_id = "funsheep_worker_#{:erlang.system_time(:millisecond)}"
+    started_at = System.monotonic_time(:millisecond)
 
-    with {:ok, assistant_id} <- resolve_assistant(assistant_name),
-         {:ok, room} <- create_room(assistant_id, external_user_id, metadata),
-         room_id <- extract_id(room),
-         {:ok, _msg} <- send_message(room_id, prompt),
-         {:ok, response} <- await_response(room_id, timeout) do
-      # Close room in background — don't block on it
-      Task.start(fn -> close_room(room_id) end)
-      {:ok, response}
-    else
+    result =
+      with {:ok, assistant_id} <- resolve_assistant(assistant_name),
+           {:ok, room} <- create_room(assistant_id, external_user_id, metadata),
+           room_id <- extract_id(room),
+           {:ok, _msg} <- send_message(room_id, prompt),
+           {:ok, assistant_message} <- await_response(room_id, timeout) do
+        # Close room in background — don't block on it
+        Task.start(fn -> close_room(room_id) end)
+        {:ok, assistant_message}
+      end
+
+    duration_ms = System.monotonic_time(:millisecond) - started_at
+    record_usage(result, assistant_name, prompt, source, metadata, duration_ms)
+
+    case result do
+      {:ok, %{"content" => content}} ->
+        {:ok, content}
+
       {:error, reason} = error ->
         Logger.error("[Agents] chat failed for assistant #{assistant_name}: #{inspect(reason)}")
         error
     end
+  end
+
+  # One AIUsage row per chat invocation, regardless of outcome. Telemetry
+  # failures are swallowed inside AIUsage.log_call/1 so they can't cascade.
+  defp record_usage({:ok, message}, assistant_name, prompt, source, metadata, duration_ms) do
+    AIUsage.log_call(%{
+      provider: "interactor",
+      model: Map.get(message, "model"),
+      assistant_name: assistant_name,
+      source: source,
+      prompt: prompt,
+      response: Map.get(message, "content"),
+      prompt_tokens: Map.get(message, "input_tokens"),
+      completion_tokens: Map.get(message, "output_tokens"),
+      duration_ms: duration_ms,
+      status: "ok",
+      metadata: metadata
+    })
+  end
+
+  defp record_usage({:error, reason}, assistant_name, prompt, source, metadata, duration_ms) do
+    status = if reason == :timeout, do: "timeout", else: "error"
+
+    AIUsage.log_call(%{
+      provider: "interactor",
+      assistant_name: assistant_name,
+      source: source,
+      prompt: prompt,
+      duration_ms: duration_ms,
+      status: status,
+      error: inspect(reason),
+      metadata: metadata
+    })
   end
 
   # --- Assistant Resolution ---
@@ -233,8 +278,8 @@ defmodule FunSheep.Interactor.Agents do
             end)
 
           case List.last(assistant_messages) do
-            %{"content" => content} ->
-              {:ok, content}
+            %{"content" => _} = message ->
+              {:ok, message}
 
             nil ->
               if attempt < @max_polls do
