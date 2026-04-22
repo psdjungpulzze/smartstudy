@@ -252,16 +252,40 @@ defmodule FunSheep.Courses do
         end)
 
       true ->
-        update_course(course, %{
-          processing_status: "failed",
-          processing_step:
+        # Distinguish "validator couldn't read its own output" (infrastructure
+        # problem — retry is the right action) from "validator looked and
+        # rejected everything" (content problem — different materials needed).
+        # Honest failure copy beats a fake "still processing" forever.
+        unparseable = unparseable_failure_count(course_id)
+
+        copy =
+          if unparseable > 0 and unparseable >= div(failed, 2) do
+            "Question validation couldn't complete — the validator returned " <>
+              "responses we couldn't read. Try regenerating or contact support if it persists."
+          else
             "Question validation failed — all generated questions were rejected. " <>
               "Please try again or upload different materials."
+          end
+
+        update_course(course, %{
+          processing_status: "failed",
+          processing_step: copy
         })
         |> tap(fn _ ->
           broadcast_finalization(course_id, "failed", 0, 0, failed)
         end)
     end
+  end
+
+  defp unparseable_failure_count(course_id) do
+    alias FunSheep.Questions.Question
+
+    from(q in Question,
+      where:
+        q.course_id == ^course_id and q.validation_status == :failed and
+          fragment("?->>'error' = ?", q.validation_report, "validator_unparseable_response")
+    )
+    |> Repo.aggregate(:count)
   end
 
   defp broadcast_finalization(course_id, status, passed, needs_review, failed) do

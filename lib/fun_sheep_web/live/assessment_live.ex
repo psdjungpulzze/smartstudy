@@ -637,7 +637,7 @@ defmodule FunSheepWeb.AssessmentLive do
           navigate={~p"/courses/#{@course_id}"}
           class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
         >
-          Back to Course
+          Go to Course Page
         </.link>
         <button
           :if={@show_retry?}
@@ -754,7 +754,7 @@ defmodule FunSheepWeb.AssessmentLive do
           navigate={~p"/courses/#{@course_id}"}
           class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
         >
-          Back to Course
+          Go to Course Page
         </.link>
         <.link
           navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
