@@ -258,6 +258,15 @@ defmodule FunSheepWeb.ParentDashboardLive do
         </p>
       </div>
 
+      <%!-- ── Flow A — pending practice requests (§4.6.2) ── --%>
+      <div :if={@user_role} class="animate-slide-up">
+        <.live_component
+          module={FunSheepWeb.PracticeRequestLive.ParentCardComponent}
+          id="parent-practice-requests"
+          parent_id={@user_role.id}
+        />
+      </div>
+
       <%!-- ── Connected apps ── --%>
       <div class="animate-slide-up">
         <.link

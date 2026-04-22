@@ -55,15 +55,22 @@ defmodule FunSheep.Billing do
   @doc """
   Upgrades a user to a paid plan via Stripe checkout.
   Returns `{:ok, checkout_url}` for redirect.
+
+  Optional `metadata` is forwarded to the Stripe checkout session (via
+  Interactor Billing). Used by Flow A (§4.7) to carry
+  `practice_request_id` and `paid_by_interactor_user_id` so the webhook
+  can stamp `Subscription.paid_by_user_role_id` +
+  `origin_practice_request_id` on activation.
   """
-  def create_checkout(interactor_user_id, plan, success_url, cancel_url) do
+  def create_checkout(interactor_user_id, plan, success_url, cancel_url, metadata \\ %{}) do
     plan_id = plan_id_for(plan)
 
     case BillingClient.create_checkout_session(
            interactor_user_id,
            plan_id,
            success_url,
-           cancel_url
+           cancel_url,
+           metadata
          ) do
       {:ok, %{"data" => %{"checkout_url" => url}}} -> {:ok, url}
       {:error, reason} -> {:error, reason}
@@ -72,6 +79,10 @@ defmodule FunSheep.Billing do
 
   @doc """
   Activates a subscription after successful payment (called from webhook).
+
+  Accepts optional `:paid_by_user_role_id` (payer, for Flow A / Flow B)
+  and `:origin_practice_request_id` (the ask that produced this
+  purchase, Flow A only). See §3.1, §7.2.
   """
   def activate_subscription(user_role_id, attrs) do
     case get_or_create_subscription(user_role_id) do
@@ -83,7 +94,10 @@ defmodule FunSheep.Billing do
             attrs[:billing_subscription_id] || attrs["billing_subscription_id"],
           stripe_customer_id: attrs[:stripe_customer_id] || attrs["stripe_customer_id"],
           current_period_start: attrs[:current_period_start] || attrs["current_period_start"],
-          current_period_end: attrs[:current_period_end] || attrs["current_period_end"]
+          current_period_end: attrs[:current_period_end] || attrs["current_period_end"],
+          paid_by_user_role_id: attrs[:paid_by_user_role_id] || attrs["paid_by_user_role_id"],
+          origin_practice_request_id:
+            attrs[:origin_practice_request_id] || attrs["origin_practice_request_id"]
         })
 
       {:error, reason} ->

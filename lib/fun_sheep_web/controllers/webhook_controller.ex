@@ -133,22 +133,55 @@ defmodule FunSheepWeb.WebhookController do
   end
 
   defp handle_subscription_activated(conn, data) do
+    # §3.1, §7.2 — read the payer/beneficiary split and Flow A
+    # origin_practice_request_id out of Stripe metadata if present.
+    metadata = data["metadata"] || %{}
+    request_id = metadata["practice_request_id"]
+    payer_interactor_id = metadata["paid_by_interactor_user_id"]
+
     with subscriber_id when not is_nil(subscriber_id) <- data["subscriber_id"],
          %{id: user_role_id} <-
            FunSheep.Accounts.get_user_role_by_interactor_id(subscriber_id) do
+      paid_by_user_role_id = resolve_payer_user_role_id(payer_interactor_id, user_role_id)
+
       FunSheep.Billing.activate_subscription(user_role_id, %{
         plan: data["plan_name"] || "monthly",
         billing_subscription_id: data["subscription_id"],
         stripe_customer_id: data["stripe_customer_id"],
         current_period_start: parse_datetime(data["current_period_start"]),
-        current_period_end: parse_datetime(data["current_period_end"])
+        current_period_end: parse_datetime(data["current_period_end"]),
+        paid_by_user_role_id: paid_by_user_role_id,
+        origin_practice_request_id: request_id
       })
+
+      # Flow A: transition the originating practice_request to :accepted.
+      # Idempotent — a second activation on the same request is a no-op.
+      if is_binary(request_id) do
+        _ = FunSheep.PracticeRequests.accept(request_id, %{subscription_id: nil})
+      end
+
+      # Notify the student's LiveView so the meter updates + celebration
+      # toast fires without a refresh (§4.7).
+      Phoenix.PubSub.broadcast(
+        FunSheep.PubSub,
+        "subscription:#{user_role_id}",
+        {:subscription_activated, user_role_id}
+      )
 
       json(conn, %{status: "activated"})
     else
       _ ->
         Logger.warning("Could not find user for billing event: #{inspect(data["subscriber_id"])}")
         conn |> put_status(404) |> json(%{error: "User not found"})
+    end
+  end
+
+  defp resolve_payer_user_role_id(nil, beneficiary_id), do: beneficiary_id
+
+  defp resolve_payer_user_role_id(interactor_id, beneficiary_id) when is_binary(interactor_id) do
+    case FunSheep.Accounts.get_user_role_by_interactor_id(interactor_id) do
+      %{id: id} -> id
+      _ -> beneficiary_id
     end
   end
 

@@ -47,7 +47,11 @@ defmodule FunSheepWeb.SubscriptionLive do
         active_tab: "overview",
         checkout_loading: nil,
         show_add_card: false,
-        setup_intent: nil
+        setup_intent: nil,
+        # Flow A (§4.7) — when the parent arrives via the accept link,
+        # the request is loaded here so checkout carries its metadata.
+        practice_request: nil,
+        practice_request_student: nil
       )
 
     {:ok, socket}
@@ -60,10 +64,25 @@ defmodule FunSheepWeb.SubscriptionLive do
     socket =
       socket
       |> assign(:active_tab, tab)
+      |> maybe_load_practice_request(params)
       |> maybe_handle_checkout_return(params)
 
     {:noreply, socket}
   end
+
+  defp maybe_load_practice_request(socket, %{"request" => request_id})
+       when is_binary(request_id) do
+    case FunSheep.PracticeRequests.view(request_id) do
+      {:ok, %FunSheep.PracticeRequests.Request{} = req} ->
+        req = FunSheep.Repo.preload(req, [:student])
+        assign(socket, practice_request: req, practice_request_student: req.student)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp maybe_load_practice_request(socket, _), do: socket
 
   defp maybe_handle_checkout_return(socket, %{"success" => "true"}) do
     stats = Billing.usage_stats(socket.assigns.user_role_id)
@@ -90,8 +109,15 @@ defmodule FunSheepWeb.SubscriptionLive do
     socket = assign(socket, :checkout_loading, plan)
     success_url = url(socket, ~p"/subscription?tab=overview&success=true")
     cancel_url = url(socket, ~p"/subscription?tab=plans&cancelled=true")
+    metadata = flow_a_metadata(socket)
 
-    case Billing.create_checkout(socket.assigns.interactor_user_id, plan, success_url, cancel_url) do
+    case Billing.create_checkout(
+           socket.assigns.interactor_user_id,
+           plan,
+           success_url,
+           cancel_url,
+           metadata
+         ) do
       {:ok, checkout_url} ->
         {:noreply, redirect(socket, external: checkout_url)}
 
@@ -187,12 +213,38 @@ defmodule FunSheepWeb.SubscriptionLive do
     end
   end
 
+  defp flow_a_metadata(%{assigns: %{practice_request: %{id: id}, interactor_user_id: payer_id}}) do
+    %{
+      "practice_request_id" => id,
+      "paid_by_interactor_user_id" => payer_id
+    }
+  end
+
+  defp flow_a_metadata(_), do: %{}
+
   # ── Render ─────────────────────────────────────────────────────────────────
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-4xl mx-auto px-4 py-6">
+    <%!-- §6.3, §8.5 — teachers never see pricing --%>
+    <.teacher_free_message :if={@role in ["teacher", :teacher]} />
+
+    <div :if={@role not in ["teacher", :teacher]} class="max-w-4xl mx-auto px-4 py-6">
+      <%!-- §4.7 — When the parent arrives via an accept link, surface the
+           "who pays" context at the top of the page. --%>
+      <div
+        :if={@practice_request_student}
+        class="mb-6 bg-[#E8F8EB] dark:bg-[#4CD964]/15 border border-[#4CD964]/40 rounded-2xl p-4"
+      >
+        <p class="text-sm font-medium text-[#1C1C1E] dark:text-white">
+          You're unlocking unlimited practice for <strong>{@practice_request_student.display_name}</strong>.
+        </p>
+        <p class="text-xs text-[#8E8E93] mt-1">
+          Annual is highlighted — best value. Cancel any time.
+        </p>
+      </div>
+
       <%!-- Header --%>
       <div class="mb-6">
         <h1 class="text-2xl sm:text-3xl font-bold text-[#1C1C1E] dark:text-white">
@@ -955,5 +1007,50 @@ defmodule FunSheepWeb.SubscriptionLive do
     else
       _ -> ""
     end
+  end
+
+  # §6.3, §8.5 — teachers never see pricing or a plan picker.
+  def teacher_free_message(assigns) do
+    ~H"""
+    <div class="max-w-2xl mx-auto px-4 py-12">
+      <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-8 text-center">
+        <div class="w-16 h-16 bg-[#E8F8EB] dark:bg-[#4CD964]/20 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg
+            class="w-8 h-8 text-[#4CD964]"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342M6.75 15a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm0 0v-3.675A55.378 55.378 0 0 1 12 8.443m-7.007 11.55A5.981 5.981 0 0 0 6.75 15.75v-1.5"
+            />
+          </svg>
+        </div>
+
+        <h1 class="text-2xl font-bold text-[#1C1C1E] dark:text-white mb-2">
+          Teachers don't need a subscription
+        </h1>
+        <p class="text-[#8E8E93] mb-4">
+          FunSheep is free for educators.
+        </p>
+        <p class="text-sm text-[#1C1C1E] dark:text-white max-w-md mx-auto mb-6">
+          Your students will practise on the free tier (20 practice questions per week).
+          When one of your students is ready for more, their parent will get an invitation
+          to upgrade — you won't need to handle payment.
+        </p>
+
+        <.link
+          navigate="/dashboard"
+          class="inline-flex bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 rounded-full shadow-md transition-colors"
+        >
+          Back to your classroom
+        </.link>
+      </div>
+    </div>
+    """
   end
 end

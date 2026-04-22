@@ -131,14 +131,22 @@ defmodule FunSheep.Interactor.Billing do
 
   # ── Checkout ───────────────────────────────────────────────────────────────
 
-  def create_checkout_session(subscriber_id, plan_id, success_url, cancel_url) do
-    post("/api/checkout/session", %{
+  def create_checkout_session(subscriber_id, plan_id, success_url, cancel_url, metadata \\ %{}) do
+    body = %{
       subscriber_id: subscriber_id,
       subscriber_type: "user",
       plan_id: plan_id,
       success_url: success_url,
       cancel_url: cancel_url
-    })
+    }
+
+    # Attach optional metadata. Interactor Billing forwards this to
+    # Stripe which returns it on `checkout.session.completed` webhooks,
+    # letting us trace a paid subscription back to its originating
+    # practice_request (Flow A, §4.7).
+    body = if map_size(metadata) == 0, do: body, else: Map.put(body, :metadata, metadata)
+
+    post("/api/checkout/session", body)
   end
 
   # ── HTTP Helpers ───────────────────────────────────────────────────────────
