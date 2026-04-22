@@ -16,7 +16,11 @@ defmodule FunSheep.Assessments do
   }
 
   alias FunSheep.{Courses, Questions}
+  alias FunSheep.Accounts.UserRole
+  alias FunSheep.Assessments.CohortCache
   alias FunSheep.Questions.QuestionAttempt
+
+  @cohort_min_size 20
 
   ## Test Schedules
 
@@ -291,6 +295,42 @@ defmodule FunSheep.Assessments do
     end
   end
 
+  ## ── Target Score (Spec §6.1) ─────────────────────────────────────────────
+
+  @doc """
+  Sets or updates the joint readiness target for a test schedule.
+
+  `proposer` must be `:student | :guardian` — we record who set it so the
+  Phase 3 goal flow can reason about proposals and counter-proposals.
+
+  Returns `{:ok, test_schedule}` or `{:error, changeset}`. The target is
+  clamped to [0, 100] by the schema validation.
+  """
+  def set_target_readiness(%TestSchedule{} = schedule, value, proposer)
+      when is_integer(value) and proposer in [:student, :guardian] do
+    schedule
+    |> TestSchedule.changeset(%{
+      target_readiness_score: value,
+      target_set_by: proposer,
+      target_set_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Clears the joint readiness target on a test schedule. Used when the
+  pair decides the target was wrong to set in the first place.
+  """
+  def clear_target_readiness(%TestSchedule{} = schedule) do
+    schedule
+    |> TestSchedule.changeset(%{
+      target_readiness_score: nil,
+      target_set_by: nil,
+      target_set_at: nil
+    })
+    |> Repo.update()
+  end
+
   ## ── Readiness Benchmarking ──────────────────────────────────────────────
 
   @doc """
@@ -539,6 +579,169 @@ defmodule FunSheep.Assessments do
       }
     end)
     |> Enum.sort_by(& &1.date, Date)
+  end
+
+  @doc """
+  Returns weekly percentile snapshots for the given student + test schedule
+  over the last `weeks` ISO-week buckets, oldest first. Each bucket is one
+  `%{week_start, percentile, score, rank, total}` map.
+
+  Spec §6.1: sparkline input. Weeks with fewer than 2 cohort students are
+  omitted — we do not fabricate a percentile when the denominator is small.
+  """
+  def readiness_percentile_history(user_role_id, test_schedule_id, weeks \\ 4)
+      when is_binary(user_role_id) and is_binary(test_schedule_id) and is_integer(weeks) and
+             weeks > 0 do
+    schedule = Repo.get(TestSchedule, test_schedule_id)
+
+    case schedule do
+      nil ->
+        []
+
+      %TestSchedule{course_id: course_id} ->
+        now = DateTime.utc_now()
+        first_week_start = beginning_of_week(DateTime.add(now, -weeks * 7, :day))
+
+        my_snapshots =
+          from(rs in ReadinessScore,
+            where:
+              rs.user_role_id == ^user_role_id and
+                rs.test_schedule_id == ^test_schedule_id and
+                rs.inserted_at >= ^first_week_start,
+            order_by: [asc: rs.inserted_at],
+            select: %{score: rs.aggregate_score, inserted_at: rs.inserted_at}
+          )
+          |> Repo.all()
+
+        cohort_scores =
+          from(rs in ReadinessScore,
+            join: ts in TestSchedule,
+            on: rs.test_schedule_id == ts.id,
+            where: ts.course_id == ^course_id and rs.inserted_at >= ^first_week_start,
+            select: %{
+              user_role_id: rs.user_role_id,
+              score: rs.aggregate_score,
+              inserted_at: rs.inserted_at
+            }
+          )
+          |> Repo.all()
+
+        weekly_percentiles(my_snapshots, cohort_scores, weeks)
+    end
+  end
+
+  defp weekly_percentiles(my_snapshots, cohort_scores, weeks) do
+    now = DateTime.utc_now()
+
+    Enum.reduce((weeks - 1)..0//-1, [], fn offset, acc ->
+      week_start = beginning_of_week(DateTime.add(now, -offset * 7, :day))
+      week_end = DateTime.add(week_start, 7, :day)
+
+      my_score =
+        my_snapshots
+        |> Enum.filter(&in_bucket?(&1.inserted_at, week_start, week_end))
+        |> last_score()
+
+      cohort =
+        cohort_scores
+        |> Enum.filter(&in_bucket?(&1.inserted_at, week_start, week_end))
+        |> Enum.uniq_by(& &1.user_role_id)
+        |> Enum.map(& &1.score)
+
+      cond do
+        my_score == nil or length(cohort) < 2 ->
+          acc
+
+        true ->
+          below = Enum.count(cohort, &(&1 < my_score))
+          pct = round(below / length(cohort) * 100)
+          rank = Enum.count(cohort, &(&1 > my_score)) + 1
+
+          [
+            %{
+              week_start: DateTime.to_date(week_start),
+              percentile: pct,
+              score: round(my_score),
+              rank: rank,
+              total: length(cohort)
+            }
+            | acc
+          ]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp in_bucket?(%DateTime{} = ts, start_ts, end_ts),
+    do: DateTime.compare(ts, start_ts) != :lt and DateTime.compare(ts, end_ts) == :lt
+
+  defp last_score([]), do: nil
+  defp last_score(list), do: list |> List.last() |> Map.get(:score)
+
+  defp beginning_of_week(%DateTime{} = dt) do
+    date = DateTime.to_date(dt)
+    dow = Date.day_of_week(date)
+    monday = Date.add(date, -(dow - 1))
+    DateTime.new!(monday, ~T[00:00:00], "Etc/UTC")
+  end
+
+  ## ── Cohort Percentile Bands (Spec §6.3) ─────────────────────────────────
+
+  @doc """
+  Returns 25th / 50th / 75th / 90th percentile readiness bands for the given
+  course + grade cohort. Only cohorts with at least #{@cohort_min_size}
+  students return full bands — smaller cohorts return `:small_cohort` and
+  the UI must suppress sub-percentile granularity.
+
+  Cached with a 15-minute TTL to keep the parent-dashboard mount cheap.
+
+  Forbidden (by spec): never expose identifying peer data — no names, no
+  ranks within a specific class. Only course × grade aggregates.
+  """
+  def cohort_percentile_bands(course_id, grade)
+      when is_binary(course_id) and is_binary(grade) do
+    CohortCache.fetch({course_id, grade}, fn ->
+      compute_cohort_percentile_bands(course_id, grade)
+    end)
+  end
+
+  def cohort_percentile_bands(_, _), do: %{status: :small_cohort, size: 0}
+
+  defp compute_cohort_percentile_bands(course_id, grade) do
+    scores =
+      from(rs in ReadinessScore,
+        join: ts in TestSchedule,
+        on: rs.test_schedule_id == ts.id,
+        join: ur in UserRole,
+        on: rs.user_role_id == ur.id,
+        where: ts.course_id == ^course_id and ur.grade == ^grade,
+        distinct: rs.user_role_id,
+        order_by: [desc: rs.inserted_at],
+        select: rs.aggregate_score
+      )
+      |> Repo.all()
+
+    size = length(scores)
+
+    if size < @cohort_min_size do
+      %{status: :small_cohort, size: size}
+    else
+      %{
+        status: :ok,
+        size: size,
+        p25: percentile(scores, 25),
+        p50: percentile(scores, 50),
+        p75: percentile(scores, 75),
+        p90: percentile(scores, 90)
+      }
+    end
+  end
+
+  defp percentile(scores, pct) when is_list(scores) and is_integer(pct) do
+    sorted = Enum.sort(scores)
+    # Nearest-rank method; simple and appropriate for a product signal.
+    rank = round(pct / 100 * (length(sorted) - 1))
+    Enum.at(sorted, rank) |> Float.round(1)
   end
 
   defp distribution_buckets(scores) do

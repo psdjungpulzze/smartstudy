@@ -3,11 +3,15 @@ defmodule FunSheepWeb.ParentDashboardLive do
 
   import FunSheepWeb.SheepMascot
 
-  alias FunSheep.{Accounts, Assessments, Courses, Gamification}
+  alias FunSheep.{Accounts, Assessments, Courses, Gamification, Repo}
+  alias FunSheep.Assessments.Forecaster
   alias FunSheep.Engagement.{StudySessions, Wellbeing}
 
   alias FunSheepWeb.StudentLive.Shared.{
     ActivityTimeline,
+    ForecastCard,
+    PeerComparison,
+    PercentileTrend,
     StudyHeatmap,
     TopicMasteryMap,
     WellbeingFraming
@@ -15,6 +19,7 @@ defmodule FunSheepWeb.ParentDashboardLive do
 
   @activity_window_days 30
   @heatmap_weeks 4
+  @percentile_history_weeks 4
 
   @impl true
   def mount(_params, _session, socket) do
@@ -129,6 +134,57 @@ defmodule FunSheepWeb.ParentDashboardLive do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_event(
+        "set_target_readiness",
+        %{"schedule_id" => schedule_id, "value" => value},
+        socket
+      ) do
+    guardian_id = socket.assigns.user_role && socket.assigns.user_role.id
+    student_id = socket.assigns.selected_id
+
+    with true <- is_binary(guardian_id),
+         true <- is_binary(student_id),
+         true <- Accounts.guardian_has_access?(guardian_id, student_id),
+         {:ok, int_value} <- parse_target_value(value),
+         schedule when not is_nil(schedule) <-
+           Repo.get(FunSheep.Assessments.TestSchedule, schedule_id),
+         true <- schedule.user_role_id == student_id,
+         {:ok, _} <- Assessments.set_target_readiness(schedule, int_value, :guardian) do
+      {:noreply, refresh_students(socket)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  defp refresh_students(socket) do
+    user_role = socket.assigns.user_role
+
+    if user_role do
+      links = Accounts.list_students_for_guardian(user_role.id)
+
+      students =
+        links
+        |> Enum.map(fn sg -> enrich_student(sg.student, guardian_id: user_role.id) end)
+        |> Enum.reject(&is_nil/1)
+
+      assign(socket, students: students)
+    else
+      socket
+    end
+  end
+
+  defp parse_target_value(v) when is_integer(v) and v >= 0 and v <= 100, do: {:ok, v}
+
+  defp parse_target_value(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} when n >= 0 and n <= 100 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp parse_target_value(_), do: :error
+
   # ── Data Loading ──────────────────────────────────────────────────────────
 
   defp enrich_student(student, opts) do
@@ -159,6 +215,10 @@ defmodule FunSheepWeb.ParentDashboardLive do
       heatmap_grid = StudySessions.study_heatmap(student_id, @heatmap_weeks, tz)
       wellbeing = Wellbeing.classify(student_id)
 
+      # Phase 2 additions
+      {percentile_history, forecast, peer_bands, target_readiness, days_to_test} =
+        benchmarks_block(student_id, student, primary_test)
+
       %{
         id: student_id,
         name: student.display_name || student.email,
@@ -179,12 +239,42 @@ defmodule FunSheepWeb.ParentDashboardLive do
         timeline_sessions: timeline_sessions,
         heatmap_grid: heatmap_grid,
         topic_grid: topic_grid,
-        wellbeing: wellbeing
+        wellbeing: wellbeing,
+        # Phase 2
+        percentile_history: percentile_history,
+        forecast: forecast,
+        peer_bands: peer_bands,
+        target_readiness: target_readiness,
+        days_to_test: days_to_test,
+        primary_test_schedule_id: primary_test && primary_test.id
       }
     else
       # Defensive: if an in-flight revoke happens between list + enrich, bail.
       nil
     end
+  end
+
+  defp benchmarks_block(_student_id, _student, nil),
+    do: {[], %{status: :insufficient_data, reason: :no_schedule}, nil, nil, nil}
+
+  defp benchmarks_block(student_id, student, primary_test) do
+    history =
+      Assessments.readiness_percentile_history(
+        student_id,
+        primary_test.id,
+        @percentile_history_weeks
+      )
+
+    forecast = Forecaster.forecast(student_id, primary_test.id)
+
+    peer_bands =
+      if primary_test.course_id && student.grade do
+        Assessments.cohort_percentile_bands(primary_test.course_id, student.grade)
+      end
+
+    days_to_test = Date.diff(primary_test.test_date, Date.utc_today())
+
+    {history, forecast, peer_bands, primary_test.target_readiness_score, max(days_to_test, 0)}
   end
 
   defp readiness_block(_student_id, nil) do
@@ -419,6 +509,34 @@ defmodule FunSheepWeb.ParentDashboardLive do
         percentile={@student.percentile}
       />
 
+      <%!-- ── Phase 2: Percentile Trend (§6.1) ── --%>
+      <PercentileTrend.trend
+        :if={!@dampen? and @student.primary_test_schedule_id}
+        history={@student.percentile_history}
+        current_percentile={percentile_value(@student.percentile)}
+        target_readiness={@student.target_readiness}
+        days_to_test={@student.days_to_test}
+      />
+
+      <%!-- ── Phase 2: Target-setter (only if no target yet) ── --%>
+      <.target_setter
+        :if={@student.primary_test_schedule_id && is_nil(@student.target_readiness)}
+        student={@student}
+      />
+
+      <%!-- ── Phase 2: Forecast card (§6.2) ── --%>
+      <ForecastCard.card
+        :if={@student.primary_test_schedule_id}
+        forecast={@student.forecast}
+      />
+
+      <%!-- ── Phase 2: Peer comparison (§6.3) — dampened too ── --%>
+      <PeerComparison.card
+        :if={!@dampen? and @student.peer_bands}
+        bands={@student.peer_bands}
+        student_readiness={@student.readiness_score}
+      />
+
       <%!-- ── Activity Timeline (§5.1) ── --%>
       <ActivityTimeline.timeline
         sessions={@student.timeline_sessions}
@@ -451,6 +569,47 @@ defmodule FunSheepWeb.ParentDashboardLive do
       <%!-- ── Weekly Summary Bar ── --%>
       <.weekly_summary activity={@student.activity} />
     </div>
+    """
+  end
+
+  attr :student, :map, required: true
+
+  defp target_setter(assigns) do
+    ~H"""
+    <section class="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5">
+      <p class="text-sm font-extrabold text-gray-900 mb-1">
+        {gettext("Set a joint target score")}
+      </p>
+      <p class="text-xs text-gray-500 mb-3">
+        {gettext(
+          "Pick a readiness target for %{test}. Research suggests aspirational-but-achievable goals beat open-ended pressure.",
+          test: @student.test_name
+        )}
+      </p>
+      <form
+        phx-submit="set_target_readiness"
+        class="flex items-center gap-2"
+      >
+        <input type="hidden" name="schedule_id" value={@student.primary_test_schedule_id} />
+        <label for={"target-#{@student.id}"} class="sr-only">{gettext("Target readiness")}</label>
+        <input
+          id={"target-#{@student.id}"}
+          name="value"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          placeholder="80"
+          class="w-20 rounded-full border border-gray-200 px-3 py-2 text-sm focus:border-[#4CD964] focus:outline-none"
+        />
+        <button
+          type="submit"
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white text-xs font-bold px-4 py-2 rounded-full shadow-md"
+        >
+          {gettext("Save target")}
+        </button>
+      </form>
+    </section>
     """
   end
 
