@@ -168,7 +168,16 @@ if config_env() == :prod do
     queues: oban_queues,
     plugins: [
       Oban.Plugins.Pruner,
-      {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(10)}
+      {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(10)},
+      # Cron runs only when this node is the leader (Oban elects via DB),
+      # so adding it to every revision is safe — the multiple worker
+      # instances won't double-fire. Keep this list in sync with the
+      # dev/test crontab in config/config.exs so behavior matches.
+      {Oban.Plugins.Cron,
+       crontab: [
+         {"0 * * * *", FunSheep.Workers.RequestExpiryWorker},
+         {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker}
+       ]}
     ]
 
   interactor_client_id =
