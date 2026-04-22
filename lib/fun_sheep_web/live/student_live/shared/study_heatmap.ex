@@ -110,7 +110,7 @@ defmodule FunSheepWeb.StudentLive.Shared.StudyHeatmap do
     """
   end
 
-  defp cell_bg_class(0.0), do: "bg-gray-100"
+  defp cell_bg_class(intensity) when intensity <= 0, do: "bg-gray-100"
 
   defp cell_bg_class(intensity) do
     cond do
