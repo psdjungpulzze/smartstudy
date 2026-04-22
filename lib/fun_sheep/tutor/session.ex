@@ -287,6 +287,26 @@ defmodule FunSheep.Tutor.Session do
         ""
       end
 
+    hobbies_text =
+      case student[:hobbies] do
+        list when is_list(list) and list != [] ->
+          "Student's hobbies/interests (use these for analogies when they " <>
+            "illuminate the concept): #{Enum.join(list, ", ")}."
+
+        _ ->
+          ""
+      end
+
+    weak_skills_text =
+      case student[:weak_skills] do
+        list when is_list(list) and list != [] ->
+          "Skills the student is currently building up (be patient and " <>
+            "reinforce gently, never label them 'weak'): #{Enum.join(list, ", ")}."
+
+        _ ->
+          ""
+      end
+
     """
     [CONTEXT] The student is working on the following question:
 
@@ -302,7 +322,10 @@ defmodule FunSheep.Tutor.Session do
     #{attempts_text}
     #{stats_text}
 
-    #{if question[:hobby_context], do: "Student's hobby context (for personalization): #{question[:hobby_context]}", else: ""}
+    #{hobbies_text}
+    #{weak_skills_text}
+
+    #{if question[:hobby_context], do: "Question-specific hobby framing already applied: #{question[:hobby_context]}", else: ""}
 
     Help the student understand this question. Do NOT reveal the answer unless they explicitly ask for it or have already answered incorrectly.
     """
@@ -317,5 +340,7 @@ defmodule FunSheep.Tutor.Session do
     Process.send_after(self(), :idle_timeout, @idle_timeout)
   end
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  # North Star I-13: default OFF so a missing config doesn't silently mock
+  # production traffic. Test env overrides to true.
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 end

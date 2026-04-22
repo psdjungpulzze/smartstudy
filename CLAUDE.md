@@ -25,6 +25,21 @@ This file provides comprehensive guidance to Claude Code for AI-driven product d
 
 ---
 
+## PRODUCT NORTH STAR — Read Before Any Learning-Flow Change
+
+**The product goal**: intelligently identify each student's weak topics and loop them on targeted practice — with personalized explanations and an AI tutor — until every in-scope skill reaches mastery (100% readiness).
+
+**Before implementing or reviewing any change that touches question selection, assessment, practice, tutor, study path, readiness, hobby personalization, or video lessons, re-read `docs/PRODUCT_NORTH_STAR.md`.** That document defines the testable invariants (I-1 through I-16) that keep implementations aligned with the goal.
+
+Deeper context, in order of detail:
+- `docs/PRODUCT_NORTH_STAR.md` — invariants and the core loop (the source of truth for this rule)
+- `docs/discovery/requirements.md` — formal FRs (FR-007 adaptive assessment, FR-008 readiness, FR-010 practice, FR-015 hobbies, FR-009 study guides)
+- `docs/project-idea-intake.md` — full product rationale
+
+**When in doubt**, the invariants take precedence over convenience. If a shortcut would violate one, raise it to the user before shipping. Diagnostic outputs (weak/strong labels, readiness, explanations) are subject to the same "no fake content" standard as generated questions — a thin label is still a fabricated one.
+
+---
+
 ## Technology Stack
 
 ### Core Technologies

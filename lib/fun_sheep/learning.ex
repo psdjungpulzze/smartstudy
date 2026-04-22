@@ -163,6 +163,19 @@ defmodule FunSheep.Learning do
     |> Repo.all()
   end
 
+  @doc """
+  Returns a flat list of hobby names for prompt injection (tutor, question
+  generation). Used by North Star invariants I-11 and I-12.
+
+  Returns `[]` if the user has no hobbies set — caller must treat the empty
+  case explicitly instead of fabricating analogies.
+  """
+  def hobby_names_for_user(user_role_id) do
+    list_hobbies_for_user(user_role_id)
+    |> Enum.map(fn sh -> sh.hobby && sh.hobby.name end)
+    |> Enum.reject(&is_nil/1)
+  end
+
   def get_student_hobby!(id), do: Repo.get!(StudentHobby, id)
 
   def create_student_hobby(attrs \\ %{}) do

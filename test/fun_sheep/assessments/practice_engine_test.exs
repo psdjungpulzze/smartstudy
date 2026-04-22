@@ -16,6 +16,10 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
         course_id: course.id
       })
 
+    # Skill tag (section) required for adaptive flows — North Star I-1.
+    {:ok, section} =
+      Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: chapter.id})
+
     {:ok, q1} =
       Questions.create_question(%{
         validation_status: :passed,
@@ -25,7 +29,9 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
         difficulty: :easy,
         options: %{"A" => "4", "B" => "5", "C" => "6", "D" => "7"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -37,7 +43,9 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
         difficulty: :easy,
         options: %{"A" => "5", "B" => "6", "C" => "7", "D" => "8"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     # Create wrong attempts so these show as weak questions

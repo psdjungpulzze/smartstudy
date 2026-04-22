@@ -191,7 +191,7 @@ defmodule FunSheep.Interactor.Billing do
     Application.get_env(:fun_sheep, :interactor_billing_url, "https://billing.interactor.com")
   end
 
-  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, true)
+  defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
   # ── Mock Responses ─────────────────────────────────────────────────────────
 

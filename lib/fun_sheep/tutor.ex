@@ -11,7 +11,7 @@ defmodule FunSheep.Tutor do
   """
 
   alias FunSheep.Interactor.{Agents, KnowledgeBase, Profiles}
-  alias FunSheep.{Questions, Courses}
+  alias FunSheep.{Questions, Courses, Learning}
   alias FunSheep.Tutor.Session
 
   require Logger
@@ -39,12 +39,29 @@ defmodule FunSheep.Tutor do
   - If the question has options, reference them by letter (A, B, C, D)
   - Always explain the underlying concept, not just the mechanics
 
+  ## Personalization with Hobbies
+  When the context includes the student's hobbies or interests, WEAVE THEM \
+  into analogies and examples. For instance, if the student likes KPOP and \
+  BTS, you might frame a percentage problem around concert followers, tour \
+  dates, or chart positions. If they like soccer, use player stats or match \
+  scores. This makes abstract concepts concrete. But only use analogies \
+  where they actually illuminate the concept — a forced reference is worse \
+  than none. If no hobbies are listed, use plain examples.
+
+  ## Weak Skills
+  When the context lists skills the student is currently weak in, be extra \
+  patient on those topics and connect the current question to the broader \
+  skill if relevant. Never call the student "weak" or imply judgment — just \
+  acknowledge the area is one they're building up.
+
   ## Context
   You will receive context about:
   - The current question the student is working on
   - The course and chapter they're studying
   - Their past performance on similar questions
   - Their grade level and learning preferences
+  - Their selected hobbies/interests (use for analogies)
+  - Their currently weak skills (use to prioritize gentle reinforcement)
 
   Use this context to tailor your explanations.
   """
@@ -195,6 +212,10 @@ defmodule FunSheep.Tutor do
         _ -> []
       end
 
+    # North Star I-12: hobbies + weak-skill list fuel personalized explanations.
+    hobbies = Learning.hobby_names_for_user(user_role_id)
+    weak_skills = weak_skill_names_for(user_role_id, course.id)
+
     %{
       question: %{
         content: question.content,
@@ -219,7 +240,9 @@ defmodule FunSheep.Tutor do
               time_seconds: a.time_taken_seconds
             }
           end),
-        profile: profile
+        profile: profile,
+        hobbies: hobbies,
+        weak_skills: weak_skills
       },
       stats: %{
         total_attempts: if(stats, do: stats.total_attempts, else: 0),
@@ -232,6 +255,30 @@ defmodule FunSheep.Tutor do
       },
       related_content: kb_results
     }
+  end
+
+  # Pulls section names for skills currently below mastery. Used only for
+  # prompt context — we never fabricate names when data is insufficient.
+  defp weak_skill_names_for(user_role_id, course_id) do
+    deficits = Questions.skill_deficits(user_role_id, course_id)
+
+    weak_section_ids =
+      deficits
+      |> Enum.filter(fn {_id, d} -> d.total >= 2 and d.deficit >= 0.4 end)
+      |> Enum.map(fn {id, _} -> id end)
+
+    if weak_section_ids == [] do
+      []
+    else
+      weak_section_ids
+      |> Enum.map(fn id ->
+        case FunSheep.Repo.get(FunSheep.Courses.Section, id) do
+          nil -> nil
+          section -> section.name
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+    end
   end
 
   @doc """

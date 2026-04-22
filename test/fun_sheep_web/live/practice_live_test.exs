@@ -30,6 +30,10 @@ defmodule FunSheepWeb.PracticeLiveTest do
         course_id: course.id
       })
 
+    # Skill tag (section) required for adaptive flows — North Star I-1.
+    {:ok, section} =
+      FunSheep.Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: chapter.id})
+
     {:ok, q1} =
       FunSheep.Questions.create_question(%{
         validation_status: :passed,
@@ -39,7 +43,9 @@ defmodule FunSheepWeb.PracticeLiveTest do
         difficulty: :easy,
         options: %{"A" => "Mitochondria", "B" => "Nucleus", "C" => "Ribosome", "D" => "Golgi"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -56,7 +62,9 @@ defmodule FunSheepWeb.PracticeLiveTest do
           "D" => "None"
         },
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     # Create wrong attempts so these are "weak" questions

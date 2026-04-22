@@ -22,6 +22,22 @@ defmodule FunSheep.Assessments.EngineTest do
         course_id: course.id
       })
 
+    # Each chapter gets a section so questions carry a skill tag — required
+    # for adaptive flows per North Star invariant I-1.
+    {:ok, section1} =
+      FunSheep.Courses.create_section(%{
+        name: "Ch1 Sec 1",
+        position: 1,
+        chapter_id: chapter1.id
+      })
+
+    {:ok, section2} =
+      FunSheep.Courses.create_section(%{
+        name: "Ch2 Sec 1",
+        position: 1,
+        chapter_id: chapter2.id
+      })
+
     # Create questions for chapter 1
     {:ok, q1} =
       FunSheep.Questions.create_question(%{
@@ -31,7 +47,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :easy,
         course_id: course.id,
-        chapter_id: chapter1.id
+        chapter_id: chapter1.id,
+        section_id: section1.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -42,7 +60,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :medium,
         course_id: course.id,
-        chapter_id: chapter1.id
+        chapter_id: chapter1.id,
+        section_id: section1.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q3} =
@@ -53,7 +73,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :hard,
         course_id: course.id,
-        chapter_id: chapter1.id
+        chapter_id: chapter1.id,
+        section_id: section1.id,
+        classification_status: :admin_reviewed
       })
 
     # Create questions for chapter 2
@@ -65,7 +87,9 @@ defmodule FunSheep.Assessments.EngineTest do
         question_type: :short_answer,
         difficulty: :easy,
         course_id: course.id,
-        chapter_id: chapter2.id
+        chapter_id: chapter2.id,
+        section_id: section2.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, schedule} =

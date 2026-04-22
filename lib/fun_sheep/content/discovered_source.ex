@@ -38,6 +38,7 @@ defmodule FunSheep.Content.DiscoveredSource do
     field :confidence_score, :float, default: 0.0
 
     belongs_to :course, FunSheep.Courses.Course
+    belongs_to :section, FunSheep.Courses.Section
 
     timestamps(type: :utc_datetime)
   end
@@ -58,7 +59,8 @@ defmodule FunSheep.Content.DiscoveredSource do
       :scraped_text,
       :search_query,
       :confidence_score,
-      :course_id
+      :course_id,
+      :section_id
     ])
     |> validate_required([:source_type, :title, :course_id])
     |> validate_inclusion(
@@ -67,6 +69,7 @@ defmodule FunSheep.Content.DiscoveredSource do
     )
     |> validate_inclusion(:status, ~w(discovered scraping scraped processed failed skipped))
     |> foreign_key_constraint(:course_id)
+    |> foreign_key_constraint(:section_id)
     |> unique_constraint([:course_id, :url])
   end
 end

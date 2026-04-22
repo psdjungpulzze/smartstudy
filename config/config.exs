@@ -79,9 +79,12 @@ config :fun_sheep, Oban,
     ingest: 1
   ]
 
-# Interactor integration (billing, auth, agents)
+# Interactor integration (billing, auth, agents).
+# Per North Star invariant I-13, mock mode defaults OFF everywhere. Only
+# `config/test.exs` flips it back on so unit tests don't hit the network.
+# Dev and prod explicitly opt out as well for clarity.
 config :fun_sheep,
-  interactor_mock: true,
+  interactor_mock: false,
   interactor_core_url: "https://core.interactor.com",
   interactor_billing_url: "https://billing.interactor.com",
   stripe_publishable_key: "mock"

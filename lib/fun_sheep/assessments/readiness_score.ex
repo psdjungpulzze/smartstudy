@@ -15,6 +15,8 @@ defmodule FunSheep.Assessments.ReadinessScore do
   schema "readiness_scores" do
     field :chapter_scores, :map
     field :topic_scores, :map
+    # Per-section skill scores + mastery status. See North Star I-9/I-10.
+    field :skill_scores, :map, default: %{}
     field :aggregate_score, :float
     field :calculated_at, :utc_datetime
 
@@ -30,6 +32,7 @@ defmodule FunSheep.Assessments.ReadinessScore do
     |> cast(attrs, [
       :chapter_scores,
       :topic_scores,
+      :skill_scores,
       :aggregate_score,
       :calculated_at,
       :user_role_id,

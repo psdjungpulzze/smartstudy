@@ -19,7 +19,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   use Oban.Worker, queue: :ai, max_attempts: 3
 
-  alias FunSheep.{Courses, Content, Repo}
+  alias FunSheep.{Courses, Content, Learning, Repo}
   alias FunSheep.Questions
   alias FunSheep.Questions.Question
   alias FunSheep.Interactor.Agents
@@ -144,12 +144,29 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
     figures = collect_figures(course.id, args["source_material_id"])
 
+    # North Star I-11: inject the student's hobbies so the generator can
+    # frame questions around interests they actually have. We look up
+    # hobbies by the course's creator (the student, in Phase 1). If the
+    # creator isn't a student or has no hobbies set, we simply skip the
+    # personalization — we never fabricate interests.
+    hobbies = student_hobbies_for_course(course, args["user_role_id"])
+
     %{
       material_text: material_text |> String.slice(0, 8000),
       existing_questions: existing_questions,
       chapter_names: Enum.map(course.chapters, & &1.name),
-      figures: figures
+      figures: figures,
+      hobbies: hobbies
     }
+  end
+
+  defp student_hobbies_for_course(course, explicit_user_role_id) do
+    user_role_id = explicit_user_role_id || Map.get(course, :created_by_id)
+
+    case user_role_id do
+      nil -> []
+      id -> Learning.hobby_names_for_user(id)
+    end
   end
 
   # Gather available SourceFigures for the course so the generator can
@@ -281,6 +298,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       end
 
     figures_section = build_figures_section(context[:figures] || [])
+    hobby_section = build_hobby_section(context[:hobbies] || [])
 
     visual_rule =
       if (context[:figures] || []) == [] do
@@ -315,6 +333,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     - "difficulty": one of "easy", "medium", "hard"
     - "figure_ids": (optional) array of figure IDs from the FIGURES AVAILABLE list, when the question depends on a visual
     - "table_spec": (optional) JSON table spec when the question requires a table you are inventing. Format: {"headers": [...], "rows": [[...], ...], "caption": "..."}
+    - "hobby_context": (optional) a one-sentence note explaining which of the student's hobbies you wove into the question, and how. Omit this field (or set null) when the question does not reference a hobby.
 
     Return ONLY the JSON array, no other text.
     """
@@ -323,10 +342,35 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       chapters_section <>
       material_section <>
       figures_section <>
+      hobby_section <>
       existing_section <>
       instructions <>
       visual_rule <>
       format
+  end
+
+  defp build_hobby_section([]), do: ""
+
+  defp build_hobby_section(hobbies) do
+    """
+    STUDENT'S HOBBIES / INTERESTS: #{Enum.join(hobbies, ", ")}
+
+    When it makes the concept clearer, frame questions around these
+    interests. Examples:
+    - "KPOP / BTS" → phrase math problems around followers, concert tickets,
+      tour dates, or chart positions.
+    - "soccer" → use player stats, match scores, league standings.
+    - "video games" → levels, XP, item counts.
+
+    For every question that uses a hobby framing, set `hobby_context` in
+    the JSON to a short note explaining which hobby and how (e.g.
+    "Reframed percentage calc using BTS follower counts.").
+
+    If a hobby framing would feel forced or distract from the concept,
+    write a plain question instead and omit `hobby_context`. A forced
+    reference is worse than none.
+
+    """
   end
 
   defp build_figures_section([]), do: ""
@@ -401,6 +445,9 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
               options: q_data["options"],
               difficulty: normalize_difficulty(q_data["difficulty"]),
               explanation: q_data["explanation"],
+              # North Star I-11: persist the hobby framing the generator
+              # actually used, so the tutor + practice UI can surface it.
+              hobby_context: sanitize_hobby_context(q_data["hobby_context"]),
               is_generated: true,
               course_id: course.id,
               chapter_id: if(chapter, do: chapter.id),
@@ -429,6 +476,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       end)
 
     enqueue_validation(inserted_ids, course.id)
+    enqueue_classification(inserted_ids)
 
     count
   end
@@ -437,6 +485,15 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   defp enqueue_validation(ids, course_id) do
     FunSheep.Workers.QuestionValidationWorker.enqueue(ids, course_id: course_id)
+  end
+
+  # Hand newly-generated (chapter-tagged but section-untagged) questions to
+  # the classifier so they pick up a skill tag (section_id) and become
+  # adaptive-eligible. See North Star invariant I-1.
+  defp enqueue_classification([]), do: :ok
+
+  defp enqueue_classification(ids) do
+    FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(ids)
   end
 
   defp attach_figures(_question, []), do: :ok
@@ -475,6 +532,20 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   defp maybe_put_meta(map, _k, nil), do: map
   defp maybe_put_meta(map, k, v), do: Map.put(map, k, v)
+
+  # Guardrails for the hobby_context field (North Star I-11, I-16).
+  # The AI returns either a short explanation string, null, or omits it.
+  # We accept only binary strings; anything else is treated as absent so we
+  # don't store fabricated data.
+  defp sanitize_hobby_context(nil), do: nil
+  defp sanitize_hobby_context(""), do: nil
+
+  defp sanitize_hobby_context(value) when is_binary(value) do
+    trimmed = String.trim(value)
+    if trimmed == "", do: nil, else: String.slice(trimmed, 0, 500)
+  end
+
+  defp sanitize_hobby_context(_), do: nil
 
   # Returns :ok when the question is safe to insert, {:error, reason} when it
   # references a visual we cannot render. Catches cases where the LLM writes

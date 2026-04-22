@@ -3,7 +3,7 @@ defmodule FunSheepWeb.QuickTestLive do
 
   import FunSheepWeb.BillingComponents
 
-  alias FunSheep.{Billing, Courses, Engagement, Gamification, Questions, Tutor}
+  alias FunSheep.{Billing, Content, Courses, Engagement, Gamification, Questions, Tutor}
   alias FunSheep.Assessments.QuickTestEngine
   alias FunSheep.Gamification.FpEconomy
 
@@ -41,6 +41,9 @@ defmodule FunSheepWeb.QuickTestLive do
             test_complete: false,
             summary: nil,
             stats: %{correct: 0, incorrect: 0, skipped: 0},
+            # Remediation videos for the current skill (I-14). Populated only
+            # when the student gets a question wrong or says "I don't know".
+            current_question_videos: [],
             # Tutor state
             tutor_open: false,
             tutor_session_id: nil,
@@ -74,6 +77,7 @@ defmodule FunSheepWeb.QuickTestLive do
             test_complete: false,
             summary: nil,
             stats: %{correct: 0, incorrect: 0, skipped: 0},
+            current_question_videos: [],
             tutor_open: false,
             tutor_session_id: nil,
             tutor_messages: [],
@@ -124,7 +128,8 @@ defmodule FunSheepWeb.QuickTestLive do
        assign(socket,
          engine_state: new_state,
          show_explanation: true,
-         stats: %{stats | incorrect: stats.incorrect + 1}
+         stats: %{stats | incorrect: stats.incorrect + 1},
+         current_question_videos: Content.list_videos_for_section(question.section_id)
        )}
     else
       {:noreply, socket}
@@ -181,11 +186,19 @@ defmodule FunSheepWeb.QuickTestLive do
           %{stats | incorrect: stats.incorrect + 1}
         end
 
+      videos =
+        if is_correct do
+          []
+        else
+          Content.list_videos_for_section(question.section_id)
+        end
+
       {:noreply,
        assign(socket,
          engine_state: new_state,
          stats: new_stats,
-         feedback: %{is_correct: is_correct, correct_answer: question.answer}
+         feedback: %{is_correct: is_correct, correct_answer: question.answer},
+         current_question_videos: videos
        )}
     end
   end
@@ -419,6 +432,8 @@ defmodule FunSheepWeb.QuickTestLive do
           engine_state: new_state,
           current_question: question,
           current_question_stats: question_stats,
+          # Fresh card → clear any videos from the previous card's wrong-answer state.
+          current_question_videos: [],
           question_number: socket.assigns.question_number + 1
         )
 
@@ -496,12 +511,14 @@ defmodule FunSheepWeb.QuickTestLive do
         <%!-- Header with stats --%>
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-4">
-            <.link
-              navigate={~p"/courses/#{@course_id}"}
-              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors"
+            <button
+              type="button"
+              onclick="history.back()"
+              class="text-[#8E8E93] hover:text-[#1C1C1E] transition-colors cursor-pointer"
+              aria-label="Go back"
             >
               <.icon name="hero-arrow-left" class="w-6 h-6" />
-            </.link>
+            </button>
             <div>
               <h1 class="text-2xl font-bold text-[#1C1C1E]">Quick Test</h1>
               <p class="text-sm text-[#8E8E93]">{@course.name}</p>
@@ -639,6 +656,7 @@ defmodule FunSheepWeb.QuickTestLive do
                   :if={assigns[:current_question_stats]}
                   stats={assigns[:current_question_stats]}
                 />
+                <.skill_videos :if={!@feedback.is_correct} videos={@current_question_videos} />
                 <%!-- Tutor actions after answering --%>
                 <div class="flex items-center gap-2 flex-wrap mb-3">
                   <button
@@ -685,6 +703,7 @@ defmodule FunSheepWeb.QuickTestLive do
                 :if={assigns[:current_question_stats]}
                 stats={assigns[:current_question_stats]}
               />
+              <.skill_videos videos={@current_question_videos} />
               <%!-- Tutor actions after "I Don't Know" --%>
               <div class="flex items-center gap-2 flex-wrap mt-3 mb-3">
                 <button
@@ -1050,6 +1069,34 @@ defmodule FunSheepWeb.QuickTestLive do
         of students got this right
         <span class="text-[#C7C7CC]">({@stats.total_attempts} attempts)</span>
       </span>
+    </div>
+    """
+  end
+
+  # Remediation videos surfaced on wrong-answer / "I don't know" events
+  # (North Star I-14). If no videos are linked to this skill, the component
+  # renders nothing — never fabricate links (I-16).
+  defp skill_videos(%{videos: []} = assigns), do: ~H""
+
+  defp skill_videos(assigns) do
+    ~H"""
+    <div class="mt-3 p-3 rounded-2xl bg-blue-50 border border-blue-100">
+      <p class="text-xs font-bold text-[#007AFF] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <.icon name="hero-video-camera" class="w-4 h-4" /> Watch & Learn
+      </p>
+      <ul class="space-y-1.5">
+        <li :for={video <- @videos}>
+          <.link
+            href={video.url}
+            target="_blank"
+            rel="noopener"
+            class="text-sm text-[#007AFF] hover:underline inline-flex items-center gap-1"
+          >
+            <.icon name="hero-play-circle" class="w-4 h-4 shrink-0" />
+            <span class="truncate">{video.title}</span>
+          </.link>
+        </li>
+      </ul>
     </div>
     """
   end

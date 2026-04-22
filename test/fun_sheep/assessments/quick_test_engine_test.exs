@@ -16,6 +16,15 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         course_id: course.id
       })
 
+    # Section carries the skill tag so questions are adaptive-eligible
+    # (North Star invariant I-1).
+    {:ok, section} =
+      Courses.create_section(%{
+        name: "Ch1 Sec 1",
+        position: 1,
+        chapter_id: chapter.id
+      })
+
     {:ok, q1} =
       Questions.create_question(%{
         validation_status: :passed,
@@ -25,7 +34,9 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         difficulty: :easy,
         options: %{"A" => "4", "B" => "5", "C" => "6", "D" => "7"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q2} =
@@ -37,7 +48,9 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         difficulty: :easy,
         options: %{"A" => "5", "B" => "6", "C" => "7", "D" => "8"},
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     {:ok, q3} =
@@ -48,7 +61,9 @@ defmodule FunSheep.Assessments.QuickTestEngineTest do
         question_type: :true_false,
         difficulty: :easy,
         course_id: course.id,
-        chapter_id: chapter.id
+        chapter_id: chapter.id,
+        section_id: section.id,
+        classification_status: :admin_reviewed
       })
 
     %{user_role: user_role, course: course, chapter: chapter, q1: q1, q2: q2, q3: q3}
