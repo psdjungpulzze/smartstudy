@@ -59,7 +59,7 @@ defmodule FunSheep.Courses.TOCRebase do
 
   import Ecto.Query
 
-  alias FunSheep.Courses.{Chapter, DiscoveredTOC, Section}
+  alias FunSheep.Courses.{Chapter, Course, DiscoveredTOC, Section, TOCAcknowledgement}
   alias FunSheep.Questions.{Question, QuestionAttempt}
   alias FunSheep.Repo
 
@@ -68,6 +68,27 @@ defmodule FunSheep.Courses.TOCRebase do
   @authority_weight %{"web" => 1.0, "textbook_partial" => 3.0, "textbook_full" => 10.0}
   @improvement_gate 1.2
   @match_threshold 0.6
+
+  # Overwhelming improvement — auto-apply without any human in the loop
+  # (provided attempts are safe). Chosen so a clean web → textbook_full
+  # upgrade (10× authority weight) clears it easily, but a small chapter
+  # count bump on the same source doesn't.
+  @auto_apply_gate 5.0
+
+  # A user counts as "active on this course" when they've answered ≥N
+  # questions in the trailing window. Active users have authority to
+  # approve material pending rebases (after the creator window elapses).
+  @active_attempts_threshold 5
+  @active_window_days 30
+
+  # Escalation window — active users can approve only after the creator
+  # has had this many days to respond first. (The 14-day admin fallback
+  # lives in the escalation worker, which is a follow-up PR.)
+  @creator_window_days 7
+
+  # Creator inactivity threshold — after this, the course becomes
+  # "adoptable" by any active user.
+  @inactive_creator_threshold_days 90
 
   ## --- Public API -------------------------------------------------------
 
@@ -143,6 +164,317 @@ defmodule FunSheep.Courses.TOCRebase do
     )
     |> Repo.all()
   end
+
+  @doc """
+  Given a freshly proposed TOC and the course it targets, return the
+  action the worker should take. This is the community-approval router:
+
+    * `:auto_apply` — overwhelming improvement AND no risk to existing
+      attempts. Safe to apply silently; notify users after.
+    * `{:pending, reason}` — material improvement that requires a human:
+      * `:needs_creator_approval` — creator is active; notify them.
+      * `:needs_active_users_approval` — creator is inactive; any active
+        user on the course can approve.
+      * `:needs_admin_approval` — no creator, no active users, or
+        attempts at risk — only admin can resolve.
+    * `:no_change` — score didn't improve enough; keep the candidate
+      row but don't do anything.
+
+  `uploader_id` is the UserRole who triggered the discovery (uploaded
+  the new textbook). The uploader's activity can unlock auto-apply on
+  safe material changes they proposed themselves.
+  """
+  @spec decide_action(DiscoveredTOC.t(), DiscoveredTOC.t() | nil, String.t() | nil) ::
+          :auto_apply
+          | {:pending,
+             :needs_creator_approval | :needs_active_users_approval | :needs_admin_approval}
+          | :no_change
+  def decide_action(%DiscoveredTOC{} = _new_toc, nil, _uploader_id), do: :auto_apply
+
+  def decide_action(%DiscoveredTOC{} = new_toc, %DiscoveredTOC{} = current_toc, uploader_id) do
+    course = Repo.get!(Course, current_toc.course_id)
+    ratio = new_toc.score / max(current_toc.score, 0.001)
+    safe? = attempts_safe?(new_toc, current_toc.course_id)
+
+    cond do
+      ratio <= @improvement_gate ->
+        :no_change
+
+      safe? and ratio >= @auto_apply_gate ->
+        :auto_apply
+
+      safe? and uploader_active_on?(uploader_id, current_toc.course_id) ->
+        # Uploader has skin in the game (≥5 attempts) AND their upload
+        # doesn't risk anyone's existing progress — let it through.
+        :auto_apply
+
+      not safe? ->
+        # Would orphan chapters that students OTHER than the uploader
+        # have answered on. Admin fallback.
+        {:pending, :needs_admin_approval}
+
+      creator_active?(course) ->
+        {:pending, :needs_creator_approval}
+
+      active_users_exist?(course.id) ->
+        {:pending, :needs_active_users_approval}
+
+      true ->
+        {:pending, :needs_admin_approval}
+    end
+  end
+
+  @doc """
+  Store a proposed TOC as pending on the course record. Called by the
+  worker when `decide_action/3` returns `{:pending, _reason}`.
+  """
+  @spec mark_pending(Course.t(), DiscoveredTOC.t(), String.t() | nil) ::
+          {:ok, Course.t()} | {:error, Ecto.Changeset.t()}
+  def mark_pending(%Course{} = course, %DiscoveredTOC{} = toc, uploader_id) do
+    course
+    |> Course.changeset(%{
+      pending_toc_id: toc.id,
+      pending_toc_proposed_by_id: uploader_id,
+      pending_toc_proposed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Clear a pending proposal (e.g., after it's been applied or rejected).
+  """
+  @spec clear_pending(Course.t()) :: {:ok, Course.t()} | {:error, Ecto.Changeset.t()}
+  def clear_pending(%Course{} = course) do
+    course
+    |> Course.changeset(%{
+      pending_toc_id: nil,
+      pending_toc_proposed_by_id: nil,
+      pending_toc_proposed_at: nil
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Can this user approve a specific pending TOC on this course right now?
+  Encodes the tier escalation:
+
+    * Admin → always.
+    * Creator + still active → immediately.
+    * Uploader (proposed this TOC) + active + rebase is attempts-safe →
+      immediately (skin in the game, bounded risk).
+    * Any active user → only after the creator window elapses
+      (`@creator_window_days` since proposal).
+    * Admin fallback — after `@active_majority_window_days`, only admin
+      can resolve (handled by the escalation worker flipping the
+      `:needs_admin_approval` reason).
+  """
+  @spec can_approve?(map() | nil, Course.t(), DiscoveredTOC.t() | nil) :: boolean()
+  def can_approve?(nil, _course, _toc), do: false
+
+  def can_approve?(%{"role" => "admin"}, _course, _toc), do: true
+  def can_approve?(%{role: "admin"}, _course, _toc), do: true
+  def can_approve?(_user, _course, nil), do: false
+
+  def can_approve?(user, %Course{} = course, %DiscoveredTOC{} = toc) do
+    user_role_id = user["user_role_id"] || user[:user_role_id] || user["id"]
+
+    cond do
+      is_nil(user_role_id) ->
+        false
+
+      # Creator still active → top authority.
+      user_role_id == course.created_by_id and user_activity_count(user_role_id, course.id) > 0 ->
+        true
+
+      # Uploader, active, and the rebase is attempts-safe.
+      user_role_id == course.pending_toc_proposed_by_id and
+        active_on?(user_role_id, course.id) and
+          attempts_safe?(toc, course.id) ->
+        true
+
+      # Active user — only after the creator window has elapsed.
+      active_on?(user_role_id, course.id) and
+          proposal_age_days(course) >= @creator_window_days ->
+        true
+
+      true ->
+        false
+    end
+  end
+
+  @doc """
+  Apply a pending TOC (authorization should be checked by the caller
+  via `can_approve?/3`). Wraps `apply/2` and clears the pending state.
+  """
+  @spec approve!(Course.t(), DiscoveredTOC.t()) :: {:ok, map()} | {:error, term()}
+  def approve!(%Course{} = course, %DiscoveredTOC{} = toc) do
+    # `apply/2` would collide with Kernel.apply/2 — fully qualify.
+    with {:ok, stats} <- __MODULE__.apply(toc, course.id),
+         {:ok, _} <- clear_pending(Repo.get!(Course, course.id)) do
+      {:ok, stats}
+    end
+  end
+
+  @doc """
+  Reject a pending proposal — drops the pending_toc_* pointers without
+  applying the TOC. The DiscoveredTOC row stays for audit. Authorization
+  is the caller's responsibility.
+  """
+  @spec reject!(Course.t()) :: {:ok, Course.t()} | {:error, Ecto.Changeset.t()}
+  def reject!(%Course{} = course), do: clear_pending(course)
+
+  ## --- Activity + authority helpers ------------------------------------
+
+  @doc """
+  Is this user-role active on the given course? Active means at least
+  `@active_attempts_threshold` recorded answers within the trailing
+  `@active_window_days`.
+  """
+  @spec active_on?(String.t() | nil, String.t()) :: boolean()
+  def active_on?(nil, _course_id), do: false
+
+  def active_on?(user_role_id, course_id) do
+    user_activity_count(user_role_id, course_id) >= @active_attempts_threshold
+  end
+
+  @doc false
+  def user_activity_count(user_role_id, course_id) do
+    since =
+      DateTime.utc_now()
+      |> DateTime.add(-@active_window_days * 24 * 60 * 60, :second)
+
+    from(a in QuestionAttempt,
+      join: q in Question,
+      on: q.id == a.question_id,
+      where:
+        a.user_role_id == ^user_role_id and
+          q.course_id == ^course_id and
+          a.inserted_at >= ^since,
+      select: count(a.id)
+    )
+    |> Repo.one()
+  end
+
+  @doc """
+  Return the UserRole IDs that are currently active on the course.
+  """
+  @spec active_users_for(String.t()) :: [String.t()]
+  def active_users_for(course_id) do
+    since =
+      DateTime.utc_now()
+      |> DateTime.add(-@active_window_days * 24 * 60 * 60, :second)
+
+    from(a in QuestionAttempt,
+      join: q in Question,
+      on: q.id == a.question_id,
+      where: q.course_id == ^course_id and a.inserted_at >= ^since,
+      group_by: a.user_role_id,
+      having: count(a.id) >= ^@active_attempts_threshold,
+      select: a.user_role_id
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Is the creator currently active on this course? Returns false if the
+  course has no creator at all.
+  """
+  @spec creator_active?(Course.t()) :: boolean()
+  def creator_active?(%Course{created_by_id: nil}), do: false
+  def creator_active?(%Course{created_by_id: id, id: cid}), do: active_on?(id, cid)
+
+  @doc """
+  Can this user adopt the course? True when the creator has been
+  inactive for ≥ #{@inactive_creator_threshold_days} days AND this user
+  is currently active on the course.
+  """
+  @spec adoptable_by?(String.t(), Course.t()) :: boolean()
+  def adoptable_by?(user_role_id, %Course{} = course) do
+    cond do
+      is_nil(user_role_id) ->
+        false
+
+      user_role_id == course.created_by_id ->
+        # Already the creator — nothing to adopt.
+        false
+
+      not active_on?(user_role_id, course.id) ->
+        false
+
+      is_nil(course.created_by_id) ->
+        # No creator at all — anyone active can claim.
+        true
+
+      creator_inactive_for_days?(course, @inactive_creator_threshold_days) ->
+        true
+
+      true ->
+        false
+    end
+  end
+
+  @doc """
+  Promote a user to creator. Authorization is the caller's responsibility
+  (usually `adoptable_by?/2`).
+  """
+  @spec adopt!(Course.t(), String.t()) :: {:ok, Course.t()} | {:error, Ecto.Changeset.t()}
+  def adopt!(%Course{} = course, new_creator_id) do
+    course
+    |> Course.changeset(%{created_by_id: new_creator_id})
+    |> Repo.update()
+  end
+
+  ## --- Acknowledgement (post-rebase banner dismiss) --------------------
+
+  @doc """
+  Record that this user has dismissed the "course updated" banner for
+  a specific applied TOC. Idempotent — upserts on (user_role_id,
+  discovered_toc_id).
+  """
+  @spec acknowledge!(String.t(), String.t(), String.t()) ::
+          {:ok, TOCAcknowledgement.t()} | {:error, Ecto.Changeset.t()}
+  def acknowledge!(user_role_id, course_id, discovered_toc_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    %TOCAcknowledgement{}
+    |> TOCAcknowledgement.changeset(%{
+      user_role_id: user_role_id,
+      course_id: course_id,
+      discovered_toc_id: discovered_toc_id,
+      dismissed_at: now
+    })
+    |> Repo.insert(
+      on_conflict: {:replace, [:dismissed_at, :updated_at]},
+      conflict_target: [:user_role_id, :discovered_toc_id]
+    )
+  end
+
+  @doc """
+  Has this user NOT yet acknowledged the currently-applied TOC for this
+  course? Returns true iff the banner should still be shown.
+  """
+  @spec needs_acknowledgement?(String.t() | nil, Course.t()) :: boolean()
+  def needs_acknowledgement?(nil, _course), do: false
+
+  def needs_acknowledgement?(user_role_id, %Course{id: course_id}) do
+    case current(course_id) do
+      nil ->
+        false
+
+      %DiscoveredTOC{id: toc_id} ->
+        ack_exists? =
+          from(a in TOCAcknowledgement,
+            where: a.user_role_id == ^user_role_id and a.discovered_toc_id == ^toc_id,
+            select: 1,
+            limit: 1
+          )
+          |> Repo.one()
+
+        is_nil(ack_exists?)
+    end
+  end
+
+  ## --- Compare (back-compat for earlier callers) -----------------------
 
   @doc """
   Decide how two TOCs compare:
@@ -536,4 +868,40 @@ defmodule FunSheep.Courses.TOCRebase do
   end
 
   defp normalize_chapter(_), do: %{"name" => "Unnamed Chapter", "sections" => []}
+
+  ## --- Community-approval private helpers ------------------------------
+
+  # Is the uploader active on this course? Used to unlock auto-apply on
+  # their own safe proposal.
+  defp uploader_active_on?(nil, _course_id), do: false
+  defp uploader_active_on?(uploader_id, course_id), do: active_on?(uploader_id, course_id)
+
+  defp active_users_exist?(course_id), do: active_users_for(course_id) != []
+
+  defp creator_inactive_for_days?(%Course{created_by_id: nil}, _days), do: true
+
+  defp creator_inactive_for_days?(%Course{created_by_id: id, id: cid}, days) do
+    since =
+      DateTime.utc_now()
+      |> DateTime.add(-days * 24 * 60 * 60, :second)
+
+    # Inactive iff no attempts by creator on this course within the window.
+    count =
+      from(a in QuestionAttempt,
+        join: q in Question,
+        on: q.id == a.question_id,
+        where: a.user_role_id == ^id and q.course_id == ^cid and a.inserted_at >= ^since,
+        select: count(a.id)
+      )
+      |> Repo.one()
+
+    count == 0
+  end
+
+  defp proposal_age_days(%Course{pending_toc_proposed_at: nil}), do: 0
+
+  defp proposal_age_days(%Course{pending_toc_proposed_at: at}) do
+    DateTime.diff(DateTime.utc_now(), at, :second)
+    |> div(24 * 60 * 60)
+  end
 end
