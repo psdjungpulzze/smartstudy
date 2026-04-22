@@ -40,9 +40,9 @@ defmodule FunSheepWeb.ParentDashboardLiveTest do
 
       {:ok, _view, html} = live(conn, ~p"/parent")
 
-      assert html =~ "No children linked yet"
-      assert html =~ "Add a child to start monitoring their progress"
-      assert html =~ "Add Child"
+      assert html =~ "No students linked yet"
+      assert html =~ "Connect your child&#39;s Fun Sheep account"
+      assert html =~ "Connect a Student"
     end
   end
 
@@ -64,9 +64,12 @@ defmodule FunSheepWeb.ParentDashboardLiveTest do
       {:ok, _view, html} = live(conn, ~p"/parent")
 
       assert html =~ "Alice Student"
-      assert html =~ "Grade: 10th"
-      assert html =~ "No assessments yet"
-      assert html =~ "View Details"
+      # Grade label is rendered as "Grade 10th" (no colon) inside the student card.
+      assert html =~ "Grade 10th"
+      # The redesigned dashboard surfaces four metric cards — readiness is the
+      # headline one, with a "No data yet" placeholder before any assessments.
+      assert html =~ "Readiness"
+      assert html =~ "No data yet"
     end
   end
 end

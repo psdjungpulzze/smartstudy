@@ -101,11 +101,17 @@ defmodule FunSheepWeb.ExportControllerTest do
       assert conn.resp_body =~ "Bio Quiz"
     end
 
-    test "redirects when no readiness data", %{conn: conn, user_role: ur, schedule: schedule} do
+    test "still generates a zero-state report when no attempts have been recorded yet",
+         %{conn: conn, user_role: ur, schedule: schedule} do
+      # `latest_readiness/2` now returns a live-computed struct (never nil
+      # when the schedule exists), so the report always renders — even with
+      # zero attempts. That's the honest "0% so far" view.
       conn = auth_conn(conn, ur)
       conn = get(conn, ~p"/export/readiness/#{schedule.id}")
 
-      assert redirected_to(conn) =~ "/courses/#{schedule.course_id}/tests/#{schedule.id}/assess"
+      assert conn.status == 200
+      assert conn.resp_body =~ "# Test Readiness Report"
+      assert conn.resp_body =~ "Bio Quiz"
     end
   end
 end
