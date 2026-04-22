@@ -138,6 +138,11 @@ defmodule FunSheepWeb.DashboardLive do
         <.study_path test={@primary_test} />
       </div>
 
+      <%!-- ── Skill Breakdown (per-skill status) ── --%>
+      <div :if={@primary_test} class="animate-slide-up">
+        <.skill_breakdown test={@primary_test} />
+      </div>
+
       <%!-- ── Other Upcoming Tests ── --%>
       <div :if={@other_tests != []} class="animate-slide-up">
         <h2 class="text-sm font-extrabold text-gray-400 uppercase tracking-wider mb-3">
