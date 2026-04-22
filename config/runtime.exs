@@ -140,26 +140,25 @@ if config_env() == :prod do
   # The web service (funsheep-api) runs with RUN_OBAN_WORKERS unset —
   # Oban still accepts job inserts but processes no queues, so the container
   # is free to scale to zero. The dedicated funsheep-worker service runs
-  # with RUN_OBAN_WORKERS=true and min-instances=1 to process background jobs.
+  # with RUN_OBAN_WORKERS=true and min-instances>=1 to process background jobs.
   # Lifeline auto-recovers jobs orphaned by any unexpected container death.
   #
   # Concurrency tuning: ocr=8 balances throughput against the combined
   # pressure of Finch connection pools (GCS fetch + Vision OCR), DB
-  # connection pool, and BEAM scheduler time. At ocr=15 under pool
-  # pressure, the worker's own Oban.Peer/Notifier GenServer calls started
-  # timing out at 5s, which cascaded into socket_closed failures across
-  # all HTTP clients — the exact storm that killed OCR in April 2026.
+  # connection pool, and BEAM scheduler time. With Cloud SQL on
+  # db-custom-1-3840 (1 dedicated vCPU, 3.84GB) the Oban.Peer/Notifier
+  # timeout storms seen on db-g1-small at ocr=4 are gone, so 8 is safe
+  # per-instance. Total global OCR concurrency = min_instances * 8, and
+  # Cloud Run scales the worker horizontally (up to max_instances) under
+  # sustained queue depth.
   # ai=5 covers question generation + content discovery without saturating
   # the OpenAI rate limit on the Interactor agent endpoint.
-  # POOL_SIZE on the worker container must be >= sum of these queues.
+  # POOL_SIZE on the worker container must be >= sum of these queues
+  # (default=10 + ocr=8 + ai=5 + pdf_ocr=3 + ingest=1 = 27) plus headroom
+  # for Lifeline/Pruner plugins and Oban's internal Peer/Notifier traffic.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
-      # ocr: 4 — fewer concurrent SSL handshakes to vision.googleapis.com.
-      # Cloud Run's kernel rejects `sndbuf` as an SSL socket option when
-      # too many connections are created at once, so we keep outbound
-      # concurrency low and let in-process Req retries + Oban snooze
-      # handle transient blips instead.
-      [default: 10, ocr: 4, ai: 5, pdf_ocr: 3, ingest: 1, integrations: 3]
+      [default: 10, ocr: 8, ai: 5, pdf_ocr: 3, ingest: 1, integrations: 3]
     else
       false
     end
