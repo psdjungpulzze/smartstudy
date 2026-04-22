@@ -37,6 +37,41 @@ find_port() {
   return 1
 }
 
+sweep_orphans() {
+  # Find orphaned `mix phx.server` processes (PPID == 1) and kill them.
+  # Scoped by matching the full command line (not just the beam.smp argv[0])
+  # so we don't touch unrelated Erlang VMs.
+  local orphans=""
+  for pid in $(pgrep -f "mix phx.server$" 2>/dev/null); do
+    local ppid
+    ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [ "$ppid" = "1" ]; then
+      orphans="$orphans $pid"
+    fi
+  done
+  orphans=$(echo "$orphans" | sed 's/^ *//')
+  if [ -n "$orphans" ]; then
+    echo "Sweeping orphaned mix phx.server processes: $orphans" >&2
+    # shellcheck disable=SC2086
+    kill $orphans 2>/dev/null || true
+    # Brief grace period then SIGKILL any survivors.
+    sleep 2
+    # shellcheck disable=SC2086
+    for pid in $orphans; do
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    done
+    # Clean any pidfiles whose PIDs no longer exist.
+    for f in /tmp/funsheep-vt-*.pid; do
+      [ -f "$f" ] || continue
+      local stale_pid
+      stale_pid=$(cat "$f" 2>/dev/null)
+      if [ -n "$stale_pid" ] && ! kill -0 "$stale_pid" 2>/dev/null; then
+        rm -f "$f" "${f%.pid}.port"
+      fi
+    done
+  fi
+}
+
 cmd_start() {
   # Check if already running for this session
   if [ -f "$PORTFILE" ] && [ -f "$PIDFILE" ]; then
@@ -50,6 +85,13 @@ cmd_start() {
     # Stale files — clean up
     rm -f "$PIDFILE" "$PORTFILE"
   fi
+
+  # Orphan sweep: any stale `mix phx.server` in THIS worktree whose parent
+  # is init (PPID=1) is an orphan from a previous session that never got
+  # stopped (Claude crash, terminal close, etc). Kill only those — leave
+  # the user's own 4040 dev server alone, and leave sibling Claude sessions
+  # alone (they're children of live shells, not init).
+  sweep_orphans
 
   local port
   port=$(find_port)
