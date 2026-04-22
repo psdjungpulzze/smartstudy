@@ -3,9 +3,14 @@ defmodule FunSheep.Assessments.PracticeEngine do
   Weak-topic practice engine. North Star invariants I-5/I-6/I-7.
 
   * **I-5** weighted selection — candidates sampled weighted by per-skill
-    deficit (1 - correct/total), so weaker skills appear more often.
+    deficit (1 - correct/total) multiplied by a per-question difficulty
+    factor derived from `QuestionStats.difficulty_score` (crowd-sourced
+    p-value), so weaker skills *and* items students historically struggle
+    with appear more often. Unknown difficulty defaults to neutral (0.5),
+    preserving pure-deficit behavior on fresh questions.
   * **I-6** deliberate interleaving — a configurable fraction (default 25%)
-    drawn from mastered-ish skills for spaced retention.
+    drawn from mastered-ish skills for spaced retention, also sampled with
+    harder-bias so retention checks land on items that discriminate.
   * **I-7** mid-session re-rank — on each answer, deficits update and the
     unserved tail is re-composed with the fresh weights.
 
@@ -157,18 +162,17 @@ defmodule FunSheep.Assessments.PracticeEngine do
 
     weak_slots = min(limit - review_slots, length(weak_available))
 
-    weak_sample = weighted_sample_by_deficit(weak_available, weak_slots, deficits)
-    review_sample = Enum.take(Enum.shuffle(review_available), review_slots)
+    weak_sample = weighted_sample(weak_available, weak_slots, deficits)
+    review_sample = weighted_sample(review_available, review_slots, deficits)
     interleave(weak_sample, review_sample, ratio)
   end
 
-  defp weighted_sample_by_deficit(_qs, 0, _d), do: []
+  defp weighted_sample(_qs, 0, _d), do: []
 
-  defp weighted_sample_by_deficit(questions, count, deficits) do
+  defp weighted_sample(questions, count, deficits) do
     questions
     |> Enum.map(fn q ->
-      deficit = get_in(deficits, [q.section_id, :deficit]) || 0.5
-      weight = max(deficit, 0.05)
+      weight = selection_weight(q, deficits)
       key = :math.log(max(:rand.uniform(), 1.0e-9)) / weight
       {q, key}
     end)
@@ -176,6 +180,19 @@ defmodule FunSheep.Assessments.PracticeEngine do
     |> Enum.take(count)
     |> Enum.map(fn {q, _} -> q end)
   end
+
+  # Combines per-skill deficit (I-5 base) with per-question difficulty_score
+  # so harder items within the same skill are more likely to be drawn.
+  # `difficulty_score` ∈ [0.0, 1.0]; multiplier ∈ [0.5, 1.5]; neutral (0.5)
+  # leaves the weight equal to the skill deficit, matching pre-wiring behavior.
+  defp selection_weight(question, deficits) do
+    deficit = get_in(deficits, [question.section_id, :deficit]) || 0.5
+    difficulty = question_difficulty(question)
+    max(deficit * (0.5 + difficulty), 0.05)
+  end
+
+  defp question_difficulty(%{stats: %{difficulty_score: score}}) when is_float(score), do: score
+  defp question_difficulty(_), do: 0.5
 
   defp interleave(weak, [], _r), do: weak
   defp interleave([], review, _r), do: review

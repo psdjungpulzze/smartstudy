@@ -19,15 +19,23 @@ defmodule FunSheepWeb.CourseSearchLiveTest do
   end
 
   describe "course search page" do
-    test "renders search form", %{conn: conn} do
+    test "renders page shell with My Courses heading and add-course CTA", %{conn: conn} do
       conn = auth_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/courses")
 
       assert html =~ "My Courses"
+      assert html =~ "Add New Course"
+      assert html =~ "Find More Courses"
+    end
+
+    test "expanding the collapsible search panel reveals the search form", %{conn: conn} do
+      conn = auth_conn(conn)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      html = render_click(view, "toggle_search")
+
       assert html =~ "Subject"
       assert html =~ "Grade"
-      assert html =~ "Search"
-      assert html =~ "Add New Course"
     end
 
     test "search with results", %{conn: conn} do

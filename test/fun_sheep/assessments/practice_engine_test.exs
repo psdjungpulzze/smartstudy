@@ -2,7 +2,8 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
   use FunSheep.DataCase, async: true
 
   alias FunSheep.Assessments.PracticeEngine
-  alias FunSheep.{Questions, Courses}
+  alias FunSheep.{Questions, Courses, Repo}
+  alias FunSheep.Questions.QuestionStats
   alias FunSheep.ContentFixtures
 
   setup do
@@ -144,6 +145,60 @@ defmodule FunSheep.Assessments.PracticeEngineTest do
 
       assert summary.total == 0
       assert summary.score == 0.0
+    end
+  end
+
+  describe "difficulty-aware weighting" do
+    test "harder questions (higher difficulty_score) are selected more often", %{
+      user_role: ur,
+      course: course,
+      q1: q1,
+      q2: q2
+    } do
+      # Seed QuestionStats: q1 is easy (many students got it right),
+      # q2 is hard (few got it right). Both live in the same section
+      # with equal per-skill deficit, so only item-level difficulty can
+      # differentiate selection.
+      Repo.insert!(%QuestionStats{
+        question_id: q1.id,
+        total_attempts: 100,
+        correct_attempts: 90,
+        difficulty_score: 0.1
+      })
+
+      Repo.insert!(%QuestionStats{
+        question_id: q2.id,
+        total_attempts: 100,
+        correct_attempts: 10,
+        difficulty_score: 0.9
+      })
+
+      # Sample one question per trial and count how often each wins.
+      trials = 300
+
+      counts =
+        Enum.reduce(1..trials, %{q1.id => 0, q2.id => 0}, fn _, acc ->
+          state = PracticeEngine.start_practice(ur.id, course.id, %{limit: 1})
+          [picked] = state.questions
+          Map.update!(acc, picked.id, &(&1 + 1))
+        end)
+
+      # With weights 0.6 (easy) vs 1.4 (hard), expected P(hard) ≈ 0.7.
+      # Assert hard wins by a decisive margin to avoid flakiness.
+      assert counts[q2.id] > counts[q1.id],
+             "harder question should be picked more often, got #{inspect(counts)}"
+
+      assert counts[q2.id] / trials > 0.55,
+             "harder question share should exceed 55%, got #{counts[q2.id]}/#{trials}"
+    end
+
+    test "missing stats default to neutral (0.5) without crashing", %{
+      user_role: ur,
+      course: course
+    } do
+      # No QuestionStats rows exist for q1/q2 — should still sample cleanly.
+      state = PracticeEngine.start_practice(ur.id, course.id, %{limit: 2})
+      assert length(state.questions) == 2
     end
   end
 
