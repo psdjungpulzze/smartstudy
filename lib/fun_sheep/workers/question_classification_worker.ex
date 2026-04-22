@@ -75,6 +75,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     prompt = build_prompt(question, sections)
 
     case Agents.chat("question_classifier", prompt, %{
+           source: "question_classification_worker",
            metadata: %{question_id: question.id, chapter_id: question.chapter_id}
          }) do
       {:ok, response} ->

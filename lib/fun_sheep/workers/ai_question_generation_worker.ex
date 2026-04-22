@@ -377,6 +377,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   defp send_to_ai(prompt, course, _chapter) do
     case Agents.chat("question_gen", prompt, %{
+           source: "ai_question_generation_worker",
            metadata: %{course_id: course.id, subject: course.subject}
          }) do
       {:ok, response} ->
