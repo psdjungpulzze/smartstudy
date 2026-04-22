@@ -303,12 +303,21 @@ defmodule FunSheepWeb.DashboardLive do
   # ── Study Path: Duolingo-style journey nodes ─────────────────────────────
 
   defp study_path(assigns) do
-    readiness = if assigns.test.readiness, do: assigns.test.readiness.aggregate_score, else: nil
-    has_readiness = readiness != nil
+    readiness_score = assigns.test.readiness
+
+    # A ReadinessScore struct is ALWAYS returned from latest_readiness/2 (even
+    # when the student has zero attempts — aggregate_score defaults to 0.0),
+    # so "has_readiness" alone can't distinguish "started" from "completed".
+    # Use assessment_complete? which checks that every in-scope skill has at
+    # least one attempt — the honest signal that the diagnostic has run.
+    assessment_done? =
+      FunSheep.Assessments.ReadinessCalculator.assessment_complete?(readiness_score)
+
+    aggregate = if readiness_score, do: readiness_score.aggregate_score, else: 0.0
 
     all_mastered? =
-      has_readiness and
-        FunSheep.Assessments.ReadinessCalculator.all_skills_mastered?(assigns.test.readiness)
+      assessment_done? and
+        FunSheep.Assessments.ReadinessCalculator.all_skills_mastered?(readiness_score)
 
     has_format = assigns.test.test.format_template_id != nil
     course_id = assigns.test.test.course_id
@@ -319,28 +328,28 @@ defmodule FunSheepWeb.DashboardLive do
         label: "Assessment",
         desc: "Find your weak spots",
         icon: "🧪",
-        done: has_readiness,
+        done: assessment_done?,
         path: ~p"/courses/#{course_id}/tests/#{schedule_id}/assess"
       },
       %{
         label: "Practice Weak Topics",
         desc: "Focus on what needs work",
         icon: "🎯",
-        done: has_readiness && readiness >= 40,
+        done: assessment_done? && aggregate >= 40,
         path: ~p"/courses/#{course_id}/practice"
       },
       %{
         label: "Study Guide",
         desc: "Review key concepts",
         icon: "📖",
-        done: has_readiness && readiness >= 60,
+        done: assessment_done? && aggregate >= 60,
         path: ~p"/courses/#{course_id}/study-guides"
       },
       %{
         label: "Format Practice",
         desc: "Match the real test format",
         icon: "📝",
-        done: has_readiness && readiness >= 80,
+        done: assessment_done? && aggregate >= 80,
         path:
           if(has_format,
             do: ~p"/courses/#{course_id}/tests/#{schedule_id}/format-test",

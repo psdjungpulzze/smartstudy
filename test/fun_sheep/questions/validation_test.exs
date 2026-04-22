@@ -148,6 +148,56 @@ defmodule FunSheep.Questions.ValidationTest do
       assert updated.chapter_id == ch2.id
     end
 
+    test "ignores hallucinated suggested_chapter_id that doesn't exist on the course" do
+      course = create_course()
+      {:ok, ch1} = Courses.create_chapter(%{name: "Ch1", position: 1, course_id: course.id})
+
+      # Another course with its own chapter — valid UUID that must NOT be
+      # persisted because it doesn't belong to this question's course.
+      other_course = create_course()
+
+      {:ok, other_ch} =
+        Courses.create_chapter(%{name: "Other", position: 1, course_id: other_course.id})
+
+      q = create_question(course, %{chapter_id: ch1.id})
+
+      verdict = %{
+        "verdict" => "approve",
+        "topic_relevance_score" => 97,
+        "categorization" => %{"suggested_chapter_id" => other_ch.id, "confidence" => 95},
+        "completeness" => %{"passed" => true, "issues" => []},
+        "answer_correct" => %{"correct" => true},
+        "explanation" => %{"valid" => true}
+      }
+
+      assert {:ok, updated} = Validation.apply_verdict(q, verdict)
+      assert updated.chapter_id == ch1.id
+      assert updated.validation_status == :passed
+    end
+
+    test "ignores completely fabricated (non-existent) suggested_chapter_id" do
+      course = create_course()
+      {:ok, ch1} = Courses.create_chapter(%{name: "Ch1", position: 1, course_id: course.id})
+
+      q = create_question(course, %{chapter_id: ch1.id})
+      fake_id = Ecto.UUID.generate()
+
+      verdict = %{
+        "verdict" => "approve",
+        "topic_relevance_score" => 97,
+        "categorization" => %{"suggested_chapter_id" => fake_id, "confidence" => 99},
+        "completeness" => %{"passed" => true, "issues" => []},
+        "answer_correct" => %{"correct" => true},
+        "explanation" => %{"valid" => true}
+      }
+
+      # Must succeed — the hallucinated id is dropped, the verdict still
+      # lands on the question so validation progress isn't blocked.
+      assert {:ok, updated} = Validation.apply_verdict(q, verdict)
+      assert updated.chapter_id == ch1.id
+      assert updated.validation_status == :passed
+    end
+
     test "ignores suggested chapter when confidence < 80" do
       course = create_course()
       {:ok, ch1} = Courses.create_chapter(%{name: "Ch1", position: 1, course_id: course.id})
