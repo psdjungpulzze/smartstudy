@@ -180,7 +180,10 @@ if config_env() == :prod do
          # Parent weekly digest scheduler (spec §8.1) — Sunday 18:00 UTC.
          # Scheduler fans out per-recipient jobs; each inner worker
          # decides what to do.
-         {"0 18 * * SUN", FunSheep.Workers.ParentDigestScheduler}
+         {"0 18 * * SUN", FunSheep.Workers.ParentDigestScheduler},
+         # Every 15min — re-enqueue questions stuck at :pending after a
+         # validation job was discarded (see StuckValidationSweeperWorker).
+         {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker}
        ]}
     ]
 
