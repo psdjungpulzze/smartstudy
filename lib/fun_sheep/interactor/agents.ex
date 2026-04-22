@@ -204,6 +204,25 @@ defmodule FunSheep.Interactor.Agents do
     Client.get("#{@base_path}/assistants")
   end
 
+  @doc """
+  Fetches one assistant by ID. Useful for comparing live config (model,
+  prompt) against the `assistant_attrs/0` intended by code.
+  """
+  @spec get_assistant(String.t()) :: {:ok, map()} | {:error, term()}
+  def get_assistant(id) do
+    Client.get("#{@base_path}/assistants/#{id}")
+  end
+
+  @doc """
+  Deletes an assistant by ID. Used by `/admin/interactor/agents`' "Force
+  re-provision" flow — Interactor's UPDATE endpoint doesn't support model
+  changes, so we delete-then-recreate.
+  """
+  @spec delete_assistant(String.t()) :: {:ok, map()} | {:error, term()}
+  def delete_assistant(id) do
+    Client.delete("#{@base_path}/assistants/#{id}")
+  end
+
   # --- Private Helpers ---
 
   defp uuid?(str) do

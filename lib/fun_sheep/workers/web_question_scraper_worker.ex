@@ -435,6 +435,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     """
 
     case Agents.chat("question_extract", prompt, %{
+           source: "web_question_scraper_worker",
            metadata: %{course_id: course.id, source_url: source.url, chunk: idx}
          }) do
       {:ok, response} ->

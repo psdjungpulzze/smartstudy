@@ -27,13 +27,19 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"material_id" => material_id, "course_id" => course_id}} = job) do
-    # Skip if course processing was cancelled
-    course = Courses.get_course!(course_id)
+    case FunSheep.FeatureFlags.require!(:ocr_enabled) do
+      {:cancel, reason} ->
+        Logger.info("[OCR] Skipped material #{material_id}: #{reason}")
+        {:cancel, reason}
 
-    if course.processing_status == "cancelled" do
-      :ok
-    else
-      do_process(material_id, course_id, job)
+      :ok ->
+        course = Courses.get_course!(course_id)
+
+        if course.processing_status == "cancelled" do
+          :ok
+        else
+          do_process(material_id, course_id, job)
+        end
     end
   end
 
