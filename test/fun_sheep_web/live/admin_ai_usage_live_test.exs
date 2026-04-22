@@ -135,4 +135,113 @@ defmodule FunSheepWeb.AdminAIUsageLiveTest do
       assert html =~ "—" or html =~ "$0.00"
     end
   end
+
+  describe "drawer + top calls + errors" do
+    test "clicking a top-calls row opens the drawer", %{conn: conn} do
+      {:ok, call} =
+        AIUsage.log_call(%{
+          provider: "openai",
+          model: "gpt-4o",
+          source: "test_worker",
+          assistant_name: "validator",
+          prompt_tokens: 100,
+          completion_tokens: 50,
+          duration_ms: 200,
+          status: "ok"
+        })
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/usage/ai")
+
+      view
+      |> element("tr[phx-click='open_drawer'][phx-value-id='#{call.id}']")
+      |> render_click()
+
+      html = render(view)
+      assert html =~ "Call detail"
+      assert html =~ "Inserted at"
+      assert html =~ "Metadata"
+    end
+
+    test "close_drawer hides the panel", %{conn: conn} do
+      {:ok, call} =
+        AIUsage.log_call(%{
+          provider: "openai",
+          model: "gpt-4o",
+          source: "w",
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          status: "ok"
+        })
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/usage/ai")
+
+      view
+      |> element("tr[phx-click='open_drawer'][phx-value-id='#{call.id}']")
+      |> render_click()
+
+      view |> element("button[phx-click='close_drawer']") |> render_click()
+
+      refute render(view) =~ "Call detail"
+    end
+
+    test "recent errors section lists error calls", %{conn: conn} do
+      {:ok, _} =
+        AIUsage.log_call(%{
+          provider: "openai",
+          model: "gpt-4o-mini",
+          source: "w",
+          prompt_tokens: 5,
+          completion_tokens: 0,
+          status: "error",
+          error: "assistant_not_found: foobar"
+        })
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/usage/ai")
+      assert html =~ "assistant_not_found"
+    end
+  end
+
+  describe "custom window" do
+    test "set_custom_window routes to ?window=custom", %{conn: conn} do
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/usage/ai")
+
+      view
+      |> form("form[phx-submit='set_custom_window']", %{
+        "since" => "2026-04-20T00:00",
+        "until" => "2026-04-22T12:00"
+      })
+      |> render_submit()
+
+      assert_patched(
+        view,
+        ~p"/admin/usage/ai?since=2026-04-20T00%3A00&until=2026-04-22T12%3A00&window=custom"
+      )
+    end
+
+    test "custom window params preload into the page", %{conn: conn} do
+      {:ok, _view, html} =
+        live(
+          admin_conn(conn),
+          ~p"/admin/usage/ai?window=custom&since=2026-04-20T00:00&until=2026-04-22T12:00"
+        )
+
+      assert html =~ "AI usage"
+      # The custom button is active
+      assert html =~ "Custom"
+    end
+  end
+
+  describe "provider filter" do
+    test "toggling provider updates URL param", %{conn: conn} do
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/usage/ai")
+
+      view
+      |> element(
+        "button[phx-click='toggle_filter'][phx-value-group='provider'][phx-value-v='openai']"
+      )
+      |> render_click()
+
+      assert_patched(view, ~p"/admin/usage/ai?provider=openai&window=24h")
+    end
+  end
 end
