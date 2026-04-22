@@ -331,40 +331,68 @@ defmodule FunSheep.Questions do
   @doc """
   Lists questions the user has gotten wrong, prioritized by most recently wrong
   and never correctly answered. Optionally filters by chapter.
+
+  Questions attempted in the user's most recent `limit` attempts are excluded
+  so the user does not see identical cards across back-to-back sessions. If
+  the exclusion leaves fewer than `limit` questions, previously-seen questions
+  backfill the remainder so the user always receives a full session when any
+  weak questions exist.
   """
   def list_weak_questions(user_role_id, course_id, chapter_id \\ nil, limit \\ 20) do
-    base_query =
-      from(q in Question,
-        join: qa in QuestionAttempt,
-        on: qa.question_id == q.id,
-        left_join:
-          cq in subquery(
-            from(ca in QuestionAttempt,
-              where: ca.user_role_id == ^user_role_id and ca.is_correct == true,
-              distinct: ca.question_id,
-              select: %{question_id: ca.question_id}
-            )
-          ),
-        on: cq.question_id == q.id,
-        where:
-          q.course_id == ^course_id and
-            q.validation_status in ^@student_visible and
-            qa.user_role_id == ^user_role_id and
-            qa.is_correct == false,
-        group_by: [q.id, cq.question_id],
-        order_by: [
-          # Prioritize questions never answered correctly (NULL cq means no correct attempt)
-          asc: fragment("CASE WHEN ? IS NULL THEN 0 ELSE 1 END", cq.question_id),
-          # Then most recently wrong
-          desc: max(qa.inserted_at)
-        ],
-        limit: ^limit,
-        preload: [:chapter]
-      )
+    recent_ids = recently_attempted_question_ids(user_role_id, limit)
 
-    base_query
+    primary =
+      weak_questions_query(user_role_id, course_id, chapter_id, limit, exclude: recent_ids)
+      |> Repo.all()
+
+    if length(primary) >= limit do
+      primary
+    else
+      shortfall = limit - length(primary)
+      already_picked = Enum.map(primary, & &1.id)
+
+      backfill =
+        weak_questions_query(user_role_id, course_id, chapter_id, shortfall,
+          exclude: already_picked
+        )
+        |> Repo.all()
+
+      primary ++ backfill
+    end
+  end
+
+  defp weak_questions_query(user_role_id, course_id, chapter_id, limit, opts) do
+    exclude_ids = Keyword.get(opts, :exclude, [])
+
+    from(q in Question,
+      join: qa in QuestionAttempt,
+      on: qa.question_id == q.id,
+      left_join:
+        cq in subquery(
+          from(ca in QuestionAttempt,
+            where: ca.user_role_id == ^user_role_id and ca.is_correct == true,
+            distinct: ca.question_id,
+            select: %{question_id: ca.question_id}
+          )
+        ),
+      on: cq.question_id == q.id,
+      where:
+        q.course_id == ^course_id and
+          q.validation_status in ^@student_visible and
+          qa.user_role_id == ^user_role_id and
+          qa.is_correct == false,
+      group_by: [q.id, cq.question_id],
+      order_by: [
+        # Prioritize questions never answered correctly (NULL cq means no correct attempt)
+        asc: fragment("CASE WHEN ? IS NULL THEN 0 ELSE 1 END", cq.question_id),
+        # Then most recently wrong
+        desc: max(qa.inserted_at)
+      ],
+      limit: ^limit,
+      preload: [:chapter]
+    )
     |> maybe_filter_chapter_for_practice(chapter_id)
-    |> Repo.all()
+    |> maybe_exclude_question_ids(exclude_ids)
   end
 
   defp maybe_filter_chapter_for_practice(query, nil), do: query
@@ -376,47 +404,94 @@ defmodule FunSheep.Questions do
   @doc """
   Lists questions for a quick test session. Prioritizes: wrong answers > unseen > previously correct.
   Optionally filters by course. Shuffles and limits results.
+
+  Questions attempted in the user's most recent window are excluded so the
+  user does not see the same card across consecutive sessions. If the course
+  does not have enough fresh questions to fill a session, previously-seen
+  questions backfill the remainder.
   """
   def list_questions_for_quick_test(user_role_id, course_id \\ nil, limit \\ 20)
   def list_questions_for_quick_test(nil, _course_id, _limit), do: []
 
   def list_questions_for_quick_test(user_role_id, course_id, limit) do
-    base_query =
-      from(q in Question,
-        left_join: qa in QuestionAttempt,
-        on: qa.question_id == q.id and qa.user_role_id == ^user_role_id,
-        where: q.validation_status in ^@student_visible,
-        group_by: q.id,
-        order_by: [
-          # Wrong answers first (0), then unseen (1), then correct (2)
-          asc:
-            fragment(
-              """
-              CASE
-                WHEN bool_or(COALESCE(?, false) = false AND ? IS NOT NULL) THEN 0
-                WHEN NOT bool_or(? IS NOT NULL) THEN 1
-                ELSE 2
-              END
-              """,
-              qa.is_correct,
-              qa.id,
-              qa.id
-            ),
-          asc: fragment("random()")
-        ],
-        limit: ^limit,
-        preload: [:chapter]
-      )
+    recent_ids = recently_attempted_question_ids(user_role_id, limit)
 
-    base_query
+    primary =
+      quick_test_query(user_role_id, course_id, limit, exclude: recent_ids)
+      |> Repo.all()
+
+    if length(primary) >= limit do
+      primary
+    else
+      shortfall = limit - length(primary)
+      already_picked = Enum.map(primary, & &1.id)
+
+      backfill =
+        quick_test_query(user_role_id, course_id, shortfall, exclude: already_picked)
+        |> Repo.all()
+
+      primary ++ backfill
+    end
+  end
+
+  defp quick_test_query(user_role_id, course_id, limit, opts) do
+    exclude_ids = Keyword.get(opts, :exclude, [])
+
+    from(q in Question,
+      left_join: qa in QuestionAttempt,
+      on: qa.question_id == q.id and qa.user_role_id == ^user_role_id,
+      where: q.validation_status in ^@student_visible,
+      group_by: q.id,
+      order_by: [
+        # Wrong answers first (0), then unseen (1), then correct (2)
+        asc:
+          fragment(
+            """
+            CASE
+              WHEN bool_or(COALESCE(?, false) = false AND ? IS NOT NULL) THEN 0
+              WHEN NOT bool_or(? IS NOT NULL) THEN 1
+              ELSE 2
+            END
+            """,
+            qa.is_correct,
+            qa.id,
+            qa.id
+          ),
+        asc: fragment("random()")
+      ],
+      limit: ^limit,
+      preload: [:chapter]
+    )
     |> maybe_filter_course_for_quick_test(course_id)
-    |> Repo.all()
+    |> maybe_exclude_question_ids(exclude_ids)
   end
 
   defp maybe_filter_course_for_quick_test(query, nil), do: query
 
   defp maybe_filter_course_for_quick_test(query, course_id) do
     where(query, [q], q.course_id == ^course_id)
+  end
+
+  defp maybe_exclude_question_ids(query, []), do: query
+
+  defp maybe_exclude_question_ids(query, ids) do
+    where(query, [q], q.id not in ^ids)
+  end
+
+  # Returns up to `count` distinct question IDs the user has most recently
+  # attempted (any outcome). Used to deprioritize just-seen questions when
+  # starting a new practice or quick test session.
+  defp recently_attempted_question_ids(nil, _count), do: []
+
+  defp recently_attempted_question_ids(user_role_id, count) do
+    from(qa in QuestionAttempt,
+      where: qa.user_role_id == ^user_role_id,
+      group_by: qa.question_id,
+      order_by: [desc: max(qa.inserted_at)],
+      limit: ^count,
+      select: qa.question_id
+    )
+    |> Repo.all()
   end
 
   ## Attempt Tracking / Aggregation
