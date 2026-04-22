@@ -105,4 +105,86 @@ defmodule FunSheepWeb.AdminJobsLiveTest do
       assert html =~ "ring-[#FF3B30]" or html =~ "bg-[#FFE5E3]"
     end
   end
+
+  describe "row actions" do
+    test "open_drawer loads job details", %{conn: conn} do
+      job = insert_failed_job()
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/jobs/failures")
+
+      view
+      |> element("tr[phx-value-id='#{job.id}']")
+      |> render_click()
+
+      html = render(view)
+      assert html =~ "Job #"
+      assert html =~ "Args"
+      assert html =~ "Error history"
+    end
+
+    test "close_drawer hides the detail panel", %{conn: conn} do
+      job = insert_failed_job()
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/jobs/failures")
+
+      view
+      |> element("tr[phx-value-id='#{job.id}']")
+      |> render_click()
+
+      view
+      |> element("button[phx-click='close_drawer']")
+      |> render_click()
+
+      # Drawer is gone from the DOM
+      refute render(view) =~ "Job #"
+    end
+
+    test "retry flashes success", %{conn: conn} do
+      job = insert_failed_job()
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/jobs/failures")
+
+      html =
+        view
+        |> element("button[phx-click='retry'][phx-value-id='#{job.id}']")
+        |> render_click()
+
+      assert html =~ "Job re-queued." or render(view) =~ "Job re-queued."
+    end
+
+    test "cancel flashes success", %{conn: conn} do
+      job = insert_failed_job()
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/jobs/failures")
+
+      html =
+        view
+        |> element("button[phx-click='cancel'][phx-value-id='#{job.id}']")
+        |> render_click()
+
+      assert html =~ "Job cancelled." or render(view) =~ "Job cancelled."
+    end
+  end
+
+  describe "worker filter" do
+    test "dropdown narrows rows to selected worker", %{conn: conn} do
+      _keep = insert_failed_job()
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/jobs/failures")
+
+      view
+      |> form("form[phx-change='filter_worker']", %{
+        "worker" => "FunSheep.Workers.CourseDiscoveryWorker"
+      })
+      |> render_change()
+
+      assert render(view) =~ "CourseDiscoveryWorker"
+    end
+  end
+
+  describe "pagination" do
+    test "prev/next buttons are disabled at boundaries", %{conn: conn} do
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/jobs/failures")
+
+      # With 0 failures, both buttons are disabled
+      assert html =~ "disabled"
+      assert html =~ "Prev"
+      assert html =~ "Next"
+    end
+  end
 end

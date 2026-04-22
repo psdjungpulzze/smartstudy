@@ -130,6 +130,83 @@ defmodule FunSheep.Admin.JobsTest do
       job = %Oban.Job{id: 1, args: %{}, errors: [], worker: "X"}
       assert Jobs.summarize_args(job) == "(no args)"
     end
+
+    test "falls back to first 2 args when no domain ids present" do
+      job = %Oban.Job{
+        id: 1,
+        args: %{"mode" => "from_curriculum", "count" => 10},
+        errors: [],
+        worker: "X"
+      }
+
+      summary = Jobs.summarize_args(job)
+      assert summary =~ "mode=" or summary =~ "count="
+    end
+
+    test "includes question count when args carry question_ids list" do
+      job = %Oban.Job{id: 1, args: %{"question_ids" => ["a", "b", "c"]}, errors: [], worker: "X"}
+      assert Jobs.summarize_args(job) =~ "3 questions"
+    end
+
+    test "uses material filename when materials_map carries it" do
+      material = %FunSheep.Content.UploadedMaterial{
+        id: "mat-abc",
+        file_name: "chapter-1.pdf"
+      }
+
+      job = %Oban.Job{id: 1, args: %{"material_id" => "mat-abc"}, errors: [], worker: "X"}
+      summary = Jobs.summarize_args(job, %{}, %{"mat-abc" => material}, nil)
+      assert summary =~ "chapter-1.pdf"
+    end
+  end
+
+  describe "retry_job/2 and cancel_job/2" do
+    test "retry re-queues the job and writes an audit log" do
+      job = insert_failed_job(%{worker: "Worker.A"})
+      actor = %{"user_role_id" => nil, "email" => "admin@test.com"}
+
+      assert :ok = Jobs.retry_job(job.id, actor)
+
+      logs = FunSheep.Admin.list_audit_logs(limit: 5)
+      assert Enum.any?(logs, &(&1.action == "admin.job.retry"))
+    end
+
+    test "cancel marks the job cancelled and writes an audit log" do
+      job = insert_failed_job(%{worker: "Worker.B"})
+      actor = %{"user_role_id" => nil, "email" => "admin@test.com"}
+
+      assert :ok = Jobs.cancel_job(job.id, actor)
+
+      logs = FunSheep.Admin.list_audit_logs(limit: 5)
+      assert Enum.any?(logs, &(&1.action == "admin.job.cancel"))
+    end
+  end
+
+  describe "get_failed_job!/1" do
+    test "returns an enriched row" do
+      job = insert_failed_job(%{worker: "Worker.C"})
+      row = Jobs.get_failed_job!(job.id)
+      assert row.job.id == job.id
+      assert row.worker_short == "C"
+    end
+  end
+
+  describe "list_failed/2 pagination" do
+    test "respects offset and limit" do
+      for i <- 1..5 do
+        insert_failed_job(%{worker: "Worker.Pager#{i}"})
+      end
+
+      page1 = Jobs.list_failed(%{}, limit: 2, offset: 0)
+      page2 = Jobs.list_failed(%{}, limit: 2, offset: 2)
+
+      assert length(page1) == 2
+      assert length(page2) == 2
+
+      ids_page1 = Enum.map(page1, & &1.job.id)
+      ids_page2 = Enum.map(page2, & &1.job.id)
+      assert MapSet.disjoint?(MapSet.new(ids_page1), MapSet.new(ids_page2))
+    end
   end
 
   # --- helpers ---------------------------------------------------------
