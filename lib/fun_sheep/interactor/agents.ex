@@ -23,6 +23,8 @@ defmodule FunSheep.Interactor.Agents do
   the assistant list and caching the mapping in `persistent_term`.
   """
 
+  @behaviour FunSheep.Interactor.AgentsBehaviour
+
   alias FunSheep.AIUsage
   alias FunSheep.AIUsage.Guard
   alias FunSheep.Interactor.Client
@@ -59,6 +61,7 @@ defmodule FunSheep.Interactor.Agents do
     - `{:ok, response_text}` - The assistant's response as a string
     - `{:error, reason}` - If the request failed
   """
+  @impl FunSheep.Interactor.AgentsBehaviour
   @spec chat(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, term()}
   def chat(assistant_name, prompt, opts \\ %{}) do
     timeout = opts[:timeout] || @response_timeout
@@ -264,6 +267,7 @@ defmodule FunSheep.Interactor.Agents do
 
   Returns `{:ok, id}` or `{:error, reason}`.
   """
+  @impl FunSheep.Interactor.AgentsBehaviour
   @spec resolve_or_create_assistant(%{required(:name) => String.t()} | map()) ::
           {:ok, String.t()} | {:error, term()}
   def resolve_or_create_assistant(%{name: name} = attrs) when is_binary(name) do

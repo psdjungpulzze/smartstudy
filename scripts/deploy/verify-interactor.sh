@@ -21,7 +21,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 ENV_FILE="${1:-$ROOT/.env.prod}"
 
-REQUIRED_ASSISTANTS=(course_discovery web_search question_gen question_extract question_validator)
+REQUIRED_ASSISTANTS=(course_discovery web_search question_gen question_extract question_quality_reviewer question_skill_tagger)
 
 # --- Colors ---------------------------------------------------------------
 if [ -t 1 ]; then
@@ -141,7 +141,9 @@ done
 
 if [ ${#MISSING[@]} -ne 0 ]; then
   echo "${RED}[fail]${NC} Missing required assistants: ${MISSING[*]}" >&2
-  echo "       Register them on the prod Interactor before deploying." >&2
+  echo "       Provision them against this Interactor before deploying:" >&2
+  echo "         mix funsheep.interactor.provision_assistants" >&2
+  echo "       (Uses the INTERACTOR_* values from the env loaded above.)" >&2
   exit 1
 fi
 ok "All ${#REQUIRED_ASSISTANTS[@]} required assistants present"

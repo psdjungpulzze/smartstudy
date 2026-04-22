@@ -1,7 +1,7 @@
 defmodule FunSheep.Workers.QuestionValidationWorker do
   @moduledoc """
   Oban worker that validates newly-inserted questions via the
-  `question_validator` Interactor assistant.
+  `question_quality_reviewer` Interactor assistant.
 
   Questions are validated in batches of up to `@batch_size` per job. Each job
   takes a list of question ids (typically from one insertion path), loads

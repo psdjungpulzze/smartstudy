@@ -25,8 +25,8 @@ defmodule FunSheep.AIUsage.Guard do
         circuit_window_ms: 60_000,
         circuit_cooldown_ms: 120_000,
         daily_budget_tokens: %{
-          "question_validator_v2" => 1_000_000,
-          "question_classifier_v1" => 500_000
+          "question_quality_reviewer" => 1_000_000,
+          "question_skill_tagger" => 500_000
           # any source not listed has no budget cap
         }
 

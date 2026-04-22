@@ -20,9 +20,12 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
 
   @default_confidence_threshold 0.85
 
-  # Versioned name so a prompt/model change triggers a fresh assistant on
-  # Interactor. Bump the suffix when `assistant_attrs` changes materially.
-  @assistant_name "question_classifier_v1"
+  # Interactor only applies `assistant_attrs` on first provision, so pushing
+  # a config change (model, prompt, token cap) requires registering under a
+  # new name. Prior names: "question_classifier", "question_classifier_v1".
+  # If config must change again, pick another descriptive name rather than
+  # reusing a prior one.
+  @assistant_name "question_skill_tagger"
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -78,25 +81,37 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   defp classify_one(question, sections) do
     prompt = build_prompt(question, sections)
 
-    _ = ensure_assistant()
+    # Provisioning failures must short-circuit — otherwise Agents.chat/3 hits
+    # Interactor with an unknown assistant name and every call returns
+    # :assistant_not_found (prod incident 2026-04-22: 530 questions failed
+    # this way before the name was bumped).
+    case ensure_assistant() do
+      {:ok, _id} ->
+        case agents_impl().chat(@assistant_name, prompt, %{
+               source: "question_classification_worker",
+               metadata: %{question_id: question.id, chapter_id: question.chapter_id}
+             }) do
+          {:ok, response} ->
+            case parse_response(response) do
+              {:ok, parsed} ->
+                apply_classification(question, sections, parsed)
 
-    case Agents.chat(@assistant_name, prompt, %{
-           source: "question_classification_worker",
-           metadata: %{question_id: question.id, chapter_id: question.chapter_id}
-         }) do
-      {:ok, response} ->
-        case parse_response(response) do
-          {:ok, parsed} ->
-            apply_classification(question, sections, parsed)
+              {:error, reason} ->
+                Logger.warning("[QClassify] Parse failed for #{question.id}: #{inspect(reason)}")
+                {:error, :parse_failed}
+            end
 
           {:error, reason} ->
-            Logger.warning("[QClassify] Parse failed for #{question.id}: #{inspect(reason)}")
-            {:error, :parse_failed}
+            Logger.error("[QClassify] AI unavailable for #{question.id}: #{inspect(reason)}")
+            {:error, :ai_unavailable}
         end
 
       {:error, reason} ->
-        Logger.error("[QClassify] AI unavailable for #{question.id}: #{inspect(reason)}")
-        {:error, :ai_unavailable}
+        Logger.error(
+          "[QClassify] Assistant not provisioned for #{question.id}; leaving for retry: #{inspect(reason)}"
+        )
+
+        {:error, :assistant_unavailable}
     end
   end
 
@@ -211,10 +226,13 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     )
   end
 
+  @behaviour FunSheep.Interactor.AssistantSpec
+
   @doc """
   Configuration used to register the `#{@assistant_name}` assistant on
   Interactor. Exposed for scripts/preflight checks.
   """
+  @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
     %{
       name: @assistant_name,
@@ -246,7 +264,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   defp provision_assistant do
     # Race-safe: if a peer just created the assistant, we'll re-resolve
     # instead of fighting a 422.
-    case Agents.resolve_or_create_assistant(assistant_attrs()) do
+    case agents_impl().resolve_or_create_assistant(assistant_attrs()) do
       {:ok, id} ->
         :persistent_term.put({__MODULE__, :assistant_id}, id)
         {:ok, id}
@@ -254,5 +272,12 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
       {:error, _} = err ->
         err
     end
+  end
+
+  # Routes Agents calls through a configurable impl so tests can stub the
+  # Interactor round-trip without real HTTP. Production always resolves to
+  # `FunSheep.Interactor.Agents`; tests set this to a Mox-backed stub.
+  defp agents_impl do
+    Application.get_env(:fun_sheep, :interactor_agents_impl, Agents)
   end
 end
