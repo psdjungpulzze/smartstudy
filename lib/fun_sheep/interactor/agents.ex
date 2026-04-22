@@ -24,6 +24,7 @@ defmodule FunSheep.Interactor.Agents do
   """
 
   alias FunSheep.AIUsage
+  alias FunSheep.AIUsage.Guard
   alias FunSheep.Interactor.Client
 
   require Logger
@@ -63,22 +64,45 @@ defmodule FunSheep.Interactor.Agents do
     timeout = opts[:timeout] || @response_timeout
     metadata = opts[:metadata] || %{}
     source = opts[:source] || assistant_name
+    guard_enabled? = Map.get(opts, :guard, true)
     external_user_id = "funsheep_worker_#{:erlang.system_time(:millisecond)}"
     started_at = System.monotonic_time(:millisecond)
 
+    # Fast-fail on circuit-open / budget-exceeded BEFORE spending tokens.
+    case guard_enabled? and Guard.check(source) do
+      {:error, reason} ->
+        duration_ms = System.monotonic_time(:millisecond) - started_at
+        record_usage({:error, reason}, assistant_name, prompt, source, metadata, duration_ms)
+        Logger.warning("[Agents] #{assistant_name} blocked by guard: #{inspect(reason)}")
+        {:error, reason}
+
+      _ok_or_disabled ->
+        do_chat(assistant_name, prompt, opts, %{
+          timeout: timeout,
+          metadata: metadata,
+          source: source,
+          guard_enabled: guard_enabled?,
+          external_user_id: external_user_id,
+          started_at: started_at
+        })
+    end
+  end
+
+  defp do_chat(assistant_name, prompt, _opts, ctx) do
     result =
       with {:ok, assistant_id} <- resolve_assistant(assistant_name),
-           {:ok, room} <- create_room(assistant_id, external_user_id, metadata),
+           {:ok, room} <- create_room(assistant_id, ctx.external_user_id, ctx.metadata),
            room_id <- extract_id(room),
            {:ok, _msg} <- send_message(room_id, prompt),
-           {:ok, assistant_message} <- await_response(room_id, timeout) do
+           {:ok, assistant_message} <- await_response(room_id, ctx.timeout) do
         # Close room in background — don't block on it
         Task.start(fn -> close_room(room_id) end)
         {:ok, assistant_message}
       end
 
-    duration_ms = System.monotonic_time(:millisecond) - started_at
-    record_usage(result, assistant_name, prompt, source, metadata, duration_ms)
+    duration_ms = System.monotonic_time(:millisecond) - ctx.started_at
+    record_usage(result, assistant_name, prompt, ctx.source, ctx.metadata, duration_ms)
+    if ctx.guard_enabled, do: feed_guard(ctx.source, result)
 
     case result do
       {:ok, %{"content" => content}} ->
@@ -89,6 +113,11 @@ defmodule FunSheep.Interactor.Agents do
         error
     end
   end
+
+  # Feed the circuit-breaker: successes reset the counter, failures
+  # bump it (and may trip the circuit open for the cooldown window).
+  defp feed_guard(source, {:ok, _}), do: Guard.record_success(source)
+  defp feed_guard(source, {:error, reason}), do: Guard.record_failure(source, reason)
 
   # One AIUsage row per chat invocation, regardless of outcome. Telemetry
   # failures are swallowed inside AIUsage.log_call/1 so they can't cascade.
