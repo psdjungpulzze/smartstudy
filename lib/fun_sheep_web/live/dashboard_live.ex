@@ -130,6 +130,15 @@ defmodule FunSheepWeb.DashboardLive do
         />
       </div>
 
+      <%!-- ── Flow A — usage meter + Ask card + waiting state (§4) ── --%>
+      <div class="animate-slide-up">
+        <.live_component
+          module={FunSheepWeb.PracticeRequestLive.AskComponent}
+          id="practice-request-ask"
+          student_id={@current_user["id"]}
+        />
+      </div>
+
       <%!-- ── Primary Test: The Focus ── --%>
       <div :if={@primary_test} class="animate-slide-up">
         <.focus_card test={@primary_test} />
