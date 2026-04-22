@@ -20,13 +20,16 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       states: [:available, :scheduled, :executing, :retryable]
     ]
 
-  alias FunSheep.{Content, Courses, Repo}
-  alias FunSheep.Courses.{Chapter, Section}
+  alias FunSheep.{Content, Courses}
+  alias FunSheep.Courses.TOCRebase
   alias FunSheep.Interactor.Agents
 
-  import Ecto.Query
-
   require Logger
+
+  # Only textbook-like materials define course structure. Defined here so
+  # both the source-label helper and the OCR-text collector can see it —
+  # module attributes must be set before their first reference.
+  @structure_kinds [:textbook, :supplementary_book]
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"course_id" => course_id}, attempt: attempt}) do
@@ -85,13 +88,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       trigger_question_generation(course)
       :ok
     else
-      # Delete existing chapters — they'll be replaced with textbook-derived ones
-      broadcast(course_id, %{sub_step: "Replacing course structure with textbook content..."})
-
-      from(ch in Chapter, where: ch.course_id == ^course_id)
-      |> Repo.delete_all()
-
-      # Run AI discovery with OCR text as primary context
+      # Run AI discovery with OCR text as primary context.
       broadcast(course_id, %{sub_step: "Discovering chapters from uploaded textbook..."})
 
       chapters = discover_chapters_from_materials(course, ocr_text)
@@ -112,44 +109,124 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
 
         :ok
       else
-        # Create chapters in DB
-        broadcast(course_id, %{
-          sub_step: "Creating #{length(chapters)} chapters from textbook..."
-        })
-
-        create_chapters(chapters, course_id)
-
-        Courses.update_course(course, %{
-          processing_step: "Discovered #{length(chapters)} chapters from textbook"
-        })
-
-        # Mark discovery complete
-        metadata =
-          Map.merge(course.metadata || %{}, %{
-            "discovery_complete" => true,
-            "ocr_complete" => true,
-            "enriched_at" => DateTime.utc_now() |> DateTime.to_iso8601()
-          })
-
-        Courses.update_course(Courses.get_course!(course_id), %{metadata: metadata})
-
-        broadcast(course_id, %{
-          step: "Discovered #{length(chapters)} chapters",
-          sub_step: nil
-        })
-
-        # Now generate questions
-        trigger_question_generation(Courses.get_course!(course_id))
-
-        :ok
+        # Record the discovery as a candidate TOC. TOCRebase.compare/2
+        # then decides whether it's worth applying (beats the
+        # improvement gate AND doesn't orphan too many active
+        # chapters). The "join-not-replace" apply/2 preserves any
+        # chapter that already carries student attempts.
+        apply_discovery(course, chapters, ocr_text)
       end
     end
   end
 
-  # Only textbook-like materials define course structure. Sample questions,
-  # lecture notes, and syllabi should not drive chapter discovery — they'd
-  # pollute the table of contents with unrelated headings.
-  @structure_kinds [:textbook, :supplementary_book]
+  defp apply_discovery(course, chapters, ocr_text) do
+    course_id = course.id
+    source = source_label(course, chapters)
+
+    {:ok, new_toc} =
+      TOCRebase.propose(course_id, source, %{
+        chapters: stringify_chapters(chapters),
+        ocr_char_count: String.length(ocr_text)
+      })
+
+    current = TOCRebase.current(course_id)
+
+    case TOCRebase.compare(new_toc, current) do
+      verdict when verdict in [:no_current, :new_better] ->
+        broadcast(course_id, %{sub_step: "Rebasing course onto discovered textbook structure..."})
+
+        case TOCRebase.apply(new_toc, course_id) do
+          {:ok, stats} ->
+            Logger.info(
+              "[EnrichDiscovery] Rebased #{course_id}: #{stats.kept} kept, " <>
+                "#{stats.created} created, #{stats.orphaned} orphaned, " <>
+                "#{stats.deleted} deleted (source=#{source})"
+            )
+
+            mark_discovery_complete(Courses.get_course!(course_id), length(chapters))
+
+          {:error, reason} ->
+            Logger.error(
+              "[EnrichDiscovery] TOC rebase failed for #{course_id}: #{inspect(reason)}"
+            )
+
+            Courses.update_course(course, %{
+              processing_status: "failed",
+              processing_step: "Could not restructure chapters. Please try again."
+            })
+        end
+
+      other ->
+        # Candidate stored but not applied — surface via admin UI
+        # (or auto-upgrade later if a stronger discovery comes in).
+        Logger.info(
+          "[EnrichDiscovery] TOC candidate kept for #{course_id}: #{other} " <>
+            "(score=#{new_toc.score} vs current=#{current && current.score})"
+        )
+
+        mark_discovery_complete(
+          Courses.get_course!(course_id),
+          (current && current.chapter_count) || length(chapters)
+        )
+    end
+
+    :ok
+  end
+
+  defp mark_discovery_complete(course, chapter_count) do
+    course_id = course.id
+
+    Courses.update_course(course, %{
+      processing_step: "Discovered #{chapter_count} chapters from textbook"
+    })
+
+    metadata =
+      Map.merge(course.metadata || %{}, %{
+        "discovery_complete" => true,
+        "ocr_complete" => true,
+        "enriched_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
+    Courses.update_course(Courses.get_course!(course_id), %{metadata: metadata})
+
+    broadcast(course_id, %{step: "Discovered #{chapter_count} chapters", sub_step: nil})
+    trigger_question_generation(Courses.get_course!(course_id))
+  end
+
+  # Rough heuristic for how authoritative this discovery is. A future
+  # improvement: actually flag "partial" vs "full" textbook at upload
+  # time (based on page count vs advertised length). For now:
+  #   * any textbook material OCR'd → textbook_partial
+  #   * if the course metadata says it has a full textbook → textbook_full
+  #   * otherwise → web
+  defp source_label(course, _chapters) do
+    metadata = course.metadata || %{}
+
+    cond do
+      metadata["has_full_textbook"] == true -> "textbook_full"
+      has_textbook_materials?(course.id) -> "textbook_partial"
+      true -> "web"
+    end
+  end
+
+  defp has_textbook_materials?(course_id) do
+    Content.list_materials_by_course(course_id)
+    |> Enum.any?(fn m ->
+      m.ocr_status == :completed and m.material_kind in @structure_kinds
+    end)
+  end
+
+  # AI returns maps with atom keys (see parse_chapters_json/1); normalize
+  # to string keys so the DiscoveredTOC.chapters JSON column stays stable.
+  defp stringify_chapters(chapters) do
+    Enum.map(chapters, fn ch ->
+      %{
+        "name" => Map.get(ch, :name) || Map.get(ch, "name"),
+        "sections" =>
+          (Map.get(ch, :sections) || Map.get(ch, "sections") || []) |> Enum.map(&to_string/1)
+      }
+    end)
+  end
 
   # How many front pages per textbook material to treat as likely-TOC.
   # Textbooks usually put the table of contents in the first 5–20 pages.
@@ -320,31 +397,6 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       _ ->
         {:error, :invalid_json}
     end
-  end
-
-  defp create_chapters(chapters, course_id) do
-    chapters
-    |> Enum.with_index(1)
-    |> Enum.each(fn {chapter_data, position} ->
-      {:ok, chapter} =
-        %Chapter{}
-        |> Chapter.changeset(%{name: chapter_data.name, position: position, course_id: course_id})
-        |> Repo.insert()
-
-      if chapter_data[:sections] && chapter_data.sections != [] do
-        chapter_data.sections
-        |> Enum.with_index(1)
-        |> Enum.each(fn {section_name, sec_pos} ->
-          %Section{}
-          |> Section.changeset(%{
-            name: section_name,
-            position: sec_pos,
-            chapter_id: chapter.id
-          })
-          |> Repo.insert()
-        end)
-      end
-    end)
   end
 
   defp trigger_question_generation(course) do
