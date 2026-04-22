@@ -215,10 +215,19 @@ defmodule FunSheep.Assessments do
       test_schedule_id: test_schedule_id,
       chapter_scores: scores.chapter_scores,
       topic_scores: scores.topic_scores,
+      skill_scores: serialize_skill_scores(scores.skill_scores),
       aggregate_score: scores.aggregate_score,
       calculated_at: DateTime.utc_now()
     })
   end
+
+  defp serialize_skill_scores(skill_scores) when is_map(skill_scores) do
+    Map.new(skill_scores, fn {section_id, data} ->
+      {section_id, Map.update(data, :status, "insufficient_data", &Atom.to_string/1)}
+    end)
+  end
+
+  defp serialize_skill_scores(_), do: %{}
 
   @doc """
   Returns the last `limit` readiness scores for a user+test, ordered by most recent first.
@@ -255,7 +264,8 @@ defmodule FunSheep.Assessments do
           test_schedule_id: test_schedule_id,
           aggregate_score: scores.aggregate_score,
           chapter_scores: scores.chapter_scores,
-          topic_scores: scores.topic_scores
+          topic_scores: scores.topic_scores,
+          skill_scores: scores.skill_scores
         }
     end
   end
