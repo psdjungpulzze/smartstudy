@@ -368,6 +368,88 @@ defmodule FunSheep.Engagement.StudySessions do
     }
   end
 
+  @doc """
+  Returns completed study sessions for a student in a recent window.
+
+  Parent-facing: powers the activity timeline (spec §5.1). Preloads
+  `:course` and `:user_role` so callers (and the timeline interpretation
+  step) can render without triggering N+1 queries.
+
+  ## Parameters
+
+    * `user_role_id` — the student's user role id
+    * `days` — look-back window in days (default 30)
+
+  ## Returns
+
+  A list of `%StudySession{}` ordered newest-first, `:course` preloaded.
+  Empty list when the student has no completed sessions in the window.
+  """
+  def list_for_student_in_window(user_role_id, days \\ 30)
+      when is_binary(user_role_id) and is_integer(days) and days > 0 do
+    cutoff =
+      DateTime.utc_now()
+      |> DateTime.add(-days, :day)
+
+    from(s in StudySession,
+      where:
+        s.user_role_id == ^user_role_id and
+          not is_nil(s.completed_at) and
+          s.completed_at >= ^cutoff,
+      order_by: [desc: s.completed_at],
+      preload: [:course]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns aggregated minutes studied by (day_of_week, time_window) over the
+  last `weeks` weeks. Day of week is 1..7 (Mon..Sun) using the student's
+  local timezone when provided, otherwise UTC.
+
+  Powers the time-of-day heatmap (spec §5.2).
+
+  ## Returns
+
+  A map keyed by `{day_of_week, time_window}` with value = minutes studied.
+  Unbucketed cells are simply absent; callers render empty cells as zero.
+  """
+  def study_heatmap(user_role_id, weeks \\ 4, tz \\ "Etc/UTC")
+      when is_binary(user_role_id) and is_integer(weeks) and weeks > 0 do
+    cutoff =
+      DateTime.utc_now()
+      |> DateTime.add(-weeks * 7, :day)
+
+    sessions =
+      from(s in StudySession,
+        where:
+          s.user_role_id == ^user_role_id and
+            not is_nil(s.completed_at) and
+            s.completed_at >= ^cutoff,
+        select: %{
+          completed_at: s.completed_at,
+          duration_seconds: s.duration_seconds,
+          time_window: s.time_window
+        }
+      )
+      |> Repo.all()
+
+    Enum.reduce(sessions, %{}, fn %{completed_at: ts, duration_seconds: dur, time_window: tw},
+                                  acc ->
+      dow = day_of_week_in_tz(ts, tz)
+      window = tw || StudySession.current_time_window()
+      minutes = div(dur || 0, 60)
+      Map.update(acc, {dow, window}, minutes, &(&1 + minutes))
+    end)
+  end
+
+  defp day_of_week_in_tz(%DateTime{} = ts, tz) do
+    case DateTime.shift_zone(ts, tz) do
+      {:ok, local} -> Date.day_of_week(DateTime.to_date(local))
+      _ -> Date.day_of_week(DateTime.to_date(ts))
+    end
+  end
+
   ## ── Private Helpers ──────────────────────────────────────────────────────
 
   defp today_start do

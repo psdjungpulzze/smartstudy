@@ -15,7 +15,8 @@ defmodule FunSheep.Assessments do
     ReadinessCalculator
   }
 
-  alias FunSheep.Questions
+  alias FunSheep.{Courses, Questions}
+  alias FunSheep.Questions.QuestionAttempt
 
   ## Test Schedules
 
@@ -401,6 +402,143 @@ defmodule FunSheep.Assessments do
 
         %{direction: direction, change: change, scores: multiple}
     end
+  end
+
+  ## ── Topic Mastery Map (Spec §5.3) ───────────────────────────────────────
+
+  @doc """
+  Returns a chapter → topics (sections) grid for a given student and test
+  schedule, with mastery %, attempt counts, and status per topic.
+
+  Spec §5.3: powers the parent-facing topic-level mastery map and its
+  drill-down. "Topic" in the spec maps to `Courses.Section` in the schema.
+
+  No fake data: topics with zero attempts return `status: :insufficient_data`
+  and `attempts_count: 0`. Chapters without a recorded scope on the schedule
+  are skipped (there is nothing to render).
+
+  ## Returns
+
+      [
+        %{
+          chapter_id: "...",
+          chapter_name: "Fractions",
+          topics: [
+            %{
+              section_id: "...",
+              section_name: "Adding fractions",
+              accuracy: 82.0,
+              attempts_count: 11,
+              correct_count: 9,
+              status: :mastered | :weak | :probing | :insufficient_data
+            },
+            ...
+          ]
+        },
+        ...
+      ]
+  """
+  def topic_mastery_map(user_role_id, test_schedule_id)
+      when is_binary(user_role_id) and is_binary(test_schedule_id) do
+    case Repo.get(TestSchedule, test_schedule_id) do
+      nil ->
+        []
+
+      %TestSchedule{scope: scope} ->
+        chapter_ids = (scope || %{}) |> Map.get("chapter_ids", []) |> List.wrap()
+        build_mastery_grid(user_role_id, chapter_ids)
+    end
+  end
+
+  defp build_mastery_grid(_user_role_id, []), do: []
+
+  defp build_mastery_grid(user_role_id, chapter_ids) do
+    chapters = Courses.list_chapters_by_ids(chapter_ids)
+    sections = Courses.list_sections_by_chapters(chapter_ids)
+    sections_by_chapter = Enum.group_by(sections, & &1.chapter_id)
+
+    Enum.map(chapters, fn chapter ->
+      topics =
+        sections_by_chapter
+        |> Map.get(chapter.id, [])
+        |> Enum.map(fn section ->
+          attempts = Questions.list_section_attempts(user_role_id, section.id)
+          correct = Enum.count(attempts, & &1.is_correct)
+          total = length(attempts)
+
+          accuracy =
+            if total > 0, do: Float.round(correct / total * 100, 1), else: 0.0
+
+          %{
+            section_id: section.id,
+            section_name: section.name,
+            accuracy: accuracy,
+            attempts_count: total,
+            correct_count: correct,
+            status: FunSheep.Assessments.Mastery.status(attempts)
+          }
+        end)
+
+      %{
+        chapter_id: chapter.id,
+        chapter_name: chapter.name,
+        topics: topics
+      }
+    end)
+  end
+
+  @doc """
+  Returns the most recent `limit` attempts for a student on a single
+  topic (section), with the question preloaded.
+
+  Powers the parent §5.3 drill-down modal (last 10 attempts).
+  """
+  def recent_attempts_for_topic(user_role_id, section_id, limit \\ 10)
+      when is_binary(user_role_id) and is_binary(section_id) and is_integer(limit) do
+    from(qa in QuestionAttempt,
+      join: q in assoc(qa, :question),
+      where: qa.user_role_id == ^user_role_id and q.section_id == ^section_id,
+      order_by: [desc: qa.inserted_at],
+      limit: ^limit,
+      preload: [question: q]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns a daily accuracy trend for a single topic (section) over the
+  last `days` days. Each bucket is `%{date, accuracy, attempts}`. Days
+  with no attempts are omitted (no fake fill).
+  """
+  def topic_accuracy_trend(user_role_id, section_id, days \\ 30)
+      when is_binary(user_role_id) and is_binary(section_id) and is_integer(days) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-days, :day)
+
+    from(qa in QuestionAttempt,
+      join: q in assoc(qa, :question),
+      where:
+        qa.user_role_id == ^user_role_id and
+          q.section_id == ^section_id and
+          qa.inserted_at >= ^cutoff,
+      order_by: [asc: qa.inserted_at],
+      select: %{
+        inserted_at: qa.inserted_at,
+        is_correct: qa.is_correct
+      }
+    )
+    |> Repo.all()
+    |> Enum.group_by(fn %{inserted_at: ts} -> DateTime.to_date(ts) end)
+    |> Enum.map(fn {date, attempts} ->
+      correct = Enum.count(attempts, & &1.is_correct)
+      total = length(attempts)
+
+      %{
+        date: date,
+        accuracy: if(total > 0, do: Float.round(correct / total * 100, 1), else: 0.0),
+        attempts: total
+      }
+    end)
+    |> Enum.sort_by(& &1.date, Date)
   end
 
   defp distribution_buckets(scores) do

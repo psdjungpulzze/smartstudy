@@ -9,8 +9,10 @@ defmodule FunSheep.Repo.Migrations.AddPendingTocAndAcknowledgements do
     # escalation (7d → active-majority, 14d → admin fallback).
     alter table(:courses) do
       add :pending_toc_id, references(:discovered_tocs, type: :binary_id, on_delete: :nilify_all)
+
       add :pending_toc_proposed_by_id,
           references(:user_roles, type: :binary_id, on_delete: :nilify_all)
+
       add :pending_toc_proposed_at, :utc_datetime
     end
 
@@ -22,6 +24,7 @@ defmodule FunSheep.Repo.Migrations.AddPendingTocAndAcknowledgements do
     # exactly once; the row records which discovered_toc they saw.
     create table(:user_course_toc_acknowledgements, primary_key: false) do
       add :id, :binary_id, primary_key: true
+
       add :user_role_id,
           references(:user_roles, type: :binary_id, on_delete: :delete_all),
           null: false
