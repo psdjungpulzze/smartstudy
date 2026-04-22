@@ -55,12 +55,23 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       maybe_finalize_course(course_id)
       :ok
     else
-      questions
-      |> Enum.chunk_every(@batch_size)
-      |> Enum.each(fn batch -> validate_and_apply(batch, retry_round, course_id) end)
+      batches = Enum.chunk_every(questions, @batch_size)
+
+      # Track sub-batch outcomes so we can distinguish "partial success"
+      # (at least one batch worked — commit progress, sweeper picks up the
+      # rest later) from "total failure" (every batch failed — raise so Oban
+      # retries the whole job).
+      outcomes = Enum.map(batches, &validate_and_apply(&1, retry_round, course_id))
 
       maybe_finalize_course(course_id)
-      :ok
+
+      if Enum.all?(outcomes, &(&1 == :error)) do
+        # Every sub-batch failed. Interactor is likely down or misconfigured —
+        # raising lets Oban retry the whole job with backoff.
+        raise "validation job failed: all #{length(batches)} sub-batches errored"
+      else
+        :ok
+      end
     end
   end
 
@@ -98,6 +109,11 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     |> Repo.all()
   end
 
+  # Returns `:ok` if the sub-batch produced verdicts (even if some verdicts
+  # were :needs_review or :failed). Returns `:error` if the validator itself
+  # errored. The caller uses these to decide whether the whole job should
+  # raise (all sub-batches failed) or commit (at least one succeeded — stuck
+  # ones get picked up by `StuckValidationSweeperWorker`).
   defp validate_and_apply(questions, retry_round, course_id) do
     case Validation.validate_batch(questions) do
       {:ok, verdicts} ->
@@ -125,14 +141,15 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
           )
         end
 
+        :ok
+
       {:error, reason} ->
         Logger.error(
           "[Validation] Batch failed for course #{course_id}: #{inspect(reason)}. " <>
-            "Leaving #{length(questions)} questions as :pending for retry."
+            "Leaving #{length(questions)} questions as :pending; sweeper will re-enqueue."
         )
 
-        # Don't mark them failed — let Oban retry the job.
-        raise "validation batch failed: #{inspect(reason)}"
+        :error
     end
   end
 
