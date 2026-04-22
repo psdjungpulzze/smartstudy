@@ -484,7 +484,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             </.link>
             <button
               type="submit"
-              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+              phx-disable-with={if @live_action == :edit, do: "Saving...", else: "Scheduling..."}
+              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {if @live_action == :edit, do: "Save Changes", else: "Schedule Test"}
             </button>
