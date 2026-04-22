@@ -73,6 +73,9 @@ defmodule FunSheepWeb.Router do
       live "/teacher", TeacherDashboardLive, :index
       live "/guardians", GuardianInviteLive, :index
 
+      # Email-only student→guardian invite claim
+      live "/guardian-invite/:token", GuardianInviteClaimLive, :show
+
       # Flow B (§5.2) — parent onboarding + claim-code redemption
       live "/onboarding/parent", ParentOnboardingLive, :index
       live "/claim/:code", ClaimCodeLive, :show

@@ -184,6 +184,189 @@ defmodule FunSheep.Accounts do
   end
 
   @doc """
+  Student-initiated invite: links this student to a guardian (parent or
+  teacher) identified by email.
+
+  Resolves the guardian's email in three ways:
+
+    1. **Account-resolved** — a `UserRole` with that email and the
+       requested role exists → create a pending `StudentGuardian` row
+       pointing at them. The guardian accepts from their `/guardians`
+       inbox on next sign-in.
+
+    2. **Email-only** — no matching `UserRole` exists → create a
+       pending row with `guardian_id: nil`, `invited_email: email`,
+       and a 14-day `invite_token`, then enqueue a delivery job so the
+       address receives a claim link at `/guardian-invite/<token>`.
+
+    3. **Already linked / already invited** — return the matching
+       `{:error, :already_linked}` or `{:error, :already_invited}`.
+
+  Errors:
+    * `{:error, :invalid_email}` — blank / malformed input
+    * `{:error, :already_linked}` — active link already exists
+    * `{:error, :already_invited}` — pending invite already exists
+    * `{:error, Ecto.Changeset.t()}` — insert failed
+  """
+  def invite_guardian_by_student(student_id, guardian_email, relationship_type)
+      when is_binary(student_id) and is_binary(guardian_email) and
+             relationship_type in [:parent, :teacher] do
+    normalized = guardian_email |> String.trim() |> String.downcase()
+
+    cond do
+      normalized == "" ->
+        {:error, :invalid_email}
+
+      not String.contains?(normalized, "@") ->
+        {:error, :invalid_email}
+
+      true ->
+        do_invite_guardian_by_student(student_id, normalized, relationship_type)
+    end
+  end
+
+  defp do_invite_guardian_by_student(student_id, email, relationship_type) do
+    guardian = Repo.get_by(UserRole, email: email, role: relationship_type)
+
+    existing = find_existing_link_for_student(student_id, guardian, email)
+
+    case {existing, guardian} do
+      {%StudentGuardian{status: :active}, _} ->
+        {:error, :already_linked}
+
+      {%StudentGuardian{status: :pending}, _} ->
+        {:error, :already_invited}
+
+      {nil, %UserRole{} = g} ->
+        create_student_guardian(%{
+          guardian_id: g.id,
+          student_id: student_id,
+          relationship_type: relationship_type,
+          status: :pending,
+          invited_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      {nil, nil} ->
+        create_email_invite(student_id, email, relationship_type)
+    end
+  end
+
+  defp find_existing_link_for_student(student_id, %UserRole{id: guardian_id}, _email) do
+    from(sg in StudentGuardian,
+      where:
+        sg.student_id == ^student_id and sg.guardian_id == ^guardian_id and
+          sg.status in [:active, :pending]
+    )
+    |> Repo.one()
+  end
+
+  defp find_existing_link_for_student(student_id, nil, email) do
+    from(sg in StudentGuardian,
+      where:
+        sg.student_id == ^student_id and sg.invited_email == ^email and
+          is_nil(sg.guardian_id) and sg.status in [:active, :pending]
+    )
+    |> Repo.one()
+  end
+
+  defp create_email_invite(student_id, email, relationship_type) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    token = generate_invite_token()
+    expires_at = DateTime.add(now, 14 * 24 * 60 * 60, :second)
+
+    attrs = %{
+      student_id: student_id,
+      relationship_type: relationship_type,
+      status: :pending,
+      invited_at: now,
+      invited_email: email,
+      invite_token: token,
+      invite_token_expires_at: expires_at
+    }
+
+    case create_student_guardian(attrs) do
+      {:ok, sg} ->
+        enqueue_guardian_invite_email(sg)
+        {:ok, sg}
+
+      other ->
+        other
+    end
+  end
+
+  defp generate_invite_token do
+    32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+  end
+
+  defp enqueue_guardian_invite_email(%StudentGuardian{id: id}) do
+    %{student_guardian_id: id}
+    |> FunSheep.Workers.GuardianInviteEmailWorker.new()
+    |> Oban.insert()
+  end
+
+  @doc """
+  Fetches a pending email-invite by its token, preloaded with the student.
+
+  Returns `{:ok, sg}` when the token matches an unexpired pending row,
+  or `{:error, reason}` for `:not_found`, `:expired`, or `:consumed`.
+  """
+  def fetch_pending_guardian_invite_by_token(token) when is_binary(token) do
+    case Repo.get_by(StudentGuardian, invite_token: token) |> Repo.preload(:student) do
+      nil ->
+        {:error, :not_found}
+
+      %StudentGuardian{status: :pending, invite_token_expires_at: exp} = sg
+      when not is_nil(exp) ->
+        if DateTime.compare(DateTime.utc_now(), exp) == :gt do
+          {:error, :expired}
+        else
+          {:ok, sg}
+        end
+
+      %StudentGuardian{status: :pending} = sg ->
+        {:ok, sg}
+
+      %StudentGuardian{} ->
+        {:error, :consumed}
+    end
+  end
+
+  @doc """
+  Claims a pending email-invite on behalf of the logged-in guardian.
+
+  Sets `guardian_id` to the claimer, clears the token, and marks the
+  link `:active` (the guardian's explicit click on the tokenised link
+  counts as consent — no separate accept step).
+
+  Returns `{:error, :relationship_mismatch}` if the claimer's role
+  disagrees with the invite's `relationship_type`.
+  """
+  def claim_guardian_invite_by_token(token, %UserRole{role: role} = guardian)
+      when is_binary(token) and role in [:parent, :teacher] do
+    with {:ok, sg} <- fetch_pending_guardian_invite_by_token(token),
+         :ok <- check_relationship_match(sg, role) do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      sg
+      |> StudentGuardian.changeset(%{
+        guardian_id: guardian.id,
+        status: :active,
+        accepted_at: now,
+        invite_token: nil,
+        invite_token_expires_at: nil
+      })
+      |> Repo.update()
+    end
+  end
+
+  def claim_guardian_invite_by_token(_, _), do: {:error, :not_a_guardian}
+
+  defp check_relationship_match(%StudentGuardian{relationship_type: rt}, role) when rt == role,
+    do: :ok
+
+  defp check_relationship_match(_, _), do: {:error, :relationship_mismatch}
+
+  @doc """
   Accepts a pending guardian invite. Sets status to :active and records accepted_at.
   """
   def accept_guardian_invite(student_guardian_id) do

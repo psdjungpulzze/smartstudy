@@ -1,7 +1,8 @@
 defmodule FunSheepWeb.GuardianInviteLiveTest do
-  use FunSheepWeb.ConnCase, async: true
+  use FunSheepWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import Swoosh.TestAssertions
 
   alias FunSheep.Accounts
 
@@ -107,6 +108,89 @@ defmodule FunSheepWeb.GuardianInviteLiveTest do
       assert html =~ "My Guardians"
       # After accepting, the parent should appear in active guardians
       assert html =~ "Test Parent"
+    end
+
+    test "student sees the invite form", %{conn: conn} do
+      student = create_user_role(%{role: :student, display_name: "Test Student"})
+      conn = auth_conn(conn, student)
+
+      {:ok, _view, html} = live(conn, ~p"/guardians")
+
+      assert html =~ "Invite a grown-up"
+      assert html =~ "Send invite"
+      assert html =~ "grown-up@example.com"
+    end
+
+    test "student inviting a parent with an existing account creates pending link", %{conn: conn} do
+      student = create_user_role(%{role: :student, display_name: "Test Student"})
+
+      _parent =
+        create_user_role(%{role: :parent, display_name: "Mom", email: "mom@example.com"})
+
+      conn = auth_conn(conn, student)
+
+      {:ok, view, _html} = live(conn, ~p"/guardians")
+
+      html =
+        view
+        |> form("form[phx-submit=\"invite\"]", %{email: "mom@example.com"})
+        |> render_submit()
+
+      assert html =~ "Invitation sent"
+      assert html =~ "They already have a FunSheep account"
+    end
+
+    test "student inviting an unknown email dispatches the invite email", %{conn: conn} do
+      student = create_user_role(%{role: :student, display_name: "Test Student"})
+      conn = auth_conn(conn, student)
+
+      {:ok, view, _html} = live(conn, ~p"/guardians")
+
+      html =
+        view
+        |> form("form[phx-submit=\"invite\"]", %{email: "stranger@example.com"})
+        |> render_submit()
+
+      assert html =~ "Invitation sent to stranger@example.com"
+      assert html =~ "get an email with a link to accept"
+
+      assert_email_sent(fn email ->
+        assert email.to == [{"", "stranger@example.com"}]
+      end)
+    end
+
+    test "student sees email-only pending invite card after sending", %{conn: conn} do
+      student = create_user_role(%{role: :student, display_name: "Test Student"})
+      conn = auth_conn(conn, student)
+
+      {:ok, view, _html} = live(conn, ~p"/guardians")
+
+      html =
+        view
+        |> form("form[phx-submit=\"invite\"]", %{email: "newparent@example.com"})
+        |> render_submit()
+
+      assert html =~ "newparent@example.com"
+      assert html =~ "Waiting for them to sign up"
+      assert html =~ "Email sent"
+    end
+
+    test "student sees error for duplicate pending email invite", %{conn: conn} do
+      student = create_user_role(%{role: :student, display_name: "Test Student"})
+      conn = auth_conn(conn, student)
+
+      {:ok, view, _html} = live(conn, ~p"/guardians")
+
+      view
+      |> form("form[phx-submit=\"invite\"]", %{email: "dup@example.com"})
+      |> render_submit()
+
+      html =
+        view
+        |> form("form[phx-submit=\"invite\"]", %{email: "dup@example.com"})
+        |> render_submit()
+
+      assert html =~ "already pending"
     end
   end
 end
