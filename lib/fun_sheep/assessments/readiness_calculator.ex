@@ -49,6 +49,55 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
 
   def all_skills_mastered?(_), do: false
 
+  @doc """
+  True iff the student has completed the diagnostic for every in-scope
+  skill — i.e., every section has at least one recorded attempt. This is
+  the correct "Assessment done" signal for Study Path: a readiness record
+  exists for any student who has answered one question, so we must actually
+  check coverage instead of "has_readiness". When a course has no sections
+  yet (skill_scores empty), fall back to the chapter-level heuristic of
+  every chapter having attempted questions.
+  """
+  def assessment_complete?(nil), do: false
+
+  def assessment_complete?(%{skill_scores: skill_scores} = readiness)
+      when is_map(skill_scores) and map_size(skill_scores) > 0 do
+    Enum.all?(skill_scores, fn {_id, data} -> skill_total(data) > 0 end) or
+      chapters_all_attempted?(readiness)
+  end
+
+  def assessment_complete?(%{chapter_scores: cs} = readiness)
+      when is_map(cs) and map_size(cs) > 0 do
+    chapters_all_attempted?(readiness)
+  end
+
+  def assessment_complete?(_), do: false
+
+  # When every chapter has ≥1 attempt we can treat the diagnostic as
+  # complete even if section-level data is sparse. ReadinessScore only
+  # exposes chapter % not counts, so we derive "had any attempts" from
+  # nonzero score ∨ skill data against that chapter.
+  defp chapters_all_attempted?(%{chapter_scores: cs, skill_scores: ss})
+       when is_map(cs) and map_size(cs) > 0 do
+    attempted_chapter_ids =
+      ss
+      |> Map.values()
+      |> Enum.filter(&(skill_total(&1) > 0))
+      |> Enum.map(fn data -> Map.get(data, :chapter_id) || Map.get(data, "chapter_id") end)
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    Enum.all?(cs, fn {chapter_id, score} ->
+      score > 0 or MapSet.member?(attempted_chapter_ids, chapter_id)
+    end)
+  end
+
+  defp chapters_all_attempted?(_), do: false
+
+  defp skill_total(%{total: t}) when is_integer(t), do: t
+  defp skill_total(%{"total" => t}) when is_integer(t), do: t
+  defp skill_total(_), do: 0
+
   @doc "Section IDs currently below mastery in the readiness snapshot."
   def unmastered_skills(%{skill_scores: skill_scores}) when is_map(skill_scores) do
     skill_scores
@@ -76,7 +125,14 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
       score = if total > 0, do: Float.round(correct / total * 100, 1), else: 0.0
       status = Mastery.status(attempts)
 
-      {section.id, %{correct: correct, total: total, score: score, status: status}}
+      {section.id,
+       %{
+         correct: correct,
+         total: total,
+         score: score,
+         status: status,
+         chapter_id: section.chapter_id
+       }}
     end)
   end
 
