@@ -554,7 +554,7 @@ defmodule FunSheepWeb.QuickTestLive do
             navigate={~p"/courses/#{@course_id}"}
             class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
-            Back to Course
+            Go to Course Page
           </.link>
         </div>
 

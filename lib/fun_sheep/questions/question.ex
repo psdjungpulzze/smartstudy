@@ -35,6 +35,10 @@ defmodule FunSheep.Questions.Question do
     field :validation_score, :float
     field :validation_report, :map, default: %{}
     field :validated_at, :utc_datetime
+    # Counts batches the validator could not parse for this question.
+    # The worker increments on parse_failed and gives up at @max_validation_attempts
+    # to break the zombie loop where unparseable LLM output keeps re-enqueueing.
+    field :validation_attempts, :integer, default: 0
 
     field :classification_status, Ecto.Enum,
       values: [:uncategorized, :ai_classified, :admin_reviewed, :low_confidence],
@@ -79,6 +83,7 @@ defmodule FunSheep.Questions.Question do
       :validation_score,
       :validation_report,
       :validated_at,
+      :validation_attempts,
       :classification_status,
       :classification_confidence,
       :classified_at,

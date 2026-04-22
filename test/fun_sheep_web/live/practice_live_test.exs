@@ -116,7 +116,7 @@ defmodule FunSheepWeb.PracticeLiveTest do
 
       assert html =~ "Practice Complete!"
       assert html =~ "Practice Again"
-      assert html =~ "Back to Course"
+      assert html =~ "Go to Course Page"
     end
   end
 

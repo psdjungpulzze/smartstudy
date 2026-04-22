@@ -519,7 +519,7 @@ defmodule FunSheepWeb.PracticeLive do
           navigate={~p"/courses/#{@course.id}"}
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
         >
-          Back to Course
+          Go to Course Page
         </.link>
       </div>
 
@@ -821,7 +821,7 @@ defmodule FunSheepWeb.PracticeLive do
             navigate={~p"/courses/#{@course.id}"}
             class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
           >
-            Back to Course
+            Go to Course Page
           </.link>
           <button
             phx-click="practice_again"

@@ -43,8 +43,20 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   import Ecto.Query
   require Logger
 
-  # How many questions each Interactor round-trip validates.
-  @batch_size 10
+  # How many questions each Interactor round-trip validates. Dropped from 10
+  # to 5 on 2026-04-22 because 10-question verdicts (with reasons + suggested
+  # explanations) regularly exceeded the validator assistant's max_tokens
+  # budget, causing OpenAI to truncate mid-stream and emit unparseable JSON
+  # (the `[`-only response that drove course d44628ca's zombie loop).
+  @batch_size 5
+
+  # How many parse_failed attempts a question survives before we mark it
+  # `:failed` honestly with an error report. Without this cap the sweeper
+  # keeps re-enqueueing questions whose batches always parse-fail (e.g.
+  # malformed source data the LLM can't summarize) forever — students see
+  # "Course is still processing" for days. 3 attempts ≈ 45 minutes of
+  # sweeper retries; if it hasn't parsed by then it isn't going to.
+  @max_validation_attempts 3
 
   # How many questions go into one Oban job. The worker chunks internally
   # into `@batch_size` sub-batches, so an outer chunk of 50 means 5 Interactor
@@ -168,13 +180,72 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
         :ok
 
       {:error, reason} ->
+        # Bump every question's attempt counter and mark any that have
+        # exceeded @max_validation_attempts as :failed. Without this the
+        # sweeper would keep re-enqueueing them forever and the course would
+        # never finalize (the 2026-04-22 d44628ca zombie loop: 912 parse
+        # failures in 24h on the same questions).
+        {give_up_ids, retry_count} = bump_attempts_and_collect_giveups(questions)
+
+        if give_up_ids != [] do
+          mark_failed_unparseable(give_up_ids, reason)
+
+          Logger.error(
+            "[Validation] Marked #{length(give_up_ids)} questions :failed after " <>
+              "#{@max_validation_attempts} parse_failed attempts (course #{course_id}, reason: #{inspect(reason)})."
+          )
+        end
+
         Logger.error(
           "[Validation] Batch failed for course #{course_id}: #{inspect(reason)}. " <>
-            "Leaving #{length(questions)} questions as :pending; sweeper will re-enqueue."
+            "#{retry_count} questions left :pending for sweeper retry; " <>
+            "#{length(give_up_ids)} marked :failed (cap reached)."
         )
 
         :error
     end
+  end
+
+  # Atomically bump validation_attempts and split into "still retryable"
+  # and "give up now" buckets. Returns {give_up_ids, retry_count}.
+  # The `select` reads the post-update row (PG RETURNING), so
+  # `q.validation_attempts` is already the incremented value.
+  defp bump_attempts_and_collect_giveups(questions) do
+    ids = Enum.map(questions, & &1.id)
+
+    {_, updated} =
+      from(q in Question,
+        where: q.id in ^ids,
+        select: %{id: q.id, attempts: q.validation_attempts}
+      )
+      |> Repo.update_all(inc: [validation_attempts: 1])
+
+    {give_up, retry} =
+      Enum.split_with(updated, fn %{attempts: a} -> a >= @max_validation_attempts end)
+
+    {Enum.map(give_up, & &1.id), length(retry)}
+  end
+
+  defp mark_failed_unparseable(ids, reason) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    report = %{
+      "error" => "validator_unparseable_response",
+      "reason" => inspect(reason),
+      "attempts" => @max_validation_attempts,
+      "marked_at" => DateTime.to_iso8601(now)
+    }
+
+    from(q in Question, where: q.id in ^ids and q.validation_status == :pending)
+    |> Repo.update_all(
+      set: [
+        validation_status: :failed,
+        validation_score: 0.0,
+        validation_report: report,
+        validated_at: now,
+        updated_at: now
+      ]
+    )
   end
 
   defp handle_verdict(question, verdict, retry_round, course_id) do
