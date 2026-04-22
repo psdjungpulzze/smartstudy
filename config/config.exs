@@ -69,7 +69,11 @@ config :fun_sheep, Oban,
     # Plugins are disabled automatically in test env (testing: :inline).
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 * * * *", FunSheep.Workers.RequestExpiryWorker}
+       {"0 * * * *", FunSheep.Workers.RequestExpiryWorker},
+       # Daily at 08:00 UTC — close the loop on pending TOC proposals
+       # that nobody has approved after 14 days. See
+       # FunSheep.Workers.TOCEscalationWorker for the logic.
+       {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker}
      ]}
   ],
   queues: [
