@@ -494,7 +494,7 @@ defmodule FunSheep.Questions do
         desc: max(qa.inserted_at)
       ],
       limit: ^limit,
-      preload: [:chapter]
+      preload: [:chapter, :stats]
     )
     |> maybe_filter_chapter_for_practice(chapter_id)
     |> maybe_exclude_question_ids(exclude_ids)
@@ -570,7 +570,7 @@ defmodule FunSheep.Questions do
       |> maybe_exclude_question_ids(exclude_ids)
       |> order_by([q], asc: fragment("random()"))
       |> limit(^limit)
-      |> preload([:chapter, :section])
+      |> preload([:chapter, :section, :stats])
       |> Repo.all()
     end
   end
