@@ -23,6 +23,7 @@ defmodule FunSheep.Accounts.UserRole do
     field :metadata, :map, default: %{}
     field :suspended_at, :utc_datetime
     field :last_login_at, :utc_datetime
+    field :timezone, :string
 
     belongs_to :school, FunSheep.Geo.School
 
@@ -51,7 +52,8 @@ defmodule FunSheep.Accounts.UserRole do
       :metadata,
       :school_id,
       :suspended_at,
-      :last_login_at
+      :last_login_at,
+      :timezone
     ])
     |> validate_required([:interactor_user_id, :role, :email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/)
