@@ -80,6 +80,10 @@ config :fun_sheep, Oban,
     default: 10,
     ocr: 3,
     ai: 2,
+    # Dedicated queue for QuestionValidationWorker — isolates it from the
+    # generation/classification/extraction/scraping workers on `:ai` so a
+    # noisy generation run doesn't starve validation (2026-04-22 incident).
+    ai_validation: 2,
     # PDF async OCR dispatch + poll. Low concurrency: pollers mostly snooze,
     # and a 1,000-page PDF spawns ~5 pollers so too much parallelism here
     # just consumes scheduler time and the Postgres update_all row lock
