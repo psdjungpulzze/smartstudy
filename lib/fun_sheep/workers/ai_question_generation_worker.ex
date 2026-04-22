@@ -17,7 +17,21 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   - Manual "generate more" request from the user
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 3
+  # `unique` stops the thundering herd we saw in prod on 2026-04-22: a single
+  # course had 11+ concurrent generation jobs running, each pulling all OCR
+  # material text and holding a DB connection, which starved the Postgrex pool
+  # and blocked validator/classifier jobs from ever making progress. Every
+  # "Try again" click on the assessment + each Oban retry previously stacked a
+  # new job. Now a duplicate enqueue with the same args is deduped for 5 min
+  # across all non-terminal states.
+  use Oban.Worker,
+    queue: :ai,
+    max_attempts: 3,
+    unique: [
+      period: 300,
+      fields: [:worker, :args],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias FunSheep.{Courses, Content, Learning, Repo}
   alias FunSheep.Questions
