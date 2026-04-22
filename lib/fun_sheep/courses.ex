@@ -717,6 +717,42 @@ defmodule FunSheep.Courses do
     |> Repo.insert()
   end
 
+  @doc """
+  Returns a usable Section for `chapter_id`. If the chapter has at least one
+  section already, returns the lowest-positioned one. Otherwise creates a
+  single "Overview" section and returns it.
+
+  This unblocks the delivery pipeline for courses where TOC discovery only
+  produced chapter-level structure (no `sections` array on the AI's chapter
+  output). North Star invariant I-1 requires every adaptive-flow question
+  to carry a `section_id`; without this fallback, those courses end up with
+  every question stuck at `classification_status = :low_confidence` and
+  invisible to practice / quick-test / readiness.
+
+  Idempotent — safe to call repeatedly. Race-tolerant: a unique-on
+  `(chapter_id, name)` race resolves to the existing row on retry.
+  """
+  @spec ensure_default_section(binary()) :: {:ok, Section.t()} | {:error, Ecto.Changeset.t()}
+  def ensure_default_section(chapter_id) when is_binary(chapter_id) do
+    case list_sections_by_chapter(chapter_id) do
+      [first | _] ->
+        {:ok, first}
+
+      [] ->
+        case create_section(%{name: "Overview", position: 1, chapter_id: chapter_id}) do
+          {:ok, section} ->
+            {:ok, section}
+
+          {:error, _} = err ->
+            # Loser of an insert race re-queries — by then the winner's row exists.
+            case list_sections_by_chapter(chapter_id) do
+              [first | _] -> {:ok, first}
+              [] -> err
+            end
+        end
+    end
+  end
+
   def update_section(%Section{} = section, attrs) do
     section
     |> Section.changeset(attrs)

@@ -84,8 +84,35 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
 
   defp load_questions(_), do: []
 
+  # When the chapter has no sections, the LLM has nothing to classify against
+  # and the question would otherwise rot at :low_confidence — invisible to
+  # practice / quick-test / readiness (see North Star invariant I-1). Auto-
+  # provision a single "Overview" section so the chapter satisfies I-1 and
+  # mark the question as :ai_classified directly: with only one possible
+  # section, an LLM call would be wasted.
+  #
+  # This unblocked the 2026-04-22 incident where AP Biology had 793 :passed
+  # questions classifier-rotted at :low_confidence because the discovery
+  # worker emitted chapters without a `sections` array.
   defp classify_one(question, sections) when sections == [] do
-    mark_low_confidence(question, nil, %{reason: "no_sections_in_chapter"})
+    case Courses.ensure_default_section(question.chapter_id) do
+      {:ok, section} ->
+        mark_classified(question, section.id, 1.0, %{
+          rationale: "auto-assigned to default Overview section (chapter has no other sections)",
+          auto_default: true
+        })
+
+      {:error, reason} ->
+        Logger.error(
+          "[QClassify] Could not provision default section for chapter " <>
+            "#{question.chapter_id}: #{inspect(reason)}"
+        )
+
+        mark_low_confidence(question, nil, %{
+          reason: "default_section_provisioning_failed",
+          error: inspect(reason)
+        })
+    end
   end
 
   defp classify_one(question, sections) do

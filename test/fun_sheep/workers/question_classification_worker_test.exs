@@ -96,6 +96,52 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
     end
   end
 
+  describe "chapter has no sections" do
+    test "auto-creates default Overview section and marks the question :ai_classified without an LLM call" do
+      {:ok, course} = Courses.create_course(%{name: "AP Bio", subject: "Biology", grade: "11"})
+
+      {:ok, chapter} =
+        Courses.create_chapter(%{name: "Chapter 1: Cells", position: 1, course_id: course.id})
+
+      {:ok, question} =
+        Questions.create_question(%{
+          content: "What is the powerhouse of the cell?",
+          answer: "Mitochondria",
+          question_type: :multiple_choice,
+          difficulty: :easy,
+          course_id: course.id,
+          chapter_id: chapter.id,
+          validation_status: :passed,
+          classification_status: :uncategorized
+        })
+
+      # NO mock expectations — the auto-default branch must not call AI at
+      # all (no chat AND no resolve_or_create_assistant). With Mox `expect`
+      # absent, any unexpected call fails the test.
+
+      assert :ok =
+               QuestionClassificationWorker.perform(%Oban.Job{
+                 args: %{"question_ids" => [question.id]}
+               })
+
+      reloaded = Repo.get!(Question, question.id)
+
+      assert reloaded.classification_status == :ai_classified
+      assert reloaded.classification_confidence == 1.0
+      refute is_nil(reloaded.section_id)
+      refute is_nil(reloaded.classified_at)
+
+      # The Overview section now exists for that chapter.
+      [section] = Courses.list_sections_by_chapter(chapter.id)
+      assert section.name == "Overview"
+      assert section.id == reloaded.section_id
+
+      # And the metadata is honest about the auto-default path.
+      classification = reloaded.metadata["classification"]
+      assert classification["auto_default"] == true
+    end
+  end
+
   describe "happy path" do
     test "classifies the question when resolve + chat both succeed" do
       %{section: section, question: question} = fixture()
