@@ -121,32 +121,65 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   # via the question_gen assistant using the validator's suggested fixes.
   # If we still end up in :needs_review after round 1, we leave it there for
   # admin review.
+  #
+  # Correction runs two extra LLM calls (gen + re-validate), so we only take
+  # that cost for fixable issues: wrong recorded answer, or weak/missing
+  # explanation. Topic-relevance and completeness issues typically can't be
+  # fixed by rewording — route those straight to the review queue.
   defp maybe_retry_needs_review(
          %Question{validation_status: :needs_review} = q,
          verdict,
          0,
          course_id
        ) do
-    case attempt_correction(q, verdict) do
-      {:ok, corrected_attrs} ->
-        {:ok, corrected} =
-          q
-          |> Question.changeset(Map.put(corrected_attrs, :validation_status, :pending))
-          |> Repo.update()
+    if correction_worthwhile?(verdict) do
+      case attempt_correction(q, verdict) do
+        {:ok, corrected_attrs} ->
+          {:ok, corrected} =
+            q
+            |> Question.changeset(Map.put(corrected_attrs, :validation_status, :pending))
+            |> Repo.update()
 
-        # Re-enqueue with retry_round=1 so we don't loop forever.
-        enqueue([corrected.id], course_id: course_id, retry_round: 1)
+          # Re-enqueue with retry_round=1 so we don't loop forever.
+          enqueue([corrected.id], course_id: course_id, retry_round: 1)
 
-      {:error, reason} ->
-        Logger.info(
-          "[Validation] Correction skipped for #{q.id}: #{inspect(reason)}. Leaving for review."
-        )
+        {:error, reason} ->
+          Logger.info(
+            "[Validation] Correction skipped for #{q.id}: #{inspect(reason)}. Leaving for review."
+          )
 
-        :ok
+          :ok
+      end
+    else
+      Logger.debug(
+        "[Validation] Correction skipped for #{q.id}: not a fixable verdict; leaving for admin review."
+      )
+
+      :ok
     end
   end
 
   defp maybe_retry_needs_review(_q, _v, _r, _c), do: :ok
+
+  # Only attempt correction when the validator has flagged a concrete fix:
+  # a wrong answer with a proposed correction, or a missing/weak explanation
+  # with a suggested replacement. Skipping cosmetic or unfixable flags cuts
+  # the validator's token burn roughly in half without hurting quality.
+  defp correction_worthwhile?(verdict) do
+    answer_fixable?(verdict["answer_correct"]) or
+      explanation_fixable?(verdict["explanation"])
+  end
+
+  defp answer_fixable?(%{"correct" => false, "corrected_answer" => a}) when is_binary(a) and a != "",
+    do: true
+
+  defp answer_fixable?(_), do: false
+
+  defp explanation_fixable?(%{"valid" => false, "suggested_explanation" => e})
+       when is_binary(e) and e != "",
+       do: true
+
+  defp explanation_fixable?(_), do: false
 
   # Build a tight correction prompt from the validator's complaint and ask
   # question_gen to return exactly one corrected question in the same JSON

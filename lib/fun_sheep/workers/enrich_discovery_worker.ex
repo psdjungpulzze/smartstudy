@@ -11,7 +11,14 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   Retries with backoff until OCR is complete (max 60 attempts = ~5 minutes).
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 60
+  use Oban.Worker,
+    queue: :ai,
+    max_attempts: 60,
+    unique: [
+      period: 600,
+      fields: [:worker, :args],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias FunSheep.{Content, Courses, Repo}
   alias FunSheep.Courses.{Chapter, Section}
@@ -144,6 +151,19 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   # pollute the table of contents with unrelated headings.
   @structure_kinds [:textbook, :supplementary_book]
 
+  # How many front pages per textbook material to treat as likely-TOC.
+  # Textbooks usually put the table of contents in the first 5–20 pages.
+  @toc_front_pages 25
+
+  # Characters of text fed to the AI. gpt-4o supports 128k tokens; 80k
+  # characters (~20k tokens) is generous without bloating latency or cost.
+  @prompt_char_budget 80_000
+
+  # Matches lines that look like chapter/unit/module headings. Used to surface
+  # the table of contents from deep inside the book when the front-matter pages
+  # don't contain it.
+  @heading_pattern ~r/^\s*(chapter|unit|module|part)\s+[\dIVXLC]+\b.*$/im
+
   defp collect_ocr_text(course_id) do
     materials = Content.list_materials_by_course(course_id)
 
@@ -153,23 +173,55 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       end)
 
     completed
-    |> Enum.flat_map(fn mat ->
-      Content.list_ocr_pages_by_material(mat.id)
-    end)
-    |> Enum.sort_by(& &1.page_number)
-    |> Enum.map(& &1.extracted_text)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n\n---PAGE BREAK---\n\n")
+    |> Enum.map(&build_material_snippet/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n===== NEXT MATERIAL =====\n\n")
+  end
+
+  # For one textbook material, return:
+  #   1. Full OCR text of the first N pages (TOC usually lives here)
+  #   2. Every line across the full book matching a chapter-heading pattern
+  # Joined together with section markers. This captures the real structure
+  # even on books where the TOC is missing or OCR'd poorly.
+  defp build_material_snippet(material) do
+    pages =
+      Content.list_ocr_pages_by_material(material.id)
+      |> Enum.sort_by(& &1.page_number)
+
+    front =
+      pages
+      |> Enum.take(@toc_front_pages)
+      |> Enum.map(& &1.extracted_text)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n\n---PAGE BREAK---\n\n")
+
+    heading_lines =
+      pages
+      |> Enum.drop(@toc_front_pages)
+      |> Enum.flat_map(fn page ->
+        (page.extracted_text || "")
+        |> String.split("\n")
+        |> Enum.filter(&Regex.match?(@heading_pattern, &1))
+        |> Enum.map(&String.trim/1)
+      end)
+      |> Enum.uniq()
+
+    headings_block =
+      case heading_lines do
+        [] -> ""
+        lines -> "\n\n--- HEADINGS FOUND ELSEWHERE IN BOOK ---\n" <> Enum.join(lines, "\n")
+      end
+
+    (front <> headings_block) |> String.trim()
   end
 
   defp discover_chapters_from_materials(course, ocr_text) do
     subject = course.subject
     grade = course.grade
 
-    # Truncate OCR text to avoid token limits (keep first ~15k chars)
     truncated_text =
-      if String.length(ocr_text) > 15_000 do
-        String.slice(ocr_text, 0, 15_000) <> "\n\n[... text truncated ...]"
+      if String.length(ocr_text) > @prompt_char_budget do
+        String.slice(ocr_text, 0, @prompt_char_budget) <> "\n\n[... text truncated ...]"
       else
         ocr_text
       end
@@ -177,25 +229,36 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     prompt = """
     You are analyzing uploaded textbook pages for a #{subject} (Grade #{grade}) course.
 
-    Below is the OCR-extracted text from the uploaded materials. Use this to identify the
-    actual chapter and section structure of the textbook.
+    Below is text extracted from the uploaded materials: the full first few
+    pages (where the table of contents usually lives), followed by every
+    chapter/unit/module heading found elsewhere in the book.
 
-    IMPORTANT: Extract the REAL chapter/section names from the text. Do NOT make up generic names.
+    Use this to identify the COMPLETE, ACTUAL chapter and section structure
+    of the textbook.
+
+    IMPORTANT:
+    - Extract the REAL chapter/section names from the text. Do NOT make up
+      generic names.
+    - Include EVERY chapter present in the text. Do not stop at 10, 20, or 30.
+      A typical textbook has 20–50 chapters — return all of them.
+    - If the table of contents lists chapters, use that as the primary source.
+    - If the text only contains heading lines, infer the chapter list from
+      those headings.
+    - Preserve the original chapter numbering and capitalization.
+
     Look for:
-    - Table of contents
+    - Table of contents entries
     - Chapter headings (e.g., "Chapter 1:", "Unit 1:", "Module 1:")
-    - Section headings (e.g., "1.1", "Section 1.1", bold/numbered subsections)
+    - Section headings (e.g., "1.1", "Section 1.1", numbered subsections)
     - Part/unit divisions
-
-    If the text contains a table of contents, use that as the primary source.
-    If not, identify chapters from heading patterns in the body text.
 
     === UPLOADED TEXT ===
     #{truncated_text}
     === END TEXT ===
 
-    Return a JSON array of chapters. Each chapter should have a "name" and optionally "sections"
-    (array of section names). Use the EXACT names from the textbook.
+    Return a JSON array of chapters. Each chapter should have a "name" and
+    optionally "sections" (array of section names). Use the EXACT names from
+    the textbook.
 
     Example format:
     [

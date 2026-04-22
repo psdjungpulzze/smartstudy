@@ -40,6 +40,30 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  Returns a map of `%{validation_status => count}` for a course. Powers the
+  UI during the validation phase — lets the user see how many questions are
+  pending, approved, flagged, or rejected without running the full query on
+  the client.
+  """
+  def count_by_validation_status(course_id) do
+    counts =
+      from(q in Question,
+        where: q.course_id == ^course_id,
+        group_by: q.validation_status,
+        select: {q.validation_status, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    %{
+      pending: Map.get(counts, :pending, 0),
+      passed: Map.get(counts, :passed, 0),
+      needs_review: Map.get(counts, :needs_review, 0),
+      failed: Map.get(counts, :failed, 0)
+    }
+  end
+
+  @doc """
   Batched count of questions per course_id. Returns `%{course_id => count}`.
   Used by the admin course table to avoid N+1 queries.
   """

@@ -166,7 +166,12 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
       {"name": "Chapter 2: Cell Structure", "sections": ["2.1 Cell Theory", "2.2 Organelles"]}
     ]
 
-    Return ONLY the JSON array, no other text. Include 8-20 chapters based on what's standard for this subject and grade level.
+    Return ONLY the JSON array, no other text.
+
+    Include every chapter that's standard for this subject, grade level, and
+    (if given) the specific textbook. Do NOT truncate or summarize — a typical
+    textbook has 20–50 chapters, and compressing that into a short list leaves
+    students without coverage of large parts of the course.
     """
   end
 
@@ -237,20 +242,10 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
     if ocr_done do
       Logger.info(
-        "[Discovery] Discovery + OCR both complete, triggering extraction for #{course_id}"
+        "[Discovery] Discovery + OCR both complete, advancing course #{course_id}"
       )
 
-      Courses.update_course(course, %{
-        processing_status: "extracting",
-        processing_step: "Extracting and generating questions...",
-        metadata: Map.merge(course.metadata || %{}, %{"ocr_complete" => true})
-      })
-
-      broadcast(course_id, %{status: "extracting", step: "Extracting and generating questions..."})
-
-      %{course_id: course_id}
-      |> FunSheep.Workers.QuestionExtractionWorker.new()
-      |> Oban.insert()
+      Courses.advance_to_extraction(course_id)
     else
       Logger.info(
         "[Discovery] Waiting for OCR — #{course.ocr_completed_count}/#{course.ocr_total_count}"

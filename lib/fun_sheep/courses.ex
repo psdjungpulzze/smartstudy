@@ -279,6 +279,46 @@ defmodule FunSheep.Courses do
     )
   end
 
+  # Called once discovery + OCR are both finished. If the course has any
+  # OCR-completed textbook material, run EnrichDiscoveryWorker to replace the
+  # generic initial chapters with the real textbook's table of contents.
+  # Otherwise go straight to QuestionExtractionWorker. Either way the next
+  # worker is responsible for moving the course to "extracting".
+  def advance_to_extraction(course_id) do
+    alias FunSheep.Content
+
+    textbook_kinds = [:textbook, :supplementary_book]
+
+    has_textbook_ocr? =
+      Content.list_materials_by_course_and_kind(course_id, textbook_kinds)
+      |> Enum.any?(&(&1.ocr_status == :completed))
+
+    if has_textbook_ocr? do
+      %{course_id: course_id}
+      |> FunSheep.Workers.EnrichDiscoveryWorker.new()
+      |> Oban.insert()
+    else
+      course = get_course!(course_id)
+
+      update_course(course, %{
+        processing_status: "extracting",
+        processing_step: "Extracting and generating questions...",
+        metadata: Map.merge(course.metadata || %{}, %{"ocr_complete" => true})
+      })
+
+      Phoenix.PubSub.broadcast(
+        FunSheep.PubSub,
+        "course:#{course_id}",
+        {:processing_update,
+         %{status: "extracting", step: "Extracting and generating questions..."}}
+      )
+
+      %{course_id: course_id}
+      |> FunSheep.Workers.QuestionExtractionWorker.new()
+      |> Oban.insert()
+    end
+  end
+
   def delete_course(%Course{} = course) do
     Repo.delete(course)
   end
