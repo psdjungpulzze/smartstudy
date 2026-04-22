@@ -126,40 +126,60 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   # that cost for fixable issues: wrong recorded answer, or weak/missing
   # explanation. Topic-relevance and completeness issues typically can't be
   # fixed by rewording — route those straight to the review queue.
+  #
+  # Additionally gated by `:auto_correction_enabled` config (default false
+  # as of April 2026 — the per-flagged-question cost is real and the admin
+  # review queue now surfaces these, so a human can trigger correction
+  # selectively instead of burning 2× tokens on every needs_review row).
   defp maybe_retry_needs_review(
          %Question{validation_status: :needs_review} = q,
          verdict,
          0,
          course_id
        ) do
-    if correction_worthwhile?(verdict) do
-      case attempt_correction(q, verdict) do
-        {:ok, corrected_attrs} ->
-          {:ok, corrected} =
-            q
-            |> Question.changeset(Map.put(corrected_attrs, :validation_status, :pending))
-            |> Repo.update()
+    cond do
+      not auto_correction_enabled?() ->
+        Logger.debug("[Validation] Auto-correction disabled; leaving #{q.id} for admin review.")
 
-          # Re-enqueue with retry_round=1 so we don't loop forever.
-          enqueue([corrected.id], course_id: course_id, retry_round: 1)
+        :ok
 
-        {:error, reason} ->
-          Logger.info(
-            "[Validation] Correction skipped for #{q.id}: #{inspect(reason)}. Leaving for review."
-          )
+      correction_worthwhile?(verdict) ->
+        do_attempt_correction(q, verdict, course_id)
 
-          :ok
-      end
-    else
-      Logger.debug(
-        "[Validation] Correction skipped for #{q.id}: not a fixable verdict; leaving for admin review."
-      )
+      true ->
+        Logger.debug(
+          "[Validation] Correction skipped for #{q.id}: not a fixable verdict; leaving for admin review."
+        )
 
-      :ok
+        :ok
     end
   end
 
   defp maybe_retry_needs_review(_q, _v, _r, _c), do: :ok
+
+  defp do_attempt_correction(q, verdict, course_id) do
+    case attempt_correction(q, verdict) do
+      {:ok, corrected_attrs} ->
+        {:ok, corrected} =
+          q
+          |> Question.changeset(Map.put(corrected_attrs, :validation_status, :pending))
+          |> Repo.update()
+
+        # Re-enqueue with retry_round=1 so we don't loop forever.
+        enqueue([corrected.id], course_id: course_id, retry_round: 1)
+
+      {:error, reason} ->
+        Logger.info(
+          "[Validation] Correction skipped for #{q.id}: #{inspect(reason)}. Leaving for review."
+        )
+
+        :ok
+    end
+  end
+
+  defp auto_correction_enabled? do
+    Application.get_env(:fun_sheep, :validation_auto_correction_enabled, false)
+  end
 
   # Only attempt correction when the validator has flagged a concrete fix:
   # a wrong answer with a proposed correction, or a missing/weak explanation

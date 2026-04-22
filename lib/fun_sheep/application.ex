@@ -15,6 +15,8 @@ defmodule FunSheep.Application do
         {Phoenix.PubSub, name: FunSheep.PubSub},
         # Interactor Auth token cache (caches App JWT for M2M calls)
         FunSheep.Interactor.Auth,
+        # Circuit-breaker + daily-budget guard for LLM calls
+        FunSheep.AIUsage.Guard,
         # Registry for AI tutor sessions (one GenServer per active student+question)
         {Registry, keys: :unique, name: FunSheep.Tutor.SessionRegistry},
         # Cache for in-progress assessment state (survives LiveView reconnects)
