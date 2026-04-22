@@ -186,4 +186,152 @@ defmodule FunSheep.QuestionsTest do
       assert hd(results).content == "Review me"
     end
   end
+
+  describe "list_questions_for_quick_test/3 — deduplication across sessions" do
+    # Regression: clairehyj reported seeing the same questions 4 times in a
+    # row. Root cause was that the quick-test query applied pure randomization
+    # with no memory of what the user had already seen.
+
+    alias FunSheep.ContentFixtures
+
+    defp create_attempt(user_role, question, opts) do
+      is_correct = Keyword.get(opts, :is_correct, true)
+      inserted_at = Keyword.get(opts, :inserted_at, DateTime.utc_now())
+
+      {:ok, attempt} =
+        Questions.create_question_attempt(%{
+          user_role_id: user_role.id,
+          question_id: question.id,
+          is_correct: is_correct,
+          answer_given: "x"
+        })
+
+      # Backdate the attempt if requested — the default DB now() is coarse
+      # and we need deterministic recency ordering in tests.
+      if inserted_at != attempt.inserted_at do
+        attempt
+        |> Ecto.Changeset.change(%{inserted_at: inserted_at})
+        |> FunSheep.Repo.update!()
+      else
+        attempt
+      end
+    end
+
+    test "excludes recently-attempted questions when pool is large enough" do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+
+      # Pool of 6 questions, session limit of 3. First session returns 3; the
+      # second must return the other 3, never repeating.
+      questions = for i <- 1..6, do: create_question(course, %{content: "Q#{i}"})
+
+      first = Questions.list_questions_for_quick_test(user_role.id, course.id, 3)
+      assert length(first) == 3
+
+      # Record attempts on everything we served.
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      Enum.each(first, fn q -> create_attempt(user_role, q, inserted_at: now) end)
+
+      second = Questions.list_questions_for_quick_test(user_role.id, course.id, 3)
+      assert length(second) == 3
+
+      first_ids = MapSet.new(first, & &1.id)
+      second_ids = MapSet.new(second, & &1.id)
+      assert MapSet.disjoint?(first_ids, second_ids)
+
+      all_ids = MapSet.new(questions, & &1.id)
+      assert MapSet.union(first_ids, second_ids) == all_ids
+    end
+
+    test "backfills when the pool is smaller than the session limit" do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+
+      # Only 3 questions available but we ask for 5. User has already
+      # attempted all 3 — dedup would return 0, so backfill must fill.
+      questions = for i <- 1..3, do: create_question(course, %{content: "Q#{i}"})
+      past = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:second)
+      Enum.each(questions, fn q -> create_attempt(user_role, q, inserted_at: past) end)
+
+      result = Questions.list_questions_for_quick_test(user_role.id, course.id, 5)
+
+      # With only 3 distinct questions, we can at most return 3 — but the
+      # user MUST get something (not an empty list).
+      assert length(result) == 3
+      result_ids = MapSet.new(result, & &1.id)
+      expected_ids = MapSet.new(questions, & &1.id)
+      assert result_ids == expected_ids
+    end
+
+    test "treats a user with no attempts the same as before the fix" do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+      for i <- 1..5, do: create_question(course, %{content: "Q#{i}"})
+
+      result = Questions.list_questions_for_quick_test(user_role.id, course.id, 3)
+      assert length(result) == 3
+    end
+  end
+
+  describe "list_weak_questions/4 — deduplication across sessions" do
+    alias FunSheep.ContentFixtures
+
+    defp create_wrong_attempt(user_role, question, inserted_at) do
+      {:ok, attempt} =
+        Questions.create_question_attempt(%{
+          user_role_id: user_role.id,
+          question_id: question.id,
+          is_correct: false,
+          answer_given: "wrong"
+        })
+
+      attempt
+      |> Ecto.Changeset.change(%{inserted_at: inserted_at})
+      |> FunSheep.Repo.update!()
+    end
+
+    test "excludes recently-seen weak questions across consecutive sessions" do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+
+      questions = for i <- 1..6, do: create_question(course, %{content: "Weak #{i}"})
+      # Seed a wrong attempt on each question far enough in the past that
+      # they are all eligible for practice but none are "recently seen" yet.
+      far_past =
+        DateTime.utc_now() |> DateTime.add(-86_400, :second) |> DateTime.truncate(:second)
+
+      Enum.each(questions, fn q -> create_wrong_attempt(user_role, q, far_past) end)
+
+      first = Questions.list_weak_questions(user_role.id, course.id, nil, 3)
+      assert length(first) == 3
+
+      # Simulate the user practicing those 3 just now (any outcome counts as
+      # "recently seen" for dedup purposes — here we keep them wrong).
+      recent = DateTime.utc_now() |> DateTime.truncate(:second)
+      Enum.each(first, fn q -> create_wrong_attempt(user_role, q, recent) end)
+
+      second = Questions.list_weak_questions(user_role.id, course.id, nil, 3)
+      assert length(second) == 3
+
+      first_ids = MapSet.new(first, & &1.id)
+      second_ids = MapSet.new(second, & &1.id)
+      assert MapSet.disjoint?(first_ids, second_ids)
+    end
+
+    test "backfills when all weak questions are recently seen" do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+
+      # Only 2 weak questions; ask for 5. Both are recently seen, but the
+      # user must still get both back (not an empty list).
+      questions = for i <- 1..2, do: create_question(course, %{content: "Weak #{i}"})
+      recent = DateTime.utc_now() |> DateTime.truncate(:second)
+      Enum.each(questions, fn q -> create_wrong_attempt(user_role, q, recent) end)
+
+      result = Questions.list_weak_questions(user_role.id, course.id, nil, 5)
+
+      assert length(result) == 2
+      assert MapSet.new(result, & &1.id) == MapSet.new(questions, & &1.id)
+    end
+  end
 end
