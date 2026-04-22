@@ -3,9 +3,10 @@ defmodule FunSheepWeb.CourseDetailLive do
 
   import FunSheepWeb.ShareButton
   import FunSheepWeb.TextbookBanner
+  import FunSheepWeb.Components.TOCBanners
 
-  alias FunSheep.{Assessments, Content, Courses, Questions}
-  alias FunSheep.Courses.{Chapter, Section}
+  alias FunSheep.{Assessments, Content, Courses, Questions, Repo}
+  alias FunSheep.Courses.{Chapter, DiscoveredTOC, Section, TOCRebase}
 
   @impl true
   def mount(%{"id" => course_id} = params, _session, socket) do
@@ -35,6 +36,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       end
 
     textbook_status = Courses.textbook_status(course_id)
+    toc_state = build_toc_state(course, user_role_id, socket.assigns.current_user)
 
     # Auto-open upload panel when user came in via a "?upload=1" link (from the
     # course listing banner) or when there are pending materials or when there
@@ -70,8 +72,65 @@ defmodule FunSheepWeb.CourseDetailLive do
        uploaded_materials: materials,
        upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0},
        upload_default_kind: :textbook,
-       textbook_status: textbook_status
+       textbook_status: textbook_status,
+       # Community-approval TOC state (pending proposal, post-rebase
+       # acknowledgement, claim-ownership). Pre-computed in one helper
+       # so the render stays readable.
+       toc_state: toc_state
      )}
+  end
+
+  # Assembles everything the TOC banners need. Keeping this as one struct
+  # of derived facts lets the LiveView re-run it cheaply after an
+  # approve/reject/ack/adopt event without rebuilding other assigns.
+  defp build_toc_state(course, user_role_id, current_user) do
+    pending_toc =
+      if course.pending_toc_id, do: Repo.get(DiscoveredTOC, course.pending_toc_id), else: nil
+
+    pending_diff = if pending_toc, do: compute_diff(pending_toc, course.id), else: nil
+
+    can_approve? =
+      not is_nil(pending_toc) and
+        TOCRebase.can_approve?(current_user, course, pending_toc)
+
+    needs_ack? = TOCRebase.needs_acknowledgement?(user_role_id, course)
+    applied_toc = if needs_ack?, do: TOCRebase.current(course.id), else: nil
+    can_adopt? = TOCRebase.adoptable_by?(user_role_id, course)
+
+    uploader_name =
+      cond do
+        is_nil(pending_toc) ->
+          nil
+
+        is_nil(course.pending_toc_proposed_by_id) ->
+          "another user"
+
+        true ->
+          case Repo.get(FunSheep.Accounts.UserRole, course.pending_toc_proposed_by_id) do
+            nil -> "another user"
+            ur -> Map.get(ur, :display_name) || ur.email || "another user"
+          end
+      end
+
+    %{
+      pending_toc: pending_toc,
+      pending_diff: pending_diff,
+      can_approve: can_approve?,
+      needs_ack: needs_ack?,
+      applied_toc: applied_toc,
+      can_adopt: can_adopt?,
+      uploader_name: uploader_name
+    }
+  end
+
+  # Uses the same `plan_rebase/3` the actual apply path uses, so the
+  # counts we show in the banner match what the user will see afterwards.
+  defp compute_diff(%DiscoveredTOC{} = pending_toc, course_id) do
+    current_chapters =
+      Courses.list_chapters_by_course(course_id)
+      |> Enum.map(fn ch -> %{id: ch.id, name: ch.name, sections: []} end)
+
+    TOCRebase.plan_rebase(pending_toc.chapters, current_chapters, MapSet.new())
   end
 
   defp load_test_schedules(nil, _course_id), do: {[], []}
@@ -172,6 +231,107 @@ defmodule FunSheepWeb.CourseDetailLive do
   end
 
   # ── Processing events ──────────────────────────────────────────────────
+
+  def handle_event("toc_approve", _params, socket) do
+    state = socket.assigns.toc_state
+    course = socket.assigns.course
+
+    cond do
+      not state.can_approve ->
+        {:noreply, put_flash(socket, :error, "You're not authorized to apply this update.")}
+
+      is_nil(state.pending_toc) ->
+        {:noreply, put_flash(socket, :error, "No pending update to apply.")}
+
+      true ->
+        case TOCRebase.approve!(course, state.pending_toc) do
+          {:ok, stats} ->
+            # Eagerly generate questions for brand-new chapters so the
+            # user isn't walking into empty topics.
+            Enum.each(stats.new_chapter_ids, fn chapter_id ->
+              FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course.id,
+                chapter_id: chapter_id,
+                count: 10,
+                mode: "from_material"
+              )
+            end)
+
+            msg =
+              "Applied textbook update — #{stats.kept} chapters preserved, #{stats.created} new."
+
+            {:noreply,
+             socket
+             |> put_flash(:info, msg)
+             |> refresh_toc_state()}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Couldn't apply update: #{inspect(reason)}")}
+        end
+    end
+  end
+
+  def handle_event("toc_reject", _params, socket) do
+    state = socket.assigns.toc_state
+    course = socket.assigns.course
+
+    cond do
+      not state.can_approve ->
+        {:noreply, put_flash(socket, :error, "You're not authorized to dismiss this update.")}
+
+      true ->
+        case TOCRebase.reject!(course) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Dismissed. Current textbook structure kept.")
+             |> refresh_toc_state()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Couldn't dismiss update.")}
+        end
+    end
+  end
+
+  def handle_event("toc_ack", _params, socket) do
+    user_role_id = socket.assigns.current_user && socket.assigns.current_user["user_role_id"]
+    course = socket.assigns.course
+    applied = socket.assigns.toc_state.applied_toc
+
+    if user_role_id && applied do
+      TOCRebase.acknowledge!(user_role_id, course.id, applied.id)
+    end
+
+    {:noreply, refresh_toc_state(socket)}
+  end
+
+  def handle_event("toc_adopt", _params, socket) do
+    user_role_id = socket.assigns.current_user && socket.assigns.current_user["user_role_id"]
+    course = socket.assigns.course
+
+    cond do
+      is_nil(user_role_id) ->
+        {:noreply, put_flash(socket, :error, "Please log in to adopt this course.")}
+
+      not TOCRebase.adoptable_by?(user_role_id, course) ->
+        {:noreply, put_flash(socket, :error, "This course isn't adoptable right now.")}
+
+      true ->
+        case TOCRebase.adopt!(course, user_role_id) do
+          {:ok, updated} ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               "You've adopted this course. You can approve textbook updates now."
+             )
+             |> assign(:course, Courses.get_course_with_chapters!(updated.id))
+             |> refresh_toc_state()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Couldn't adopt this course right now.")}
+        end
+    end
+  end
 
   def handle_event("cancel_processing", _params, socket) do
     Courses.cancel_processing(socket.assigns.course.id)
@@ -638,6 +798,26 @@ defmodule FunSheepWeb.CourseDetailLive do
           <.icon name="hero-arrow-left" class="w-4 h-4 mr-1" /> Back to Courses
         </.link>
       </div>
+
+      <%!-- Community-approval TOC banners (one at a time, in priority order):
+           1. Pending proposal for users who can approve
+           2. Post-rebase acknowledgement for users who haven't seen it
+           3. Claim-ownership for inactive-creator courses --%>
+      <.pending_proposal_banner
+        :if={@toc_state.can_approve and @toc_state.pending_toc}
+        course={@course}
+        pending_toc={@toc_state.pending_toc}
+        diff={@toc_state.pending_diff}
+        uploader_name={@toc_state.uploader_name}
+      />
+
+      <.applied_update_banner
+        :if={@toc_state.needs_ack and @toc_state.applied_toc}
+        toc={@toc_state.applied_toc}
+        stats={%{kept: length(@course.chapters), created: 0, orphaned: 0, deleted: 0}}
+      />
+
+      <.claim_ownership_banner :if={@toc_state.can_adopt} course={@course} />
 
       <%!-- Course Header --%>
       <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
@@ -2123,4 +2303,13 @@ defmodule FunSheepWeb.CourseDetailLive do
   end
 
   defp parse_material_kind(value) when is_atom(value), do: value
+
+  defp refresh_toc_state(socket) do
+    user_role_id = socket.assigns.current_user && socket.assigns.current_user["user_role_id"]
+    reloaded = Courses.get_course_with_chapters!(socket.assigns.course.id)
+
+    socket
+    |> assign(:course, reloaded)
+    |> assign(:toc_state, build_toc_state(reloaded, user_role_id, socket.assigns.current_user))
+  end
 end
