@@ -100,23 +100,23 @@ defmodule FunSheepWeb.ParentSettingsLive do
               "A short Sunday recap of this week's activity, readiness change, and one conversation opener."
             )}
           </p>
-          <label class="flex items-center gap-2 mt-2 text-sm">
+          <label class="flex items-center gap-2 mt-2 text-sm text-gray-800">
             <input
               type="radio"
               name="digest_frequency"
               value="weekly"
               checked={@user_role.digest_frequency == :weekly}
             />
-            {gettext("Send weekly")}
+            <span class="text-gray-800">{gettext("Send weekly")}</span>
           </label>
-          <label class="flex items-center gap-2 mt-1 text-sm">
+          <label class="flex items-center gap-2 mt-1 text-sm text-gray-800">
             <input
               type="radio"
               name="digest_frequency"
               value="off"
               checked={@user_role.digest_frequency == :off}
             />
-            {gettext("Off")}
+            <span class="text-gray-800">{gettext("Off")}</span>
           </label>
         </div>
 
@@ -127,33 +127,33 @@ defmodule FunSheepWeb.ParentSettingsLive do
           <p class="text-xs text-gray-500 mt-0.5">
             {gettext("Opt-in. We never turn surveillance alerts on for you by default.")}
           </p>
-          <label class="flex items-start gap-2 mt-3 text-sm">
+          <label class="flex items-start gap-2 mt-3 text-sm text-gray-800">
             <input
               type="checkbox"
               name="alerts_skipped_days"
               checked={@user_role.alerts_skipped_days}
             />
-            <span>
+            <span class="text-gray-800">
               {gettext("3+ skipped study days (with an active daily-minutes goal)")}
             </span>
           </label>
-          <label class="flex items-start gap-2 mt-2 text-sm">
+          <label class="flex items-start gap-2 mt-2 text-sm text-gray-800">
             <input
               type="checkbox"
               name="alerts_readiness_drop"
               checked={@user_role.alerts_readiness_drop}
             />
-            <span>
+            <span class="text-gray-800">
               {gettext("Readiness drop > 10% week-over-week within 21 days of a test")}
             </span>
           </label>
-          <label class="flex items-start gap-2 mt-2 text-sm">
+          <label class="flex items-start gap-2 mt-2 text-sm text-gray-800">
             <input
               type="checkbox"
               name="alerts_goal_achieved"
               checked={@user_role.alerts_goal_achieved}
             />
-            <span>
+            <span class="text-gray-800">
               {gettext("Goal achieved (celebratory — on by default)")}
             </span>
           </label>

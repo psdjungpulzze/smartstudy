@@ -47,14 +47,14 @@ defmodule FunSheepWeb.StudentLive.Shared.StudyHeatmap do
         </p>
       </div>
 
-      <div :if={!@empty?} class="overflow-x-auto">
-        <table class="text-xs border-separate border-spacing-1">
+      <div :if={!@empty?} class="-mx-2 overflow-x-auto pb-2">
+        <table class="text-xs border-separate border-spacing-1 mx-auto">
           <thead>
             <tr>
               <th class="text-left text-[10px] font-bold text-gray-400 pr-2"></th>
               <th
                 :for={day <- @days}
-                class="text-[10px] font-bold text-gray-400 px-1 text-center w-10"
+                class="text-[10px] font-bold text-gray-400 px-1 text-center w-8 sm:w-10"
               >
                 {short_day_label(day)}
               </th>
@@ -92,7 +92,7 @@ defmodule FunSheepWeb.StudentLive.Shared.StudyHeatmap do
     ~H"""
     <div
       class={[
-        "w-10 h-8 rounded-md flex items-center justify-center",
+        "w-8 h-8 sm:w-10 rounded-md flex items-center justify-center",
         cell_bg_class(@intensity)
       ]}
       title={"#{@minutes} min"}
