@@ -875,7 +875,10 @@ defmodule FunSheepWeb.DashboardLive do
               {skill.correct}/{skill.total} correct Â· {skill_status_label(skill.status)}
             </p>
           </div>
-          <span class={["text-xs font-bold px-3 py-1 rounded-full shrink-0", skill_badge_cls(skill.status)]}>
+          <span class={[
+            "text-xs font-bold px-3 py-1 rounded-full shrink-0",
+            skill_badge_cls(skill.status)
+          ]}>
             {skill_status_short(skill.status)}
           </span>
         </div>
@@ -937,5 +940,4 @@ defmodule FunSheepWeb.DashboardLive do
   defp skill_badge_cls(:probing), do: "bg-[#FFCC00] text-gray-900"
   defp skill_badge_cls(:mastered), do: "bg-[#4CD964] text-white"
   defp skill_badge_cls(_), do: "bg-gray-100 text-gray-600"
-
 end
