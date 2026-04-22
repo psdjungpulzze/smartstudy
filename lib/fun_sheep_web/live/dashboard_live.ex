@@ -310,7 +310,7 @@ defmodule FunSheepWeb.DashboardLive do
         desc: "Focus on what needs work",
         icon: "🎯",
         done: has_readiness && readiness >= 40,
-        path: ~p"/courses/#{course_id}/quick-test"
+        path: ~p"/courses/#{course_id}/practice"
       },
       %{
         label: "Study Guide",
