@@ -22,9 +22,7 @@ defmodule FunSheepWeb.AdminCoursesLiveTest do
 
   defp create_course(attrs \\ %{}) do
     {:ok, c} =
-      Courses.create_course(
-        Map.merge(%{name: "Bio 101", subject: "Biology", grade: "10"}, attrs)
-      )
+      Courses.create_course(Map.merge(%{name: "Bio 101", subject: "Biology", grade: "10"}, attrs))
 
     c
   end

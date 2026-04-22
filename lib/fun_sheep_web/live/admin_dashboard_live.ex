@@ -68,205 +68,205 @@ defmodule FunSheepWeb.AdminDashboardLive do
           </p>
         </div>
 
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <.stat_card label="Total users" value={@total_users} />
-        <.stat_card
-          label="Students"
-          value={Map.get(@users_by_role, :student, 0)}
-          accent="text-[#4CD964]"
-        />
-        <.stat_card
-          label="Teachers"
-          value={Map.get(@users_by_role, :teacher, 0)}
-          accent="text-[#007AFF]"
-        />
-        <.stat_card
-          label="Admins"
-          value={Map.get(@users_by_role, :admin, 0)}
-          accent="text-[#1C1C1E]"
-        />
-      </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <.stat_card label="Total users" value={@total_users} />
+          <.stat_card
+            label="Students"
+            value={Map.get(@users_by_role, :student, 0)}
+            accent="text-[#4CD964]"
+          />
+          <.stat_card
+            label="Teachers"
+            value={Map.get(@users_by_role, :teacher, 0)}
+            accent="text-[#007AFF]"
+          />
+          <.stat_card
+            label="Admins"
+            value={Map.get(@users_by_role, :admin, 0)}
+            accent="text-[#1C1C1E]"
+          />
+        </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <.link
-          navigate={~p"/admin/courses"}
-          class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold text-[#1C1C1E]">Courses</h3>
-            <.icon name="hero-book-open" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class="text-3xl font-bold text-[#1C1C1E]">{@course_total}</p>
-          <p class="text-sm text-[#8E8E93] mt-1">All courses</p>
-        </.link>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <.link
+            navigate={~p"/admin/courses"}
+            class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-[#1C1C1E]">Courses</h3>
+              <.icon name="hero-book-open" class="w-5 h-5 text-[#8E8E93]" />
+            </div>
+            <p class="text-3xl font-bold text-[#1C1C1E]">{@course_total}</p>
+            <p class="text-sm text-[#8E8E93] mt-1">All courses</p>
+          </.link>
 
-        <.link
-          navigate={~p"/admin/questions/review"}
-          class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold text-[#1C1C1E]">Question review</h3>
-            <.icon name="hero-clipboard-document-check" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class={[
-            "text-3xl font-bold",
-            if(@review_count > 0, do: "text-[#FFCC00]", else: "text-[#4CD964]")
-          ]}>
-            {@review_count}
-          </p>
-          <p class="text-sm text-[#8E8E93] mt-1">Flagged for review</p>
-        </.link>
+          <.link
+            navigate={~p"/admin/questions/review"}
+            class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-[#1C1C1E]">Question review</h3>
+              <.icon name="hero-clipboard-document-check" class="w-5 h-5 text-[#8E8E93]" />
+            </div>
+            <p class={[
+              "text-3xl font-bold",
+              if(@review_count > 0, do: "text-[#FFCC00]", else: "text-[#4CD964]")
+            ]}>
+              {@review_count}
+            </p>
+            <p class="text-sm text-[#8E8E93] mt-1">Flagged for review</p>
+          </.link>
 
-        <.link
-          navigate={~p"/admin/users"}
-          class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold text-[#1C1C1E]">Manage users</h3>
-            <.icon name="hero-users" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class="text-sm text-[#8E8E93]">
-            Search, suspend, promote, demote, impersonate across every account.
-          </p>
-        </.link>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <.link
-          navigate={~p"/admin/usage/ai"}
-          class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-[#1C1C1E]">AI usage (24h)</h3>
-            <.icon name="hero-chart-bar" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class="text-2xl font-bold text-[#1C1C1E] mt-2">
-            {Pricing.format_cost_cents(@ai_summary_24h.est_cost_cents)}
-          </p>
-          <p class="text-xs text-[#8E8E93] mt-1">
-            {@ai_summary_24h.calls} calls · tokens, cost, latency breakdown
-          </p>
-        </.link>
-
-        <.link
-          navigate={~p"/admin/settings/mfa"}
-          class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-[#1C1C1E]">Two-factor auth</h3>
-            <.icon name="hero-bolt" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class="text-xs text-[#8E8E93] mt-1">
-            Enroll or review your TOTP setup.
-          </p>
-        </.link>
-
-        <.link
-          navigate="/admin/jobs"
-          class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-[#1C1C1E]">Background jobs</h3>
-            <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class="text-xs text-[#8E8E93] mt-1">
-            Oban Web: queues, jobs, retries.
-          </p>
-        </.link>
-
-        <.link
-          navigate={~p"/admin/jobs/failures"}
-          class={[
-            "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
-            @failures_24h > 0 && "ring-2 ring-[#FF3B30]/30"
-          ]}
-        >
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-[#1C1C1E]">Job failures</h3>
-            <span
-              :if={@failures_24h > 0}
-              class="inline-block px-2 py-0.5 rounded-full bg-[#FFE5E3] text-[#FF3B30] text-xs font-medium"
-            >
-              {@failures_24h}
-            </span>
-            <.icon
-              :if={@failures_24h == 0}
-              name="hero-check-circle"
-              class="w-5 h-5 text-[#4CD964]"
-            />
-          </div>
-          <p class="text-xs text-[#8E8E93] mt-1">
-            FunSheep-domain drill-down for retryable / discarded jobs.
-          </p>
-        </.link>
-
-        <.link
-          navigate={~p"/admin/audit-log"}
-          class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
-        >
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-[#1C1C1E]">Audit log</h3>
-            <.icon name="hero-document-text" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
-          <p class="text-xs text-[#8E8E93] mt-1">
-            Full history of privileged actions.
-          </p>
-        </.link>
-
-        <.link
-          navigate={~p"/admin/flags"}
-          class={[
-            "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
-            @flags_disabled > 0 && "ring-2 ring-[#FFCC00]/40"
-          ]}
-        >
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-[#1C1C1E]">Feature flags</h3>
-            <span
-              :if={@flags_disabled > 0}
-              class="inline-block px-2 py-0.5 rounded-full bg-[#FFF4CC] text-[#1C1C1E] text-xs font-medium"
-            >
-              {@flags_disabled} off
-            </span>
-            <.icon
-              :if={@flags_disabled == 0}
-              name="hero-bolt"
-              class="w-5 h-5 text-[#4CD964]"
-            />
-          </div>
-          <p class="text-xs text-[#8E8E93] mt-1">
-            Kill switches for background work and signup.
-          </p>
-        </.link>
-      </div>
-
-      <div class="bg-white rounded-2xl shadow-md p-6">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold text-[#1C1C1E]">Recent admin activity</h2>
-          <.link navigate={~p"/admin/audit-log"} class="text-sm text-[#4CD964] font-medium">
-            View all →
+          <.link
+            navigate={~p"/admin/users"}
+            class="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-[#1C1C1E]">Manage users</h3>
+              <.icon name="hero-users" class="w-5 h-5 text-[#8E8E93]" />
+            </div>
+            <p class="text-sm text-[#8E8E93]">
+              Search, suspend, promote, demote, impersonate across every account.
+            </p>
           </.link>
         </div>
 
-        <ul :if={@recent_audit != []} class="divide-y divide-[#F5F5F7]">
-          <li :for={log <- @recent_audit} class="py-3 flex items-center justify-between gap-4">
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-medium text-[#1C1C1E] truncate">{log.actor_label}</div>
-              <div class="text-xs text-[#8E8E93]">
-                <code>{log.action}</code>
-                <span :if={log.target_type}>· {log.target_type}</span>
-              </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <.link
+            navigate={~p"/admin/usage/ai"}
+            class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-[#1C1C1E]">AI usage (24h)</h3>
+              <.icon name="hero-chart-bar" class="w-5 h-5 text-[#8E8E93]" />
             </div>
-            <div class="text-xs text-[#8E8E93] whitespace-nowrap">
-              {Calendar.strftime(log.inserted_at, "%Y-%m-%d %H:%M")}
-            </div>
-          </li>
-        </ul>
+            <p class="text-2xl font-bold text-[#1C1C1E] mt-2">
+              {Pricing.format_cost_cents(@ai_summary_24h.est_cost_cents)}
+            </p>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              {@ai_summary_24h.calls} calls · tokens, cost, latency breakdown
+            </p>
+          </.link>
 
-        <p :if={@recent_audit == []} class="text-sm text-[#8E8E93] text-center py-6">
-          No admin actions recorded yet.
-        </p>
-      </div>
+          <.link
+            navigate={~p"/admin/settings/mfa"}
+            class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-[#1C1C1E]">Two-factor auth</h3>
+              <.icon name="hero-bolt" class="w-5 h-5 text-[#8E8E93]" />
+            </div>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Enroll or review your TOTP setup.
+            </p>
+          </.link>
+
+          <.link
+            navigate="/admin/jobs"
+            class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-[#1C1C1E]">Background jobs</h3>
+              <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-[#8E8E93]" />
+            </div>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Oban Web: queues, jobs, retries.
+            </p>
+          </.link>
+
+          <.link
+            navigate={~p"/admin/jobs/failures"}
+            class={[
+              "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
+              @failures_24h > 0 && "ring-2 ring-[#FF3B30]/30"
+            ]}
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-[#1C1C1E]">Job failures</h3>
+              <span
+                :if={@failures_24h > 0}
+                class="inline-block px-2 py-0.5 rounded-full bg-[#FFE5E3] text-[#FF3B30] text-xs font-medium"
+              >
+                {@failures_24h}
+              </span>
+              <.icon
+                :if={@failures_24h == 0}
+                name="hero-check-circle"
+                class="w-5 h-5 text-[#4CD964]"
+              />
+            </div>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              FunSheep-domain drill-down for retryable / discarded jobs.
+            </p>
+          </.link>
+
+          <.link
+            navigate={~p"/admin/audit-log"}
+            class="bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block"
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-[#1C1C1E]">Audit log</h3>
+              <.icon name="hero-document-text" class="w-5 h-5 text-[#8E8E93]" />
+            </div>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Full history of privileged actions.
+            </p>
+          </.link>
+
+          <.link
+            navigate={~p"/admin/flags"}
+            class={[
+              "bg-white rounded-2xl shadow-md p-5 hover:shadow-lg transition-shadow block",
+              @flags_disabled > 0 && "ring-2 ring-[#FFCC00]/40"
+            ]}
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-[#1C1C1E]">Feature flags</h3>
+              <span
+                :if={@flags_disabled > 0}
+                class="inline-block px-2 py-0.5 rounded-full bg-[#FFF4CC] text-[#1C1C1E] text-xs font-medium"
+              >
+                {@flags_disabled} off
+              </span>
+              <.icon
+                :if={@flags_disabled == 0}
+                name="hero-bolt"
+                class="w-5 h-5 text-[#4CD964]"
+              />
+            </div>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Kill switches for background work and signup.
+            </p>
+          </.link>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-md p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-semibold text-[#1C1C1E]">Recent admin activity</h2>
+            <.link navigate={~p"/admin/audit-log"} class="text-sm text-[#4CD964] font-medium">
+              View all →
+            </.link>
+          </div>
+
+          <ul :if={@recent_audit != []} class="divide-y divide-[#F5F5F7]">
+            <li :for={log <- @recent_audit} class="py-3 flex items-center justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium text-[#1C1C1E] truncate">{log.actor_label}</div>
+                <div class="text-xs text-[#8E8E93]">
+                  <code>{log.action}</code>
+                  <span :if={log.target_type}>· {log.target_type}</span>
+                </div>
+              </div>
+              <div class="text-xs text-[#8E8E93] whitespace-nowrap">
+                {Calendar.strftime(log.inserted_at, "%Y-%m-%d %H:%M")}
+              </div>
+            </li>
+          </ul>
+
+          <p :if={@recent_audit == []} class="text-sm text-[#8E8E93] text-center py-6">
+            No admin actions recorded yet.
+          </p>
+        </div>
       </div>
     </div>
     """

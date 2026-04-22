@@ -27,6 +27,15 @@ defmodule FunSheep.Billing.Subscription do
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
 
+    # §3.1, §7.2 — payer-vs-beneficiary split.
+    # `user_role` is the beneficiary (always the student).
+    # `paid_by_user_role` is the payer (parent, or student self-purchasing).
+    belongs_to :paid_by_user_role, FunSheep.Accounts.UserRole
+
+    # §7.2 — links a paid sub back to the practice_request that produced it
+    # (Flow A). Null for self-purchase or parent upfront purchase (Flow B).
+    belongs_to :origin_practice_request, FunSheep.PracticeRequests.Request
+
     timestamps(type: :utc_datetime)
   end
 
@@ -41,13 +50,17 @@ defmodule FunSheep.Billing.Subscription do
       :current_period_start,
       :current_period_end,
       :cancelled_at,
-      :metadata
+      :metadata,
+      :paid_by_user_role_id,
+      :origin_practice_request_id
     ])
     |> validate_required([:user_role_id, :plan, :status])
     |> validate_inclusion(:plan, @plans)
     |> validate_inclusion(:status, @statuses)
     |> unique_constraint(:user_role_id)
     |> foreign_key_constraint(:user_role_id)
+    |> foreign_key_constraint(:paid_by_user_role_id)
+    |> foreign_key_constraint(:origin_practice_request_id)
   end
 
   def paid?(%__MODULE__{plan: plan, status: "active"}) when plan in ["monthly", "annual"],
