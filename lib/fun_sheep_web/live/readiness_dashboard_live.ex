@@ -105,6 +105,15 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     {:noreply, put_flash(socket, :info, message)}
   end
 
+  def handle_event("delete_schedule", _params, socket) do
+    {:ok, _} = Assessments.delete_test_schedule(socket.assigns.schedule)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Test schedule deleted.")
+     |> push_navigate(to: ~p"/courses/#{socket.assigns.course_id}/tests")}
+  end
+
   defp readiness_share_message(score) when score >= 80, do: "Almost there!"
   defp readiness_share_message(score) when score >= 60, do: "Getting closer every day."
   defp readiness_share_message(score) when score >= 40, do: "Making progress!"
@@ -137,7 +146,25 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
       <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div class="min-w-0">
-            <h1 class="text-2xl sm:text-3xl font-bold text-[#1C1C1E] truncate">{@schedule.name}</h1>
+            <div class="flex items-center gap-2">
+              <h1 class="text-2xl sm:text-3xl font-bold text-[#1C1C1E] truncate">{@schedule.name}</h1>
+              <.link
+                navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/edit"}
+                class="text-[#8E8E93] hover:text-[#1C1C1E] p-2 rounded-lg transition-colors touch-target"
+                title="Edit test"
+              >
+                <.icon name="hero-pencil" class="w-5 h-5" />
+              </.link>
+              <button
+                type="button"
+                phx-click="delete_schedule"
+                data-confirm="Delete this test schedule? This cannot be undone."
+                class="text-[#FF3B30] hover:text-red-700 p-2 rounded-lg transition-colors touch-target"
+                title="Delete test"
+              >
+                <.icon name="hero-trash" class="w-5 h-5" />
+              </button>
+            </div>
             <p class="text-sm text-[#8E8E93] mt-1">
               {if @schedule.course, do: @schedule.course.name, else: "Unknown Course"}
             </p>
