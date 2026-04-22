@@ -80,7 +80,7 @@ CONNECTION_NAME=$(gcloud sql instances describe "$DB_INSTANCE" --format='value(c
 # Mirror the env vars and secrets the api service uses so the release task
 # connects to the same DB, GCS bucket, and Interactor environment.
 ENV_VARS="DB_SOCKET_DIR=/cloudsql/$CONNECTION_NAME,GCS_BUCKET=$GCS_BUCKET,INTERACTOR_URL=$INTERACTOR_URL,INTERACTOR_ORG_NAME=$INTERACTOR_ORG_NAME,INTERACTOR_CLIENT_ID=$INTERACTOR_CLIENT_ID,PHX_HOST=$PHX_HOST"
-SECRETS="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest"
+SECRETS="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest"
 
 if gcloud run jobs describe "$JOB_NAME" --region="$GCP_REGION" >/dev/null 2>&1; then
   info "Updating existing job $JOB_NAME to latest image..."

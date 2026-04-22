@@ -237,14 +237,28 @@ defmodule FunSheep.Ingest.Sources.NcesCcd do
   end
 
   # Returns %{"CA" => state_uuid, "NY" => ..., ...} — keyed by 2-letter abbr.
-  # States are looked up by `iso_code` like "US-CA"; fall back to FIPS-based name match.
+  # States are looked up by `iso_code` like "US-CA". Raises if the index is
+  # empty (which means priv/repo/seeds_geo_iso.exs hasn't run) — better to
+  # fail the ingest than silently insert 130K schools with NULL state_id and
+  # break every autocomplete downstream.
   defp us_state_index do
-    from(s in State,
-      where: like(s.iso_code, "US-%"),
-      select: {fragment("substring(?, 4)", s.iso_code), s.id}
-    )
-    |> Repo.all()
-    |> Map.new()
+    index =
+      from(s in State,
+        where: like(s.iso_code, "US-%"),
+        select: {fragment("substring(?, 4)", s.iso_code), s.id}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    if map_size(index) == 0 do
+      raise """
+      NCES CCD ingest aborted: states table has no rows with iso_code matching 'US-%'.
+      Run priv/repo/seeds_geo_iso.exs (or FunSheep.Release.ingest_us_schools/0, which
+      calls it) before ingesting — otherwise every school is saved with state_id = NULL.
+      """
+    end
+
+    index
   end
 
   defp district_index_by_leaid do

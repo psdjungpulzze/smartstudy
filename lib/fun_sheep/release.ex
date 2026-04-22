@@ -54,6 +54,11 @@ defmodule FunSheep.Release do
 
     Logger.info("release.ingest_us_schools starting")
 
+    # Ingestion maps NCES STABR → state via `states.iso_code LIKE 'US-%'`. If
+    # the iso-code seed hasn't run, every school lands with state_id = NULL and
+    # autocomplete filters return 0 rows.
+    ensure_geo_iso_seeded()
+
     with {:ok, lea_stats} <- FunSheep.Ingest.run("nces_ccd", "lea"),
          {:ok, school_stats} <- FunSheep.Ingest.run("nces_ccd", "school") do
       Logger.info("release.ingest_us_schools completed",
@@ -66,6 +71,20 @@ defmodule FunSheep.Release do
       {:error, reason} = err ->
         Logger.error("release.ingest_us_schools failed", reason: inspect(reason))
         err
+    end
+  end
+
+  defp ensure_geo_iso_seeded do
+    path = Application.app_dir(@app, "priv/repo/seeds_geo_iso.exs")
+
+    if File.exists?(path) do
+      Logger.info("release.ingest_us_schools seeding ISO state codes", path: path)
+      Code.eval_file(path)
+    else
+      Logger.warning(
+        "release.ingest_us_schools expected ISO seed file missing — state_id mapping may fail",
+        path: path
+      )
     end
   end
 
