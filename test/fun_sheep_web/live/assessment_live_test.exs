@@ -149,10 +149,12 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       user_role: ur,
       course: course
     } do
-      # Schedule scoped to a chapter that has no questions — must NOT render
-      # a zero-of-zero "Assessment Complete" summary (which would advance the
-      # study path past Assessment despite no answers). Instead, show an
-      # honest "Questions not ready yet" state per the no-fake-content rule.
+      # Regression: a schedule whose chapters have no questions must NOT
+      # render a zero-of-zero "Assessment Complete" summary (which would
+      # advance the study path past Assessment despite no answers). The
+      # readiness gate now blocks mount entirely; the specific copy depends
+      # on course status (here: default "pending" → "Course is still
+      # processing").
       {:ok, empty_chapter} =
         FunSheep.Courses.create_chapter(%{
           name: "Empty Chapter",
@@ -174,9 +176,234 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       {:ok, _view, html} =
         live(conn, ~p"/courses/#{empty_schedule.course_id}/tests/#{empty_schedule.id}/assess")
 
-      assert html =~ "Questions not ready yet"
+      assert html =~ "Course is still processing"
       refute html =~ "Assessment Complete"
+      refute html =~ "Question 1"
       assert html =~ ~s|href="/courses/#{course.id}"|
+    end
+  end
+
+  describe "readiness gating" do
+    defp ready_course(user_role) do
+      course = ContentFixtures.create_course(%{created_by_id: user_role.id})
+
+      {:ok, course} =
+        course
+        |> FunSheep.Courses.Course.changeset(%{processing_status: "ready"})
+        |> FunSheep.Repo.update()
+
+      course
+    end
+
+    defp passed_classified(course, chapter, section, idx) do
+      {:ok, _} =
+        FunSheep.Questions.create_question(%{
+          validation_status: :passed,
+          content: "R#{idx}",
+          answer: "A",
+          question_type: :multiple_choice,
+          difficulty: :medium,
+          options: %{"A" => "a", "B" => "b"},
+          course_id: course.id,
+          chapter_id: chapter.id,
+          section_id: section.id,
+          classification_status: :ai_classified
+        })
+    end
+
+    test "shows scope_empty screen with Generate Questions Now button when course is ready but scope has none",
+         %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+      course = ready_course(user_role)
+
+      {:ok, empty_chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Empty", position: 1, course_id: course.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Readiness Test",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [empty_chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      assert html =~ "No questions for the selected chapters"
+      assert html =~ "Generate Questions Now"
+      refute html =~ "Question 1"
+    end
+
+    test "shows scope_partial screen when some chapters ready and some missing", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+      course = ready_course(user_role)
+
+      {:ok, ready_chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Ready", position: 1, course_id: course.id})
+
+      {:ok, section} =
+        FunSheep.Courses.create_section(%{name: "S", position: 1, chapter_id: ready_chapter.id})
+
+      for i <- 1..3, do: passed_classified(course, ready_chapter, section, i)
+
+      {:ok, missing_chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Missing", position: 2, course_id: course.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Partial",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [ready_chapter.id, missing_chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      assert html =~ "Some chapters still need questions"
+      assert html =~ "Generate Questions Now"
+    end
+
+    test "shows course_failed screen when course processing failed", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course(%{created_by_id: user_role.id})
+
+      {:ok, course} =
+        course
+        |> FunSheep.Courses.Course.changeset(%{
+          processing_status: "failed",
+          processing_step: "AI service unavailable"
+        })
+        |> FunSheep.Repo.update()
+
+      {:ok, chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Failed",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      assert html =~ "Course processing failed"
+      assert html =~ "AI service unavailable"
+      refute html =~ "Generate Questions Now"
+    end
+
+    test "course_not_ready screen humanizes the processing stage", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course(%{created_by_id: user_role.id})
+
+      {:ok, course} =
+        course
+        |> FunSheep.Courses.Course.changeset(%{processing_status: "validating"})
+        |> FunSheep.Repo.update()
+
+      {:ok, chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Stage",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, _view, html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      assert html =~ "Course is still processing"
+      assert html =~ "validating questions"
+    end
+
+    test "retry_generation event enqueues gen for missing chapters without crashing", %{
+      conn: conn
+    } do
+      user_role = ContentFixtures.create_user_role()
+      course = ready_course(user_role)
+
+      {:ok, empty_chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Empty", position: 1, course_id: course.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Retry",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [empty_chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      # Button is rendered and clickable; event handler must not crash
+      assert render_click(view, "retry_generation") =~ "No questions for the selected chapters"
+    end
+
+    test "PubSub {:questions_ready, ...} transitions the view when scope becomes ready", %{
+      conn: conn
+    } do
+      user_role = ContentFixtures.create_user_role()
+      course = ready_course(user_role)
+
+      {:ok, chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+
+      {:ok, section} =
+        FunSheep.Courses.create_section(%{name: "S", position: 1, chapter_id: chapter.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Live Transition",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, view, html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      assert html =~ "No questions for the selected chapters"
+
+      # Simulate the generation pipeline finishing: create passed+classified
+      # questions for the chapter, then broadcast the signal workers emit.
+      for i <- 1..3, do: passed_classified(course, chapter, section, i)
+
+      Phoenix.PubSub.broadcast(
+        FunSheep.PubSub,
+        "course:#{course.id}",
+        {:questions_ready, %{chapter_ids: [chapter.id]}}
+      )
+
+      # Wait for the LiveView process to handle the broadcast
+      html = render(view)
+      assert html =~ "Question 1"
+      refute html =~ "No questions for the selected chapters"
     end
   end
 end

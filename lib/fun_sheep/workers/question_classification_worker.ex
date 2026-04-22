@@ -202,15 +202,31 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   defp mark_classified(question, section_id, confidence, meta) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    question
-    |> Question.changeset(%{
-      section_id: section_id,
-      classification_status: :ai_classified,
-      classification_confidence: confidence,
-      classified_at: now,
-      metadata: Map.merge(question.metadata || %{}, %{"classification" => stringify(meta)})
-    })
-    |> Repo.update()
+    result =
+      question
+      |> Question.changeset(%{
+        section_id: section_id,
+        classification_status: :ai_classified,
+        classification_confidence: confidence,
+        classified_at: now,
+        metadata: Map.merge(question.metadata || %{}, %{"classification" => stringify(meta)})
+      })
+      |> Repo.update()
+
+    # A question becomes student-visible (and adaptive-eligible) only after
+    # both validation has passed AND classification has tagged it. Since
+    # classification typically runs last, this is where we let subscribers —
+    # notably `AssessmentLive` — know the scope may have just tipped into
+    # `:ready`. No-op when the update itself failed.
+    with {:ok, updated} <- result do
+      Phoenix.PubSub.broadcast(
+        FunSheep.PubSub,
+        "course:#{updated.course_id}",
+        {:questions_ready, %{chapter_ids: [updated.chapter_id]}}
+      )
+
+      result
+    end
   end
 
   defp mark_low_confidence(question, confidence, meta) do

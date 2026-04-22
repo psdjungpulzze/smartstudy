@@ -146,6 +146,25 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
           handle_verdict(q, verdict, retry_round, course_id)
         end)
 
+        # Broadcast so `AssessmentLive` (and anyone else gating on scope
+        # readiness) can re-run its check without polling. Validation and
+        # classification run on independent queues; whichever finishes last
+        # is the one that makes a question visible to students — so we
+        # broadcast from both sides.
+        chapter_ids =
+          questions
+          |> Enum.map(& &1.chapter_id)
+          |> Enum.reject(&is_nil/1)
+          |> Enum.uniq()
+
+        if course_id && chapter_ids != [] do
+          Phoenix.PubSub.broadcast(
+            FunSheep.PubSub,
+            "course:#{course_id}",
+            {:questions_ready, %{chapter_ids: chapter_ids}}
+          )
+        end
+
         :ok
 
       {:error, reason} ->

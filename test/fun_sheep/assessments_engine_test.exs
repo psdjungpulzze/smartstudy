@@ -118,7 +118,12 @@ defmodule FunSheep.Assessments.EngineTest do
       assert question.content != nil
     end
 
-    test "returns :complete when no topics exist" do
+    test "returns :no_questions_available when no topics exist" do
+      # Fails honestly per commit 2935c33: an empty scope must NOT produce a
+      # zero-of-zero "complete" state — that would mark the assessment done
+      # and advance the study path despite no work having been done. Instead
+      # the engine exits with `:no_questions_available` so the UI can show
+      # the readiness-block screen (covered by AssessmentLiveTest).
       user_role = ContentFixtures.create_user_role()
       course = ContentFixtures.create_course()
 
@@ -132,8 +137,8 @@ defmodule FunSheep.Assessments.EngineTest do
         })
 
       state = Engine.start_assessment(schedule)
-      assert {:complete, completed_state} = Engine.next_question(state)
-      assert completed_state.status == :complete
+      assert {:no_questions_available, final_state} = Engine.next_question(state)
+      assert final_state.status == :no_questions_available
     end
   end
 
