@@ -466,9 +466,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     end
   end
 
-  defp check_answer(question, answer) do
-    String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-  end
+  defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
   defp record_attempt(socket, question, answer_given, is_correct) do
     user_role_id = socket.assigns.current_user["user_role_id"]
