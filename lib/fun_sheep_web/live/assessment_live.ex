@@ -110,6 +110,8 @@ defmodule FunSheepWeb.AssessmentLive do
     initial_phase =
       case readiness do
         :ready -> if(question_sources != [], do: :setup, else: :testing)
+        # Some chapters ready — start immediately with available questions
+        {:scope_partial, _} -> if(question_sources != [], do: :setup, else: :testing)
         _ -> :readiness_block
       end
 
@@ -309,11 +311,13 @@ defmodule FunSheepWeb.AssessmentLive do
   defp maybe_transition_on_readiness(%{assigns: %{phase: :readiness_block}} = socket) do
     readiness = Assessments.scope_readiness(socket.assigns.schedule)
 
+    can_start = readiness == :ready or match?({:scope_partial, _}, readiness)
+
     cond do
-      readiness == :ready and socket.assigns.question_sources != [] ->
+      can_start and socket.assigns.question_sources != [] ->
         assign(socket, readiness: readiness, phase: :setup)
 
-      readiness == :ready ->
+      can_start ->
         state = Engine.start_assessment(socket.assigns.schedule)
 
         socket
