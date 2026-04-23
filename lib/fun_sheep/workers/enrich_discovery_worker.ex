@@ -319,6 +319,16 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   # Enough to catch a chapter title + first few paragraphs on a single page.
   @sampled_per_material_chars 2_000
 
+  # Hard cap on the number of materials we fetch OCR pages for during
+  # sampling. Each sample fires one DB query that loads the material's
+  # OcrPage row(s) including the full extracted_text; above this count the
+  # worker pool's 10 connection slots can queue past the 15s checkout
+  # timeout (observed repeatedly on AP Bio: 500+ `{:other, id}` groups from
+  # filenames that don't match the Chapter-N regex). The cap preserves all
+  # filename-chapter-labeled groups first (they sort before unlabeled), so
+  # the AI still sees one representative page per known chapter.
+  @max_sampled_materials 40
+
   defp completed_structure_materials(course_id) do
     Content.list_materials_by_course(course_id)
     |> Enum.filter(fn m ->
@@ -391,6 +401,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     ordered_groups =
       grouped
       |> Enum.sort_by(fn {key, _} -> chapter_sort_key(key) end)
+      |> Enum.take(@max_sampled_materials)
 
     group_count = length(ordered_groups)
 
