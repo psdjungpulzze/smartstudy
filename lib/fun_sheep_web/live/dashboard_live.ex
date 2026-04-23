@@ -336,36 +336,22 @@ defmodule FunSheepWeb.DashboardLive do
         path: ~p"/courses/#{course_id}/tests/#{schedule_id}/assess"
       },
       %{
-        label: "Practice Weak Topics",
-        desc: "Focus on what needs work",
+        label: "Practice",
+        desc: "Drill weak skills until you're ready",
         icon: "🎯",
-        done: assessment_done? && aggregate >= 40,
+        done: assessment_done? && aggregate >= 80,
         path: ~p"/courses/#{course_id}/practice"
       },
       %{
-        label: "Study Guide",
-        desc: "Review key concepts",
-        icon: "📖",
-        done: assessment_done? && aggregate >= 60,
-        path: ~p"/courses/#{course_id}/study-guides"
-      },
-      %{
         label: "Format Practice",
-        desc: "Match the real test format",
+        desc: "Simulate the real test",
         icon: "📝",
-        done: assessment_done? && aggregate >= 80,
+        done: all_mastered?,
         path:
           if(has_format,
             do: ~p"/courses/#{course_id}/tests/#{schedule_id}/format-test",
             else: ~p"/courses/#{course_id}/tests/#{schedule_id}/format"
           )
-      },
-      %{
-        label: "Master Every Skill",
-        desc: "Keep drilling weak skills until you're 100% ready",
-        icon: "🏁",
-        done: all_mastered?,
-        path: ~p"/courses/#{course_id}/practice"
       }
     ]
 

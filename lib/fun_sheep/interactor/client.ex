@@ -13,6 +13,13 @@ defmodule FunSheep.Interactor.Client do
 
   @max_retries 3
 
+  # All Interactor API calls share a dedicated Finch pool (FunSheep.Finch,
+  # configured in FunSheep.Application). Req's default Finch pool is
+  # size=50/count=1 and exhausts under classification-worker burst (250
+  # concurrent LLM calls), causing silent question drops. See application.ex
+  # for the post-mortem.
+  @finch_opts [finch: FunSheep.Finch]
+
   @doc """
   Performs a GET request to the given Interactor API path.
 
@@ -83,7 +90,7 @@ defmodule FunSheep.Interactor.Client do
   # --- Request execution with rate limit retry ---
 
   defp do_get(path, token, attempt) do
-    case Req.get(base_url() <> path, headers: auth_headers(token)) do
+    case Req.get(base_url() <> path, [headers: auth_headers(token)] ++ @finch_opts) do
       {:ok, %{status: 200, body: body}} ->
         {:ok, body}
 
@@ -99,7 +106,10 @@ defmodule FunSheep.Interactor.Client do
   end
 
   defp do_post(path, body, token, attempt) do
-    case Req.post(base_url() <> path, json: body, headers: auth_headers(token)) do
+    case Req.post(
+           base_url() <> path,
+           [json: body, headers: auth_headers(token)] ++ @finch_opts
+         ) do
       {:ok, %{status: status, body: resp_body}} when status in [200, 201] ->
         {:ok, resp_body}
 
@@ -115,7 +125,10 @@ defmodule FunSheep.Interactor.Client do
   end
 
   defp do_put(path, body, token, attempt) do
-    case Req.put(base_url() <> path, json: body, headers: auth_headers(token)) do
+    case Req.put(
+           base_url() <> path,
+           [json: body, headers: auth_headers(token)] ++ @finch_opts
+         ) do
       {:ok, %{status: status, body: resp_body}} when status in [200, 201] ->
         {:ok, resp_body}
 
@@ -131,7 +144,7 @@ defmodule FunSheep.Interactor.Client do
   end
 
   defp do_delete(path, token, attempt) do
-    case Req.delete(base_url() <> path, headers: auth_headers(token)) do
+    case Req.delete(base_url() <> path, [headers: auth_headers(token)] ++ @finch_opts) do
       {:ok, %{status: status, body: resp_body}} when status in [200, 202, 204] ->
         {:ok, resp_body}
 

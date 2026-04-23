@@ -373,6 +373,7 @@ For detailed specifications:
 - **Material UI Enforcement**: `docs/i/ui-design/material-ui/enforcement.md`
 - **Component Patterns**: `docs/i/ui-design/` (buttons, forms, navigation, etc.)
 - **Validation Checklist**: `docs/i/ui-design/material-ui/checklist.md`
+- **Long-Running Operations (MANDATORY)**: `.claude/rules/i/progress-feedback.md` and `docs/i/ui-design/progress-feedback.md` — never leave users hanging on > 2s operations; show real-time, contextual, bounded progress
 
 ---
 

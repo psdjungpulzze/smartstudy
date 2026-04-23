@@ -374,9 +374,7 @@ defmodule FunSheepWeb.PracticeLive do
     :ok
   end
 
-  defp check_answer(question, answer) do
-    String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-  end
+  defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
   defp has_figures?(%{figures: figures}) when is_list(figures), do: figures != []
   defp has_figures?(_), do: false

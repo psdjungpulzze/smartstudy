@@ -77,6 +77,13 @@ defmodule FunSheep.Assessments.ScopeReadiness do
       :ready ->
         :ready
 
+      # Some chapters have enough questions — let the student start now with
+      # what's available. Gating on processing_status here would block every
+      # user on the course whenever a new textbook upload triggers re-enrichment,
+      # even though the chapters they're being tested on are already fully ready.
+      {:scope_partial, _} = partial ->
+        partial
+
       scope_block ->
         course = Courses.get_course!(schedule.course_id)
 

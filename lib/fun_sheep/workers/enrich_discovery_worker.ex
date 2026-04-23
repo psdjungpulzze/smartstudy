@@ -319,12 +319,30 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   # Enough to catch a chapter title + first few paragraphs on a single page.
   @sampled_per_material_chars 2_000
 
+  # Hard cap on the number of materials we fetch OCR pages for during
+  # sampling. Each sample fires one DB query that loads the material's
+  # OcrPage row(s) including the full extracted_text; above this count the
+  # worker pool's 10 connection slots can queue past the 15s checkout
+  # timeout (observed repeatedly on AP Bio: 500+ `{:other, id}` groups from
+  # filenames that don't match the Chapter-N regex). The cap preserves all
+  # filename-chapter-labeled groups first (they sort before unlabeled), so
+  # the AI still sees one representative page per known chapter.
+  @max_sampled_materials 40
+
   defp completed_structure_materials(course_id) do
     Content.list_materials_by_course(course_id)
     |> Enum.filter(fn m ->
       m.ocr_status == :completed and m.material_kind in @structure_kinds
     end)
   end
+
+  # Materials-count threshold above which we skip the per-material page-count
+  # probe and go straight to sampling. A real textbook is usually 1–a few
+  # large PDFs; hundreds of files almost always means one-JPG-per-page
+  # uploads, and probing each would fire N DB queries (saturating the
+  # connection pool on large courses — observed as
+  # DBConnection.ConnectionError 15000ms checkout timeout).
+  @sampling_materials_threshold 50
 
   # Adaptive snippet builder. The old path assumed each material was a full
   # textbook (20+ pages) and that the TOC lived in the front matter. That
@@ -333,16 +351,23 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   # 26+" logic collapses to "show page 1, scan nothing" and the global 80K
   # truncation keeps only the first ~20 of hundreds of pages. Pick the
   # strategy from the shape of the upload.
+  defp collect_ocr_text([]), do: ""
+
+  defp collect_ocr_text(materials)
+       when length(materials) >= @sampling_materials_threshold do
+    sampled_snippet(materials)
+  end
+
   defp collect_ocr_text(materials) do
     max_pages =
       materials
       |> Enum.map(&page_count/1)
       |> Enum.max(fn -> 0 end)
 
-    cond do
-      materials == [] -> ""
-      max_pages >= 10 -> per_material_snippet(materials)
-      true -> sampled_snippet(materials)
+    if max_pages >= 10 do
+      per_material_snippet(materials)
+    else
+      sampled_snippet(materials)
     end
   end
 
@@ -376,6 +401,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     ordered_groups =
       grouped
       |> Enum.sort_by(fn {key, _} -> chapter_sort_key(key) end)
+      |> Enum.take(@max_sampled_materials)
 
     group_count = length(ordered_groups)
 
