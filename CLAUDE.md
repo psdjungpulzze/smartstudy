@@ -240,6 +240,19 @@ Copy from `.claude/assets/i/brand/` to `priv/static/brand/`:
 | Colors | `docs/i/ui-design/colors.md` |
 | Modals & Dropdowns | `docs/i/ui-design/modals-dropdowns.md` |
 | Panels & Toolbar | `docs/i/ui-design/panels-toolbar.md` |
+| **Long-running operations (progress UI)** | `.claude/rules/i/progress-feedback.md` + `docs/i/ui-design/progress-feedback.md` |
+
+### ⚠️ Long-Running Operations — MANDATORY Progress Feedback
+
+**Any UI action that takes longer than ~2 seconds MUST show real-time, contextual, informative progress — not a lone spinner or "usually takes about a minute" toast.**
+
+Every such operation must satisfy all four:
+1. **Real-time** — updates via PubSub/Channels/SSE, not polling or timers
+2. **Contextual** — name the current phase and item in domain terms (e.g. "Generating questions for Chapter 3: Cell Division")
+3. **Informative** — show real counts (e.g. "12 of 20 questions") and surface intermediate results as they arrive
+4. **Bounded** — the user can always answer "how much longer?" (step N of M, count of total, or honest time window)
+
+Both success and failure must render as distinct, actionable terminal states — never silently dismiss the indicator. See `.claude/rules/i/progress-feedback.md` for the full rule and `docs/i/ui-design/progress-feedback.md` for the `FunSheep.Progress.Event` shape, Oban + LiveView patterns, and checklists.
 
 ---
 
