@@ -32,8 +32,7 @@ defmodule FunSheep.Questions.Question do
     # `is_generated`, `source_url`, `source_material_id`, and
     # `metadata["source"]`. Those remain for one release while callers
     # migrate, then drop in a follow-up.
-    field :source_type, Ecto.Enum,
-      values: [:web_scraped, :user_uploaded, :ai_generated, :curated]
+    field :source_type, Ecto.Enum, values: [:web_scraped, :user_uploaded, :ai_generated, :curated]
 
     # For :ai_generated rows, the grounding strategy the worker used.
     # Typical values: "from_curriculum", "from_material", "from_web_context".

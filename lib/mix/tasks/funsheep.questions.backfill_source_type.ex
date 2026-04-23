@@ -248,5 +248,4 @@ defmodule Mix.Tasks.Funsheep.Questions.BackfillSourceType do
      WHERE q.id IN (SELECT id FROM batch)
      """, [batch_size, Ecto.UUID.dump!(course_id)]}
   end
-
 end
