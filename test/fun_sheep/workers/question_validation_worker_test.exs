@@ -1,7 +1,7 @@
 defmodule FunSheep.Workers.QuestionValidationWorkerTest do
   @moduledoc """
-  Covers the partial-success / total-failure boundary introduced after the
-  2026-04-22 stuck-pending incident.
+  Covers the partial-success / total-failure boundary and immediate retry
+  introduced after the 2026-04-22 stuck-pending incident.
 
   Before the fix: any sub-batch error raised from the worker, losing progress
   on every prior sub-batch in the same job and eventually discarding it after
@@ -14,11 +14,18 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
   `:failed` after `@max_validation_attempts` attempts so the course can
   finalize honestly instead of staying "still processing" forever.
 
+  Later fix: on partial failure the failed sub-batch's retry-eligible questions
+  are immediately re-enqueued (60s scheduled delay) instead of waiting for the
+  sweeper's 30-minute stuck threshold. In Oban inline test mode, the scheduled
+  job executes synchronously during the same `perform/1` call.
+
   Contract:
     * Sub-batch success → apply verdicts, job stays `:ok`.
     * Mixed success/failure → commit verdicts for the successful sub-batches,
-      leave failed ones at `:pending` for the sweeper, return `:ok`.
-    * Every sub-batch failed → raise, Oban retries the whole job.
+      immediately re-enqueue retry-eligible questions from failed sub-batches,
+      return `:ok`.
+    * Every sub-batch failed → raise, Oban retries the whole job (no immediate
+      re-enqueue since the job itself will be retried by Oban).
     * Same questions parse-fail @max_validation_attempts times → mark them
       `:failed` with a `validator_unparseable_response` report.
   """
@@ -94,18 +101,24 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
   end
 
   describe "partial failure" do
-    test "commits successful sub-batch and leaves failed sub-batch as :pending without raising" do
+    test "commits successful sub-batch, immediately retries failed sub-batch, returns :ok" do
       {course, questions} = make_questions(10)
       [first_batch, second_batch] = Enum.chunk_every(questions, 5)
 
       expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
 
       AgentsMock
+      # First batch: success
       |> expect(:chat, fn _name, _prompt, _opts ->
         {:ok, approve_verdict_json(first_batch)}
       end)
+      # Second batch: failure (triggers immediate re-enqueue)
       |> expect(:chat, fn _name, _prompt, _opts ->
         {:error, :timeout}
+      end)
+      # Immediate retry of second batch (Oban inline executes it synchronously)
+      |> expect(:chat, fn _name, _prompt, _opts ->
+        {:ok, approve_verdict_json(second_batch)}
       end)
 
       assert :ok =
@@ -116,18 +129,17 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
                  }
                })
 
+      # First batch: validated immediately
       for q <- first_batch do
         assert Repo.get!(Question, q.id).validation_status == :passed
       end
 
+      # Second batch: retry succeeded — also :passed
       for q <- second_batch do
-        # :timeout is not :parse_failed-only — but the bump still happens; one
-        # attempt is not enough to reach the cap, so they stay :pending.
-        reloaded = Repo.get!(Question, q.id)
-        assert reloaded.validation_status == :pending
-        assert reloaded.validation_attempts == 1
+        assert Repo.get!(Question, q.id).validation_status == :passed
       end
     end
+
   end
 
   describe "total failure" do

@@ -82,18 +82,41 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       batches = Enum.chunk_every(questions, @batch_size)
 
       # Track sub-batch outcomes so we can distinguish "partial success"
-      # (at least one batch worked — commit progress, sweeper picks up the
-      # rest later) from "total failure" (every batch failed — raise so Oban
-      # retries the whole job).
+      # (at least one batch worked — commit progress, stuck ones re-enqueued
+      # immediately) from "total failure" (every batch failed — raise so Oban
+      # retries the whole job with backoff).
       outcomes = Enum.map(batches, &validate_and_apply(&1, retry_round, course_id))
 
       maybe_finalize_course(course_id)
 
-      if Enum.all?(outcomes, &(&1 == :error)) do
+      if Enum.all?(outcomes, &match?({:error, _}, &1)) do
         # Every sub-batch failed. Interactor is likely down or misconfigured —
-        # raising lets Oban retry the whole job with backoff.
+        # raising lets Oban retry the whole job with backoff. No point
+        # re-enqueueing individual questions here since the whole job will retry.
         raise "validation job failed: all #{length(batches)} sub-batches errored"
       else
+        # Partial failure: some batches succeeded. Re-enqueue questions from
+        # failed sub-batches immediately (60s delay) rather than waiting for
+        # the sweeper's 30-minute stuck threshold.
+        retry_ids =
+          Enum.flat_map(outcomes, fn
+            {:error, ids} -> ids
+            {:ok} -> []
+          end)
+
+        if retry_ids != [] and course_id do
+          scheduled_at = DateTime.add(DateTime.utc_now(), 60, :second)
+          # Ignore enqueue errors: the sweeper is still a backstop, and in
+          # Oban inline test mode the retry job runs synchronously here — if
+          # that job itself raises we don't want it to bubble up and mask the
+          # partial-success result of the original job.
+          try do
+            enqueue(retry_ids, course_id: course_id, scheduled_at: scheduled_at)
+          rescue
+            _ -> :ok
+          end
+        end
+
         :ok
       end
     end
@@ -116,6 +139,8 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   def enqueue([], _opts), do: :ok
 
   def enqueue(question_ids, opts) when is_list(question_ids) do
+    job_opts = Keyword.take(opts, [:scheduled_at])
+
     question_ids
     |> Enum.sort()
     |> Enum.chunk_every(@outer_chunk_size)
@@ -125,7 +150,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
         |> put_if(:course_id, opts[:course_id])
         |> put_if(:retry_round, opts[:retry_round])
 
-      case args |> __MODULE__.new() |> Oban.insert() do
+      case args |> __MODULE__.new(job_opts) |> Oban.insert() do
         {:ok, _job} -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}
       end
@@ -145,11 +170,10 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     |> Repo.all()
   end
 
-  # Returns `:ok` if the sub-batch produced verdicts (even if some verdicts
-  # were :needs_review or :failed). Returns `:error` if the validator itself
-  # errored. The caller uses these to decide whether the whole job should
-  # raise (all sub-batches failed) or commit (at least one succeeded — stuck
-  # ones get picked up by `StuckValidationSweeperWorker`).
+  # Returns `{:ok}` if the sub-batch produced verdicts (even if some verdicts
+  # were :needs_review or :failed). Returns `{:error, retry_ids}` if the
+  # validator itself errored — `retry_ids` are question ids that can be
+  # re-attempted; the caller decides whether to re-enqueue them or raise.
   defp validate_and_apply(questions, retry_round, course_id) do
     case Validation.validate_batch(questions) do
       {:ok, verdicts} ->
@@ -177,7 +201,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
           )
         end
 
-        :ok
+        {:ok}
 
       {:error, reason} ->
         # Bump every question's attempt counter and mark any that have
@@ -185,7 +209,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
         # sweeper would keep re-enqueueing them forever and the course would
         # never finalize (the 2026-04-22 d44628ca zombie loop: 912 parse
         # failures in 24h on the same questions).
-        {give_up_ids, retry_count} = bump_attempts_and_collect_giveups(questions)
+        {give_up_ids, retry_ids} = bump_attempts_and_collect_giveups(questions)
 
         if give_up_ids != [] do
           mark_failed_unparseable(give_up_ids, reason)
@@ -198,16 +222,16 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
         Logger.error(
           "[Validation] Batch failed for course #{course_id}: #{inspect(reason)}. " <>
-            "#{retry_count} questions left :pending for sweeper retry; " <>
+            "#{length(retry_ids)} questions eligible for retry; " <>
             "#{length(give_up_ids)} marked :failed (cap reached)."
         )
 
-        :error
+        {:error, retry_ids}
     end
   end
 
   # Atomically bump validation_attempts and split into "still retryable"
-  # and "give up now" buckets. Returns {give_up_ids, retry_count}.
+  # and "give up now" buckets. Returns {give_up_ids, retry_ids}.
   # The `select` reads the post-update row (PG RETURNING), so
   # `q.validation_attempts` is already the incremented value.
   defp bump_attempts_and_collect_giveups(questions) do
@@ -223,7 +247,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     {give_up, retry} =
       Enum.split_with(updated, fn %{attempts: a} -> a >= @max_validation_attempts end)
 
-    {Enum.map(give_up, & &1.id), length(retry)}
+    {Enum.map(give_up, & &1.id), Enum.map(retry, & &1.id)}
   end
 
   defp mark_failed_unparseable(ids, reason) do
