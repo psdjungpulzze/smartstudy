@@ -10,6 +10,8 @@ defmodule FunSheepWeb.AssessmentLive do
   alias FunSheep.Progress.Event, as: ProgressEvent
   alias FunSheep.Questions.FreeformGrader
 
+  require Logger
+
   @xp_per_correct FpEconomy.xp_per_correct()
 
   @impl true
@@ -498,13 +500,15 @@ defmodule FunSheepWeb.AssessmentLive do
 
       {:complete, new_state} ->
         summary = Engine.summary(new_state)
+        previous_aggregate = snapshot_and_fetch_previous(socket)
         finalize_session(socket)
 
         assign(socket,
           engine_state: new_state,
           current_question: nil,
           assessment_complete: true,
-          summary: summary
+          summary: summary,
+          previous_aggregate_score: previous_aggregate
         )
 
       {:no_questions_available, new_state} ->
@@ -519,13 +523,42 @@ defmodule FunSheepWeb.AssessmentLive do
       _other ->
         # generate_needed or other - treat as complete for now
         summary = Engine.summary(state)
+        previous_aggregate = snapshot_and_fetch_previous(socket)
         finalize_session(socket)
 
         assign(socket,
           current_question: nil,
           assessment_complete: true,
-          summary: summary
+          summary: summary,
+          previous_aggregate_score: previous_aggregate
         )
+    end
+  end
+
+  # Teacher-review fix #6: snapshot the current readiness and return the
+  # prior score (if any) so the summary screen can show the retake delta.
+  # Readiness history was only written from the dashboard before — moving
+  # the write here means every assessment completion persists a data point,
+  # which is what makes "again-and-again until 100% ready" measurable.
+  defp snapshot_and_fetch_previous(socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    schedule_id = socket.assigns.schedule.id
+
+    if user_role_id && schedule_id do
+      # History BEFORE we snapshot the current run — the most recent entry
+      # is the score from the prior completion (or nil on first run).
+      previous =
+        case Assessments.list_readiness_history(user_role_id, schedule_id, 1) do
+          [%{aggregate_score: score} | _] when is_float(score) or is_integer(score) -> score
+          _ -> nil
+        end
+
+      case Assessments.calculate_and_save_readiness(user_role_id, schedule_id) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Logger.warning("readiness snapshot failed: #{inspect(reason)}")
+      end
+
+      previous
     end
   end
 
@@ -664,7 +697,11 @@ defmodule FunSheepWeb.AssessmentLive do
           <% @no_questions_available -> %>
             <.render_no_questions schedule={@schedule} course_id={@course_id} />
           <% @assessment_complete -> %>
-            <.render_summary summary={@summary} schedule={@schedule} />
+            <.render_summary
+              summary={@summary}
+              schedule={@schedule}
+              previous_aggregate_score={assigns[:previous_aggregate_score]}
+            />
           <% true -> %>
             <.render_question
               question={@current_question}
@@ -1213,8 +1250,15 @@ defmodule FunSheepWeb.AssessmentLive do
 
   attr :summary, :map, required: true
   attr :schedule, :map, required: true
+  attr :previous_aggregate_score, :any, default: nil
 
   defp render_summary(assigns) do
+    assigns =
+      assign(assigns,
+        has_needs_work: Enum.any?(assigns.summary.topic_results, &(not &1.mastered)),
+        score_delta: score_delta(assigns.summary, assigns.previous_aggregate_score)
+      )
+
     ~H"""
     <div class="bg-white rounded-2xl shadow-md p-8">
       <div class="text-center mb-8">
@@ -1229,6 +1273,28 @@ defmodule FunSheepWeb.AssessmentLive do
           <p class="text-sm text-[#8E8E93] mt-1">
             {@summary.total_correct} of {@summary.total_questions} correct
           </p>
+          <%!-- Teacher-review fix #6: readiness delta vs last retake. This
+               is the progress signal that makes the "again-and-again until
+               100% ready" loop feel like progress. --%>
+          <div :if={@score_delta} class="mt-3 inline-flex items-center gap-1.5 text-xs font-medium">
+            <span class={[
+              "px-3 py-1 rounded-full",
+              cond do
+                @score_delta.points > 0 -> "bg-[#E8F8EB] text-[#4CD964]"
+                @score_delta.points < 0 -> "bg-red-100 text-[#FF3B30]"
+                true -> "bg-[#F5F5F7] text-[#8E8E93]"
+              end
+            ]}>
+              <%= cond do %>
+                <% @score_delta.points > 0 -> %>
+                  ▲ +{@score_delta.points}pts since last attempt ({@score_delta.previous}% → {@summary.overall_score}%)
+                <% @score_delta.points < 0 -> %>
+                  ▼ {@score_delta.points}pts since last attempt ({@score_delta.previous}% → {@summary.overall_score}%)
+                <% true -> %>
+                  Same as last attempt ({@summary.overall_score}%)
+              <% end %>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1257,23 +1323,51 @@ defmodule FunSheepWeb.AssessmentLive do
         </div>
       </div>
 
-      <div class="flex justify-center gap-4">
+      <%!-- Teacher-review fix #1: primary CTA now routes to weak-topic
+           practice scoped to this schedule. "Retake" demoted to secondary
+           — the mastery loop says practice weak topics FIRST, then retake. --%>
+      <div class="flex flex-col items-center gap-3">
         <.link
-          navigate={~p"/courses/#{@schedule.course_id}/tests"}
-          class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
+          :if={@has_needs_work}
+          navigate={~p"/courses/#{@schedule.course_id}/practice?schedule_id=#{@schedule.id}"}
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors inline-flex items-center gap-2"
         >
-          Back to Tests
+          <.icon name="hero-academic-cap" class="w-5 h-5" />
+          Practice Weak Topics
         </.link>
-        <.link
-          navigate={~p"/courses/#{@schedule.course_id}/tests/#{@schedule.id}/assess"}
-          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
-        >
-          Retake Assessment
-        </.link>
+        <div class="flex justify-center gap-3">
+          <.link
+            navigate={~p"/courses/#{@schedule.course_id}/tests"}
+            class="px-5 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors text-sm"
+          >
+            Back to Tests
+          </.link>
+          <.link
+            navigate={~p"/courses/#{@schedule.course_id}/tests/#{@schedule.id}/assess"}
+            class="px-5 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors text-sm"
+          >
+            Retake Assessment
+          </.link>
+        </div>
       </div>
     </div>
     """
   end
+
+  # Compute the delta between the current summary score and the most recent
+  # prior attempt. Returns nil when there is no prior (first attempt) so the
+  # badge can be omitted entirely — "First attempt" would be noise.
+  defp score_delta(_summary, nil), do: nil
+
+  defp score_delta(%{overall_score: current}, previous)
+       when is_number(current) and is_number(previous) do
+    %{
+      previous: round(previous),
+      points: round(current - previous)
+    }
+  end
+
+  defp score_delta(_, _), do: nil
 
   attr :stats, :map, required: true
 
