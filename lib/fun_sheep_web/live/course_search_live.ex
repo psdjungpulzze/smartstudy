@@ -8,7 +8,6 @@ defmodule FunSheepWeb.CourseSearchLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    schools = Geo.list_schools()
     user_role_id = socket.assigns.current_user["id"]
 
     {my_courses, nearby_courses, user_grade, user_school_id, tests_by_course} =
@@ -31,7 +30,7 @@ defmodule FunSheepWeb.CourseSearchLive do
         search_subject: "",
         search_grade: "",
         search_school_id: "",
-        schools: schools,
+        schools: [],
         my_courses: my_courses,
         nearby_courses: nearby_courses,
         textbook_statuses: textbook_statuses,
@@ -104,7 +103,17 @@ defmodule FunSheepWeb.CourseSearchLive do
   end
 
   def handle_event("toggle_search", _params, socket) do
-    {:noreply, assign(socket, show_search: !socket.assigns.show_search)}
+    socket =
+      if socket.assigns.show_search do
+        assign(socket, show_search: false)
+      else
+        schools =
+          if socket.assigns.schools == [], do: Geo.list_schools(), else: socket.assigns.schools
+
+        assign(socket, show_search: true, schools: schools)
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("clear_search", _params, socket) do
