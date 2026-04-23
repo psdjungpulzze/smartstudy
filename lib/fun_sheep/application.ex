@@ -23,6 +23,25 @@ defmodule FunSheep.Application do
         FunSheep.Assessments.StateCache,
         # ETS-backed cache for cohort percentile bands (spec §6.3)
         FunSheep.Assessments.CohortCache,
+        # Dedicated Finch HTTP pool for Interactor API calls (LLM round-trips
+        # via FunSheep.Interactor.Client). Req's default Finch pool is
+        # size=50 / count=1, which gets exhausted under worker load
+        # (5 concurrent classification jobs × 50 LLM calls each = 250
+        # simultaneous requests → "Finch was unable to provide a connection
+        # within the timeout due to excess queuing for connections" — the
+        # 2026-04-22 incident where 80% of classification jobs silently
+        # dropped their questions back to :uncategorized). 200 × 4 gives
+        # 800 effective slots, with `count=4` spreading load across multiple
+        # connection pools to avoid head-of-line blocking on a single pool.
+        # Override per-environment via FINCH_AI_POOL_SIZE / FINCH_AI_POOL_COUNT.
+        {Finch,
+         name: FunSheep.Finch,
+         pools: %{
+           default: [
+             size: String.to_integer(System.get_env("FINCH_AI_POOL_SIZE") || "200"),
+             count: String.to_integer(System.get_env("FINCH_AI_POOL_COUNT") || "4")
+           ]
+         }},
         # Background job processing
         {Oban, Application.fetch_env!(:fun_sheep, Oban)}
       ] ++
