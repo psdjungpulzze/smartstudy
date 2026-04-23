@@ -176,10 +176,14 @@ defmodule FunSheepWeb.AssessmentLive do
   def handle_event("start_assessment", _params, socket) do
     schedule = socket.assigns.schedule
     enabled = socket.assigns.enabled_sources
+    all_source_ids = socket.assigns.question_sources |> Enum.map(& &1.material_id) |> MapSet.new()
 
-    # Pass source material filter to the engine if any sources are selected
+    # Only apply source filter when the user has explicitly deselected at least one
+    # source. When all sources are selected (or none are available), pass nil so the
+    # engine includes questions regardless of their source_material_id — including
+    # questions whose source_material_id is nil (e.g. generated without OCR tracking).
     source_ids =
-      if MapSet.size(enabled) > 0 do
+      if MapSet.size(enabled) > 0 and enabled != all_source_ids do
         MapSet.to_list(enabled)
       else
         nil
