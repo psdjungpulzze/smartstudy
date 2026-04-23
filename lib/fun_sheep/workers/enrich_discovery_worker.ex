@@ -79,8 +79,13 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       sub_step: "Collecting text from uploaded materials..."
     })
 
-    # Collect OCR text from ALL materials (not just new ones)
-    ocr_text = collect_ocr_text(course_id)
+    # Collect OCR text + filename-derived chapter signal from all materials.
+    # The filename signal (e.g. "Biology Chapter 39 - 22.jpg" → 39) is a strong
+    # authoritative prior that we pass to the AI so it stops under-counting on
+    # big books where the OCR budget truncates most of the content.
+    materials = completed_structure_materials(course_id)
+    ocr_text = collect_ocr_text(materials)
+    filename_chapters = extract_filename_chapter_numbers(materials)
 
     if ocr_text == "" do
       Logger.warning("[EnrichDiscovery] No OCR text found for course #{course_id}")
@@ -91,7 +96,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       # Run AI discovery with OCR text as primary context.
       broadcast(course_id, %{sub_step: "Discovering chapters from uploaded textbook..."})
 
-      chapters = discover_chapters_from_materials(course, ocr_text)
+      chapters = discover_chapters_from_materials(course, ocr_text, filename_chapters)
 
       if chapters == [] do
         Logger.error("[EnrichDiscovery] No chapters discovered from materials for #{course_id}")
@@ -305,18 +310,127 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   # don't contain it.
   @heading_pattern ~r/^\s*(chapter|unit|module|part)\s+[\dIVXLC]+\b.*$/im
 
-  defp collect_ocr_text(course_id) do
-    materials = Content.list_materials_by_course(course_id)
+  # When the filename of a material contains "Chapter N" (or Unit/Module/Part),
+  # pull N out as an authoritative signal. Works across mixed casing and the
+  # trailing page-number suffix some scanners add (e.g. "Biology Chapter 39 - 22.jpg").
+  @filename_chapter_pattern ~r/\b(?:chapter|unit|module|part)\s*(\d+)\b/i
 
-    completed =
-      Enum.filter(materials, fn m ->
-        m.ocr_status == :completed and m.material_kind in @structure_kinds
-      end)
+  # Per-material cap for the "many small materials" sampling strategy.
+  # Enough to catch a chapter title + first few paragraphs on a single page.
+  @sampled_per_material_chars 2_000
 
-    completed
+  defp completed_structure_materials(course_id) do
+    Content.list_materials_by_course(course_id)
+    |> Enum.filter(fn m ->
+      m.ocr_status == :completed and m.material_kind in @structure_kinds
+    end)
+  end
+
+  # Adaptive snippet builder. The old path assumed each material was a full
+  # textbook (20+ pages) and that the TOC lived in the front matter. That
+  # breaks when users upload one JPG per page — hundreds of 1-page
+  # materials where the per-material "take 25 front pages + regex-scan page
+  # 26+" logic collapses to "show page 1, scan nothing" and the global 80K
+  # truncation keeps only the first ~20 of hundreds of pages. Pick the
+  # strategy from the shape of the upload.
+  defp collect_ocr_text(materials) do
+    max_pages =
+      materials
+      |> Enum.map(&page_count/1)
+      |> Enum.max(fn -> 0 end)
+
+    cond do
+      materials == [] -> ""
+      max_pages >= 10 -> per_material_snippet(materials)
+      true -> sampled_snippet(materials)
+    end
+  end
+
+  defp page_count(material) do
+    Content.list_ocr_pages_by_material(material.id) |> length()
+  end
+
+  # Original strategy: each material has real front matter + deep content.
+  # TOC lives in the first 25 pages; headings elsewhere are surfaced via regex.
+  defp per_material_snippet(materials) do
+    materials
     |> Enum.map(&build_material_snippet/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n===== NEXT MATERIAL =====\n\n")
+  end
+
+  # "Many small materials" strategy: allocate the character budget evenly
+  # across all materials (grouped by filename-derived chapter when possible,
+  # so we don't blow budget on 20 pages of the same chapter). Each material
+  # contributes its filename as a label + up to ~2K chars of OCR text. The
+  # label is critical — it's what lets the AI tie a sampled page back to a
+  # chapter number even when the page text itself doesn't say "Chapter 39".
+  #
+  # Total output is capped at @prompt_char_budget — when the grouping
+  # doesn't reduce enough (e.g. filenames are random and every material
+  # becomes its own {:other, id} group), per-sample size shrinks so the
+  # union still fits.
+  defp sampled_snippet(materials) do
+    grouped = group_materials_by_filename_chapter(materials)
+
+    ordered_groups =
+      grouped
+      |> Enum.sort_by(fn {key, _} -> chapter_sort_key(key) end)
+
+    group_count = length(ordered_groups)
+
+    per_sample_chars =
+      case group_count do
+        0 -> 0
+        n -> min(@sampled_per_material_chars, div(@prompt_char_budget, n) - 100)
+      end
+      |> max(200)
+
+    samples =
+      ordered_groups
+      |> Enum.flat_map(fn {chapter_key, group} ->
+        group
+        |> Enum.sort_by(& &1.file_name)
+        |> Enum.take(1)
+        |> Enum.map(&material_sample(&1, chapter_key, per_sample_chars))
+      end)
+      |> Enum.reject(&(&1 == ""))
+
+    samples |> Enum.join("\n\n===== NEXT SAMPLE =====\n\n")
+  end
+
+  defp group_materials_by_filename_chapter(materials) do
+    Enum.group_by(materials, fn m ->
+      case filename_chapter_number(m.file_name) do
+        nil -> {:other, m.id}
+        n -> {:chapter, n}
+      end
+    end)
+  end
+
+  defp chapter_sort_key({:chapter, n}), do: {0, n}
+  defp chapter_sort_key({:other, id}), do: {1, id}
+
+  defp material_sample(material, chapter_key, max_chars) do
+    label =
+      case chapter_key do
+        {:chapter, n} -> "[filename chapter #{n}] #{material.file_name}"
+        {:other, _} -> "[unlabeled] #{material.file_name}"
+      end
+
+    text =
+      Content.list_ocr_pages_by_material(material.id)
+      |> Enum.sort_by(& &1.page_number)
+      |> Enum.map(& &1.extracted_text)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n")
+      |> String.slice(0, max_chars)
+      |> String.trim()
+
+    case text do
+      "" -> ""
+      t -> label <> "\n" <> t
+    end
   end
 
   # For one textbook material, return:
@@ -356,7 +470,37 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     (front <> headings_block) |> String.trim()
   end
 
-  defp discover_chapters_from_materials(course, ocr_text) do
+  # Returns a sorted, deduped list of chapter numbers mined from the
+  # filenames of the uploaded materials. Empty when filenames don't follow
+  # a "Chapter N" convention — in that case we fall through to pure
+  # OCR-driven discovery.
+  @doc false
+  def extract_filename_chapter_numbers(materials) do
+    materials
+    |> Enum.map(&filename_chapter_number(&1.file_name))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp filename_chapter_number(nil), do: nil
+
+  defp filename_chapter_number(file_name) when is_binary(file_name) do
+    case Regex.run(@filename_chapter_pattern, file_name) do
+      [_, n] ->
+        case Integer.parse(n) do
+          {num, ""} when num > 0 and num < 1_000 -> num
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp filename_chapter_number(_), do: nil
+
+  defp discover_chapters_from_materials(course, ocr_text, filename_chapters) do
     subject = course.subject
     grade = course.grade
 
@@ -366,6 +510,8 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
       else
         ocr_text
       end
+
+    filename_signal = build_filename_signal(filename_chapters)
 
     prompt = """
     You are analyzing uploaded textbook pages for a #{subject} (Grade #{grade}) course.
@@ -386,6 +532,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     - If the text only contains heading lines, infer the chapter list from
       those headings.
     - Preserve the original chapter numbering and capitalization.
+    #{filename_signal}
 
     Look for:
     - Table of contents entries
@@ -437,6 +584,31 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
         Logger.error("[EnrichDiscovery] AI discovery failed: #{inspect(reason)}")
         []
     end
+  end
+
+  # Surface filename-derived chapter numbers as authoritative context so the
+  # AI returns the full chapter list even when the OCR budget truncates most
+  # of the book. Empty string when filenames don't reveal a chapter scheme —
+  # the AI falls back to OCR-only reasoning.
+  defp build_filename_signal([]), do: ""
+
+  defp build_filename_signal(chapter_numbers) do
+    list =
+      chapter_numbers
+      |> Enum.sort()
+      |> Enum.map(&Integer.to_string/1)
+      |> Enum.join(", ")
+
+    """
+
+    AUTHORITATIVE FILENAME SIGNAL:
+    The filenames of the uploaded pages reference these chapter numbers: [#{list}].
+    Return one entry in the JSON array for EACH of these chapter numbers
+    (#{length(chapter_numbers)} chapters total), even if the sampled text
+    doesn't cover every chapter. Use the sampled OCR text to fill in each
+    chapter's real name; if a chapter's name isn't present in the sample,
+    use "Chapter N" as a placeholder for number N.
+    """
   end
 
   defp parse_chapters_json(content) do

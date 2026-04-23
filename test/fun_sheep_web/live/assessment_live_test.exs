@@ -358,8 +358,11 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       {:ok, view, _html} =
         live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
 
-      # Button is rendered and clickable; event handler must not crash
-      assert render_click(view, "retry_generation") =~ "No questions for the selected chapters"
+      html = render_click(view, "retry_generation")
+      # Still shows the readiness block until the broadcast fires.
+      assert html =~ "No questions for the selected chapters"
+      # But the click surfaces a flash so the user knows it registered.
+      assert html =~ "Generating questions for 1 chapter"
     end
 
     test "PubSub {:questions_ready, ...} transitions the view when scope becomes ready", %{
