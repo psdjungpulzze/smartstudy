@@ -59,6 +59,10 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
         # Verify textbook completeness — worker no-ops on non-textbook kinds.
         FunSheep.Workers.TextbookCompletenessWorker.enqueue(material_id)
 
+        # AI-classify the content kind so downstream routing trusts the
+        # verified kind, not the user label (Phase 2 guardrail).
+        FunSheep.Workers.MaterialClassificationWorker.enqueue(material_id)
+
         advance_course(course_id)
         :ok
 
