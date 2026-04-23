@@ -59,6 +59,27 @@ if google_vision_api_key do
   config :fun_sheep, :google_vision_api_key, google_vision_api_key
 end
 
+# Classifier confidence threshold — questions whose LLM-assigned section
+# confidence is below this are stored as :low_confidence (invisible to
+# delivery). See `QuestionClassificationWorker` moduledoc for tuning notes.
+# Falls back to the worker's compiled-in default (0.5) when unset.
+case System.get_env("CLASSIFIER_CONFIDENCE_THRESHOLD") do
+  nil ->
+    :ok
+
+  raw ->
+    case Float.parse(raw) do
+      {f, ""} when f >= 0.0 and f <= 1.0 ->
+        config :fun_sheep, :classification_confidence_threshold, f
+
+      _ ->
+        raise """
+        CLASSIFIER_CONFIDENCE_THRESHOLD must be a float in [0.0, 1.0].
+        Got: #{inspect(raw)}
+        """
+    end
+end
+
 if System.get_env("PHX_SERVER") do
   config :fun_sheep, FunSheepWeb.Endpoint, server: true
 end

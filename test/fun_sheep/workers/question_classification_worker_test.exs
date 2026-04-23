@@ -167,4 +167,99 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
       assert reloaded.section_id == section.id
     end
   end
+
+  describe "confidence threshold" do
+    setup do
+      original = Application.get_env(:fun_sheep, :classification_confidence_threshold)
+
+      on_exit(fn ->
+        if is_nil(original) do
+          Application.delete_env(:fun_sheep, :classification_confidence_threshold)
+        else
+          Application.put_env(:fun_sheep, :classification_confidence_threshold, original)
+        end
+      end)
+
+      :ok
+    end
+
+    test "default threshold (0.5) accepts the LLM's mid-confidence picks instead of rotting them at :low_confidence" do
+      # The 2026-04-22 incident: LLM consistently returned 0.5–0.7 for valid
+      # AP Bio chapter→section assignments, but the old 0.85 threshold
+      # rejected all of them. With the new default (0.5), a 0.6 verdict
+      # against a valid in-chapter section must come through as :ai_classified.
+      %{section: section, question: question} = fixture()
+
+      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
+
+      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+        {:ok,
+         Jason.encode!(%{
+           "section_id" => section.id,
+           "confidence" => 0.6,
+           "rationale" => "matches the section reasonably well"
+         })}
+      end)
+
+      assert :ok =
+               QuestionClassificationWorker.perform(%Oban.Job{
+                 args: %{"question_ids" => [question.id]}
+               })
+
+      reloaded = Repo.get!(Question, question.id)
+      assert reloaded.classification_status == :ai_classified
+      assert reloaded.section_id == section.id
+      assert reloaded.classification_confidence == 0.6
+    end
+
+    test "below-threshold confidence still routes to :low_confidence (no false promotions)" do
+      %{question: question} = fixture()
+
+      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
+
+      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+        {:ok,
+         Jason.encode!(%{
+           "section_id" => Ecto.UUID.generate(),
+           "confidence" => 0.3,
+           "rationale" => "guessing"
+         })}
+      end)
+
+      assert :ok =
+               QuestionClassificationWorker.perform(%Oban.Job{
+                 args: %{"question_ids" => [question.id]}
+               })
+
+      reloaded = Repo.get!(Question, question.id)
+      assert reloaded.classification_status == :low_confidence
+      assert is_nil(reloaded.section_id)
+    end
+
+    test "env override raises threshold above LLM verdict → routes to :low_confidence" do
+      %{section: section, question: question} = fixture()
+
+      Application.put_env(:fun_sheep, :classification_confidence_threshold, 0.9)
+
+      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
+
+      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+        {:ok,
+         Jason.encode!(%{
+           "section_id" => section.id,
+           "confidence" => 0.7,
+           "rationale" => "matches"
+         })}
+      end)
+
+      assert :ok =
+               QuestionClassificationWorker.perform(%Oban.Job{
+                 args: %{"question_ids" => [question.id]}
+               })
+
+      reloaded = Repo.get!(Question, question.id)
+      assert reloaded.classification_status == :low_confidence
+      assert is_nil(reloaded.section_id)
+    end
+  end
 end
