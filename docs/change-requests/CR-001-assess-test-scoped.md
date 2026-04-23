@@ -3,12 +3,38 @@
 **Date**: 2026-04-23
 **Requested By**: Peter Jung
 **Priority**: P1 (High) — blocks the core learning loop from working as designed
+**Status**: Scoped (2026-04-23) — codebase exploration revised scope significantly (see "Revised Scope After Exploration" below)
 
 ---
 
 ## Summary
 
 The assessment flow currently asks students to pick **file-level question sources** (e.g. `Biology Answers - 31.jpg`) to include. It should instead run inside the scope of an **upcoming test** (FR-006 / FR-006b), with the student seeing chapters/skills — not upload filenames.
+
+---
+
+## Revised Scope After Exploration (2026-04-23)
+
+Exploration of the worktree revealed that **most of the test-scoped foundation is already built** — only the setup-phase source picker and a few additions remain. Corrections to the original analysis:
+
+| Original claim | Reality |
+|---|---|
+| Readiness must be migrated from course-scoped to test-scoped | **Already done.** `ReadinessScore` schema (`lib/fun_sheep/assessments/readiness_score.ex:23`) has `test_schedule_id` FK. `ReadinessCalculator.calculate/2` (`lib/fun_sheep/assessments/readiness_calculator.ex:22`) operates on `test_schedule.scope["chapter_ids"]` with a weakest-N-average aggregate (`:20`, N=3). Skill mastery is per-section (global) and transfers across tests as required. |
+| Remove global `/assess` nav entry | **Not present.** The router has exactly one assessment route: `/courses/:course_id/tests/:schedule_id/assess` (`lib/fun_sheep_web/router.ex:104`). Student nav (`lib/fun_sheep_web/components/layouts.ex:117`) exposes Learn / Courses / Practice / Flocks — no Assess tab. |
+| `TestSchedule` entity needs to be added | **Exists.** `lib/fun_sheep/assessments/test_schedule.ex` has `name`, `test_date`, `scope` (chapter_ids), `target_readiness_score`, calendar sync fields. |
+
+### Remaining work (smaller than the original task list)
+
+1. **Remove the source-picker setup phase from `AssessmentLive`** — this is the real user-visible fix from the screenshot. `Questions.list_question_sources/1` (`lib/fun_sheep/questions.ex:974`) returns raw `uploaded_materials.file_name` and `AssessmentLive` routes into a `:setup` phase (`lib/fun_sheep_web/live/assessment_live.ex:18`) whenever `question_sources != []`, rendering the picker at `:725`. Remove that phase entirely — assessment starts directly on the test's scope.
+2. **Add primary-test selection** — no `is_primary` flag on `TestSchedule` today. Add one (or keep state-free and use nearest-deadline by default, with an override).
+3. **Fix the OCR "answer key as source" bug (separate PR)** — `lib/fun_sheep/workers/question_extraction_worker.ex:50-71` has no material-type guard; every OCR'd file becomes a question source. `UploadedMaterial` has no `material_type` field. Add classification (user-declared on upload + optional LLM heuristic) and filter at extraction time.
+4. **Update tests** — remove source-picker test paths in `test/fun_sheep_web/live/assessment_live_test.exs`; cover the new direct-launch flow.
+
+### Deferred / already-met
+
+- Migration of readiness storage → already test-scoped.
+- Remove global Assess nav / route → nothing to remove.
+- Schema additions for `tests` / scope → already present.
 
 ---
 
@@ -128,17 +154,20 @@ Replace the file-source picker with a chapter picker but keep global `/assess`.
 - [x] Planning — ADR for test-scoped readiness data model
 - [x] Implementation — per tasks below
 
-### Tasks
+### Tasks (revised post-exploration)
 
-- [ ] Clarify FR-007 in `docs/discovery/requirements.md` to explicitly require a test scope (FR-006 linkage)
-- [ ] ADR: test-scoped readiness + Study Path (primary test, nearest-deadline default, multi-test overlap behavior)
-- [ ] Remove `QuestionSources` picker UI and its route/handler
-- [ ] Change `/assess` to require an active test (redirect to test picker/creator if none)
-- [ ] Remove global Assess nav entry; replace with Tests list or a Test-CTA
-- [ ] Migrate readiness storage from course-scoped → test-scoped
-- [ ] Add "primary test" selection (pin) with nearest-deadline default
-- [ ] Audit OCR classification pipeline for answer-key files being indexed as question sources (separate PR — bug fix for (c))
-- [ ] Update integration/LiveView tests to seed a Test before invoking Assess
+- [ ] **Remove source-picker setup phase from `AssessmentLive`** — delete `:setup` phase, launch engine directly on `test_schedule.scope`
+- [ ] **Add primary-test selection** with nearest-deadline default + manual pin override
+- [ ] **Fix OCR answer-key ingestion bug** (separate PR) — add `material_type` to `UploadedMaterial`; filter at extraction
+- [ ] Clarify FR-007 wording in `docs/discovery/requirements.md` to explicitly require FR-006 scope linkage (minor; mostly already aligned)
+- [ ] ADR documenting the test-scoped pattern + primary-test rule (small — codifying what exists)
+- [ ] Update LiveView tests for new direct-launch flow; remove source-picker tests
+
+### Deferred / already complete
+
+- ~~Migrate readiness storage from course-scoped → test-scoped~~ (already done)
+- ~~Change `/assess` to require an active test~~ (already enforced by route)
+- ~~Remove global Assess nav entry~~ (none exists)
 
 ### Documents to Update
 
@@ -167,3 +196,4 @@ If the new flow regresses, feature-flag the route: `/assess` falls back to the p
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-23 | Peter Jung + Claude | Initial request, drafted from screenshot review of `funsheep.com/.../finals/assess` |
+| 2026-04-23 | Peter Jung + Claude | Post-exploration scope revision — most test-scoping already implemented; remaining work is source-picker removal + primary-test + OCR bug |

@@ -80,8 +80,6 @@ defmodule FunSheepWeb.AssessmentLive do
             feedback: nil,
             question_number: 0,
             start_time: 0,
-            question_sources: [],
-            enabled_sources: MapSet.new(),
             phase: :blocked,
             readiness: nil,
             generation_progress: %{},
@@ -94,8 +92,6 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   defp restore_from_cache(socket, course_id, schedule, cached) do
-    question_sources = Questions.list_question_sources(course_id)
-
     socket
     |> assign(
       page_title: "Assessment: #{schedule.name}",
@@ -110,8 +106,6 @@ defmodule FunSheepWeb.AssessmentLive do
       feedback: cached.feedback,
       question_number: cached.question_number,
       start_time: System.monotonic_time(:second),
-      question_sources: question_sources,
-      enabled_sources: cached.enabled_sources,
       assessment_complete: cached.assessment_complete,
       summary: cached.summary,
       phase: cached.phase,
@@ -123,29 +117,21 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   defp mount_assessment(socket, course_id, schedule) do
-    # Load available question sources for filtering
-    question_sources = Questions.list_question_sources(course_id)
-
-    # By default, all sources are enabled
-    enabled_sources =
-      question_sources
-      |> Enum.map(& &1.material_id)
-      |> MapSet.new()
-
     readiness = Assessments.scope_readiness(schedule)
 
-    # Route to one of three top-level phases:
+    # Route to one of two top-level phases:
     #   :readiness_block — upstream pipeline hasn't produced enough visible
     #                      questions for this scope; no point entering the
-    #                      engine yet (render_readiness_block/1 explains
-    #                      what's happening and what the student can do)
-    #   :setup          — multiple source materials to filter
-    #   :testing        — single source (or none); engine kicks off now
+    #                      engine yet.
+    #   :testing        — engine kicks off immediately on the test's scope.
+    #
+    # There is no source-picker phase: assessment runs on the full set of
+    # questions matching the test's chapter scope. Source attribution
+    # (which uploaded file a question came from) is not a student concern.
     initial_phase =
       case readiness do
-        :ready -> if(question_sources != [], do: :setup, else: :testing)
-        # Some chapters ready — start immediately with available questions
-        {:scope_partial, _} -> if(question_sources != [], do: :setup, else: :testing)
+        :ready -> :testing
+        {:scope_partial, _} -> :testing
         _ -> :readiness_block
       end
 
@@ -163,8 +149,6 @@ defmodule FunSheepWeb.AssessmentLive do
         feedback: nil,
         question_number: 0,
         start_time: System.monotonic_time(:second),
-        question_sources: question_sources,
-        enabled_sources: enabled_sources,
         phase: initial_phase,
         readiness: readiness,
         generation_progress: %{},
@@ -172,7 +156,6 @@ defmodule FunSheepWeb.AssessmentLive do
         grading_task: nil
       )
 
-    # If no sources to filter and scope is ready, start immediately
     socket =
       if initial_phase == :testing do
         state = Engine.start_assessment(schedule)
@@ -189,54 +172,6 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   @impl true
-  def handle_event("toggle_source", %{"material-id" => material_id}, socket) do
-    enabled = socket.assigns.enabled_sources
-
-    enabled =
-      if MapSet.member?(enabled, material_id) do
-        MapSet.delete(enabled, material_id)
-      else
-        MapSet.put(enabled, material_id)
-      end
-
-    {:noreply, assign(socket, enabled_sources: enabled)}
-  end
-
-  def handle_event("toggle_all_sources", _params, socket) do
-    all_ids = socket.assigns.question_sources |> Enum.map(& &1.material_id) |> MapSet.new()
-    currently_all = MapSet.equal?(socket.assigns.enabled_sources, all_ids)
-
-    enabled = if currently_all, do: MapSet.new(), else: all_ids
-    {:noreply, assign(socket, enabled_sources: enabled)}
-  end
-
-  def handle_event("start_assessment", _params, socket) do
-    schedule = socket.assigns.schedule
-    enabled = socket.assigns.enabled_sources
-    all_source_ids = socket.assigns.question_sources |> Enum.map(& &1.material_id) |> MapSet.new()
-
-    # Only apply source filter when the user has explicitly deselected at least one
-    # source. When all sources are selected (or none are available), pass nil so the
-    # engine includes questions regardless of their source_material_id — including
-    # questions whose source_material_id is nil (e.g. generated without OCR tracking).
-    source_ids =
-      if MapSet.size(enabled) > 0 and enabled != all_source_ids do
-        MapSet.to_list(enabled)
-      else
-        nil
-      end
-
-    state = Engine.start_assessment(schedule, source_material_ids: source_ids)
-
-    socket =
-      socket
-      |> assign(engine_state: state, phase: :testing)
-      |> advance_to_next_question()
-      |> save_state_to_cache()
-
-    {:noreply, socket}
-  end
-
   def handle_event("select_answer", %{"answer" => answer}, socket) do
     {:noreply, assign(socket, selected_answer: answer)}
   end
@@ -461,9 +396,6 @@ defmodule FunSheepWeb.AssessmentLive do
     can_start = readiness == :ready or match?({:scope_partial, _}, readiness)
 
     cond do
-      can_start and socket.assigns.question_sources != [] ->
-        assign(socket, readiness: readiness, phase: :setup)
-
       can_start ->
         state = Engine.start_assessment(socket.assigns.schedule)
 
@@ -590,7 +522,6 @@ defmodule FunSheepWeb.AssessmentLive do
         selected_answer: socket.assigns.selected_answer,
         feedback: socket.assigns.feedback,
         question_number: socket.assigns.question_number,
-        enabled_sources: socket.assigns.enabled_sources,
         assessment_complete: assessment_complete,
         summary: Map.get(socket.assigns, :summary),
         phase: socket.assigns.phase
@@ -688,12 +619,6 @@ defmodule FunSheepWeb.AssessmentLive do
                 Questions are being validated. This screen will refresh automatically once they're ready.
               </p>
             </div>
-          <% @phase == :setup -> %>
-            <.render_source_setup
-              question_sources={@question_sources}
-              enabled_sources={@enabled_sources}
-              schedule={@schedule}
-            />
           <% @no_questions_available -> %>
             <.render_no_questions schedule={@schedule} course_id={@course_id} />
           <% @assessment_complete -> %>
@@ -713,100 +638,6 @@ defmodule FunSheepWeb.AssessmentLive do
               grading={assigns[:grading] || false}
             />
         <% end %>
-      </div>
-    </div>
-    """
-  end
-
-  attr :question_sources, :list, required: true
-  attr :enabled_sources, :any, required: true
-  attr :schedule, :map, required: true
-
-  defp render_source_setup(assigns) do
-    all_enabled =
-      MapSet.size(assigns.enabled_sources) == length(assigns.question_sources)
-
-    total_questions =
-      assigns.question_sources
-      |> Enum.filter(&MapSet.member?(assigns.enabled_sources, &1.material_id))
-      |> Enum.map(& &1.question_count)
-      |> Enum.sum()
-
-    assigns = assign(assigns, all_enabled: all_enabled, total_questions: total_questions)
-
-    ~H"""
-    <div class="bg-white rounded-2xl shadow-md p-8">
-      <div class="mb-6">
-        <h2 class="text-xl font-bold text-[#1C1C1E] mb-2">Question Sources</h2>
-        <p class="text-sm text-[#8E8E93]">
-          Select which question sets to include in this assessment.
-          Toggle off any sources you want to exclude.
-        </p>
-      </div>
-
-      <div class="mb-4">
-        <button
-          phx-click="toggle_all_sources"
-          class="text-sm font-medium text-[#007AFF] hover:text-[#0066DD] transition-colors"
-        >
-          {if @all_enabled, do: "Deselect All", else: "Select All"}
-        </button>
-      </div>
-
-      <div class="space-y-3 mb-6">
-        <button
-          :for={source <- @question_sources}
-          phx-click="toggle_source"
-          phx-value-material-id={source.material_id}
-          class={[
-            "w-full flex items-center justify-between p-4 rounded-xl border-2 transition-colors text-left",
-            if(MapSet.member?(@enabled_sources, source.material_id),
-              do: "border-[#4CD964] bg-[#E8F8EB]",
-              else: "border-[#E5E5EA] bg-white hover:border-[#8E8E93]"
-            )
-          ]}
-        >
-          <div class="flex items-center gap-3">
-            <div class={[
-              "w-5 h-5 rounded-md flex items-center justify-center",
-              if(MapSet.member?(@enabled_sources, source.material_id),
-                do: "bg-[#4CD964]",
-                else: "border-2 border-[#E5E5EA]"
-              )
-            ]}>
-              <.icon
-                :if={MapSet.member?(@enabled_sources, source.material_id)}
-                name="hero-check"
-                class="w-3 h-3 text-white"
-              />
-            </div>
-            <div>
-              <p class="font-medium text-[#1C1C1E] text-sm">{source.file_name}</p>
-            </div>
-          </div>
-          <span class="text-xs text-[#8E8E93] px-2 py-1 bg-[#F5F5F7] rounded-full">
-            {source.question_count} questions
-          </span>
-        </button>
-      </div>
-
-      <div class="flex items-center justify-between pt-4 border-t border-[#E5E5EA]">
-        <p class="text-sm text-[#8E8E93]">
-          {@total_questions} questions selected
-        </p>
-        <button
-          phx-click="start_assessment"
-          disabled={@total_questions == 0}
-          class={[
-            "font-medium px-6 py-2 rounded-full shadow-md transition-colors",
-            if(@total_questions > 0,
-              do: "bg-[#4CD964] hover:bg-[#3DBF55] text-white",
-              else: "bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed"
-            )
-          ]}
-        >
-          Start Assessment
-        </button>
       </div>
     </div>
     """

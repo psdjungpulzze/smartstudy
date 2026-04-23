@@ -33,7 +33,7 @@ defmodule FunSheep.Assessments.Engine do
   @difficulty_tolerance 0.25
   @depth_probe_gap 0.1
 
-  def start_assessment(test_schedule, opts \\ []) do
+  def start_assessment(test_schedule) do
     topics = extract_topics(test_schedule)
 
     %{
@@ -47,8 +47,7 @@ defmodule FunSheep.Assessments.Engine do
       topic_attempts: %{},
       skill_states: %{},
       active_skill_id: nil,
-      status: :in_progress,
-      source_material_ids: opts[:source_material_ids]
+      status: :in_progress
     }
   end
 
@@ -96,8 +95,7 @@ defmodule FunSheep.Assessments.Engine do
                state.course_id,
                topic.id,
                state.target_difficulty,
-               attempts,
-               state.source_material_ids
+               attempts
              ) do
           {:ok, question} ->
             {:question, question, state}
@@ -134,11 +132,6 @@ defmodule FunSheep.Assessments.Engine do
   defp select_skill_targeted(state, section_id, skill, bounds) do
     attempted_ids = Enum.map(skill.attempts, & &1.question_id)
     filters = %{chapter_id: skill.chapter_id, section_id: section_id}
-
-    filters =
-      if state.source_material_ids,
-        do: Map.put(filters, :source_material_ids, state.source_material_ids),
-        else: filters
 
     candidates =
       Questions.list_questions_with_stats(state.course_id, filters)
@@ -317,16 +310,10 @@ defmodule FunSheep.Assessments.Engine do
          course_id,
          chapter_id,
          target_difficulty,
-         previous_attempts,
-         source_material_ids
+         previous_attempts
        ) do
     attempted_ids = Enum.map(previous_attempts, & &1.question_id)
     filters = %{chapter_id: chapter_id}
-
-    filters =
-      if source_material_ids,
-        do: Map.put(filters, :source_material_ids, source_material_ids),
-        else: filters
 
     all_questions =
       Questions.list_questions_with_stats(course_id, filters)
