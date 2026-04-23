@@ -13,6 +13,17 @@ defmodule Mix.Tasks.Funsheep.Classify.RequeueLowConfidenceTest do
   alias FunSheep.{Courses, Questions, Repo}
   alias FunSheep.Questions.Question
 
+  # The Mix task enqueues classification jobs. Default test Oban mode is
+  # `:inline` which would synchronously run the worker (LLM round-trip
+  # against a mock that never resolves) — here we only care that the
+  # requeue/reset writes happened, so wrap the task call in `:manual`
+  # mode: Oban.insert/1 inserts the job row but doesn't execute it.
+  defp run_task(args) do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run(args)
+    end)
+  end
+
   defp setup_questions do
     {:ok, course} = Courses.create_course(%{name: "Bio", subject: "Biology", grade: "10"})
     {:ok, ch} = Courses.create_chapter(%{name: "Cells", position: 1, course_id: course.id})
@@ -92,7 +103,7 @@ defmodule Mix.Tasks.Funsheep.Classify.RequeueLowConfidenceTest do
     %{targets: targets, untouched_classified: kept, untouched_pending: pending} =
       setup_questions()
 
-    Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run([])
+    run_task([])
 
     for q <- targets do
       reloaded = Repo.get!(Question, q.id)
@@ -115,7 +126,7 @@ defmodule Mix.Tasks.Funsheep.Classify.RequeueLowConfidenceTest do
   test "--dry-run reports without writing" do
     %{targets: targets} = setup_questions()
 
-    Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run(["--dry-run"])
+    run_task(["--dry-run"])
 
     for q <- targets do
       reloaded = Repo.get!(Question, q.id)
@@ -127,7 +138,9 @@ defmodule Mix.Tasks.Funsheep.Classify.RequeueLowConfidenceTest do
     %{course: target_course, targets: target_qs} = setup_questions()
     %{targets: other_targets} = setup_questions()
 
-    Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run(["--course", target_course.id])
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run(["--course", target_course.id])
+    end)
 
     for q <- target_qs do
       assert Repo.get!(Question, q.id).classification_status == :uncategorized
@@ -141,9 +154,9 @@ defmodule Mix.Tasks.Funsheep.Classify.RequeueLowConfidenceTest do
   test "is idempotent on repeat runs" do
     %{targets: targets} = setup_questions()
 
-    Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run([])
+    run_task([])
     # After first run, all targets are :uncategorized — second run finds 0
-    Mix.Tasks.Funsheep.Classify.RequeueLowConfidence.run([])
+    run_task([])
 
     for q <- targets do
       assert Repo.get!(Question, q.id).classification_status == :uncategorized

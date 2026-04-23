@@ -140,7 +140,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
                metadata: %{question_id: question.id, chapter_id: question.chapter_id}
              }) do
           {:ok, response} ->
-            case parse_response(response) do
+            case parse_response(response, sections) do
               {:ok, parsed} ->
                 apply_classification(question, sections, parsed)
 
@@ -163,14 +163,24 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     end
   end
 
+  # Pick-by-number prompt: tells the LLM to return an integer 1..N
+  # instead of a UUID. UUIDs are 36-char strings the model rarely
+  # reproduces verbatim, so the old prompt's `valid_section_id` check
+  # rejected ~80% of verdicts even when the LLM correctly identified the
+  # right section in the rationale (the 2026-04-22 prod incident:
+  # confidence 0.5–0.7 with hallucinated UUIDs → :low_confidence). We
+  # then map number → real UUID in `parse_response/2` so hallucination is
+  # impossible by construction.
   defp build_prompt(question, sections) do
     sections_list =
-      Enum.map_join(sections, "\n", fn s -> "- id=#{s.id} | name=#{s.name}" end)
+      sections
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n", fn {s, idx} -> "#{idx}. #{s.name}" end)
 
     """
     Classify the following question into one of the existing sections for this chapter.
 
-    EXISTING SECTIONS:
+    SECTIONS (pick by number):
     #{sections_list}
 
     QUESTION:
@@ -178,37 +188,53 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
 
     Return ONLY a JSON object:
     {
-      "section_id": "<uuid of matched section, or null>",
+      "section_number": <integer 1-#{length(sections)}, or null if none fit>,
       "propose_section_name": "<name of a new section if none fit, or null>",
       "confidence": <float 0.0-1.0>,
       "rationale": "<one-sentence explanation>"
     }
 
-    Prefer matching an existing section. Return low confidence (<0.6) if unsure.
+    Pick the closest existing section. Use `section_number: null` ONLY when
+    no listed section is even loosely related. Confidence below 0.6 means
+    you're guessing.
     """
   end
 
-  defp parse_response(text) when is_binary(text) do
+  defp parse_response(text, sections) when is_binary(text) do
     cleaned =
       text
       |> String.replace(~r/```json\s*/i, "")
       |> String.replace(~r/```\s*/, "")
       |> String.trim()
 
-    case Jason.decode(cleaned) do
-      {:ok, %{"confidence" => conf} = json} when is_number(conf) ->
-        {:ok,
-         %{
-           section_id: json["section_id"],
-           propose_section_name: json["propose_section_name"],
-           confidence: conf / 1.0,
-           rationale: json["rationale"]
-         }}
+    with {:ok, %{"confidence" => conf} = json} when is_number(conf) <- Jason.decode(cleaned) do
+      section_id = resolve_section(json, sections)
 
-      _ ->
-        {:error, :bad_json}
+      {:ok,
+       %{
+         section_id: section_id,
+         propose_section_name: json["propose_section_name"],
+         confidence: conf / 1.0,
+         rationale: json["rationale"]
+       }}
+    else
+      _ -> {:error, :bad_json}
     end
   end
+
+  # Map "section_number" 1..N → the corresponding section's UUID.
+  # Falls back to "section_id" for any caller still using the old shape
+  # (and for forward-compat if the LLM occasionally returns a UUID).
+  defp resolve_section(%{"section_number" => n}, sections)
+       when is_integer(n) and n >= 1 do
+    case Enum.at(sections, n - 1) do
+      nil -> nil
+      section -> section.id
+    end
+  end
+
+  defp resolve_section(%{"section_id" => sid}, _sections) when is_binary(sid), do: sid
+  defp resolve_section(_, _), do: nil
 
   defp apply_classification(question, sections, %{
          section_id: section_id,
@@ -217,7 +243,11 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
          rationale: rationale
        }) do
     threshold = confidence_threshold()
-    valid_section_id = section_id && Enum.any?(sections, &(&1.id == section_id))
+
+    # Boolean (not nil) so the `cond` below doesn't BadBooleanError when
+    # section_id is nil — which it now is whenever resolve_section/2 can't
+    # map the LLM's section_number to a real UUID.
+    valid_section_id = is_binary(section_id) and Enum.any?(sections, &(&1.id == section_id))
 
     cond do
       valid_section_id and confidence >= threshold ->
