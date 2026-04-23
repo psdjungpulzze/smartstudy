@@ -29,6 +29,16 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
           validator returned no verdict (LLM returned nothing) to
           `:pending`. Those are validator bugs, not content bugs.
 
+      mix funsheep.questions.cleanup apply_chapter_suggestions --course ID [--confirm] [--min-confidence N]
+
+          For each question with NULL chapter_id whose validation_report
+          carries a `categorization.suggested_chapter_id` at or above the
+          confidence threshold (default 50), copy that chapter_id onto the
+          row and mark `classification_status: :uncategorized` so the
+          downstream classifier picks it up for section assignment.
+          Pairs with `classify_missing` to restore I-1 eligibility without
+          re-running the chapter-tagger LLM.
+
       mix funsheep.questions.cleanup classify_missing --course ID [--confirm]
 
           Enqueue `QuestionClassificationWorker` for every question that is
@@ -81,7 +91,13 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
   alias FunSheep.Questions.Question
   alias FunSheep.Repo
 
-  @switches [course: :string, confirm: :boolean, limit: :integer, prod_db: :boolean]
+  @switches [
+    course: :string,
+    confirm: :boolean,
+    limit: :integer,
+    prod_db: :boolean,
+    min_confidence: :integer
+  ]
 
   @impl Mix.Task
   def run(argv) do
@@ -111,6 +127,7 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
       "apply_explanations" -> apply_explanations(course_id, dry_run?, opts)
       "requeue_no_verdict" -> requeue_no_verdict(course_id, dry_run?)
       "requeue_transport_failures" -> requeue_transport_failures(course_id, dry_run?)
+      "apply_chapter_suggestions" -> apply_chapter_suggestions(course_id, dry_run?, opts)
       "classify_missing" -> classify_missing(course_id, dry_run?)
       "delete_garbage" -> delete_garbage(course_id, dry_run?)
       _ -> usage()
@@ -416,6 +433,82 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
     end
   end
 
+  # -- apply_chapter_suggestions ---------------------------------------------
+
+  defp apply_chapter_suggestions(course_id, dry_run?, opts) do
+    threshold = Keyword.get(opts, :min_confidence, 50)
+
+    rows =
+      Repo.query!(
+        """
+        SELECT q.id,
+               q.validation_report->'categorization'->>'suggested_chapter_id' AS suggested_chapter_id,
+               (q.validation_report->'categorization'->>'confidence')::int AS confidence
+        FROM questions q
+        JOIN chapters ch ON ch.id = (q.validation_report->'categorization'->>'suggested_chapter_id')::uuid
+        WHERE q.course_id = $1
+          AND q.chapter_id IS NULL
+          AND q.validation_report->'categorization'->>'suggested_chapter_id' ~
+              '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          AND ch.course_id = $1
+          AND (q.validation_report->'categorization'->>'confidence')::int >= $2
+        """,
+        [Ecto.UUID.dump!(course_id), threshold]
+      )
+      |> Map.get(:rows)
+      |> Enum.map(fn [id, ch_id, conf] ->
+        # id is binary(16) from uuid column; ch_id is text from jsonb ->>.
+        {normalize_uuid(id), ch_id, conf}
+      end)
+
+    Mix.shell().info(
+      "\n=== APPLY CHAPTER SUGGESTIONS (#{if dry_run?, do: "DRY-RUN", else: "CONFIRMED"}) ==="
+    )
+
+    Mix.shell().info("Candidates (confidence ≥ #{threshold}): #{length(rows)}")
+
+    cond do
+      rows == [] ->
+        Mix.shell().info("Nothing to apply.")
+
+      dry_run? ->
+        rows
+        |> Enum.take(3)
+        |> Enum.each(fn {id, ch_id, conf} ->
+          Mix.shell().info("  [#{id}] → chapter=#{ch_id} conf=#{conf}")
+        end)
+
+        Mix.shell().info("(dry-run — pass --confirm to write)")
+
+      true ->
+        {applied, reset_ids} =
+          Enum.reduce(rows, {0, []}, fn {id, ch_id, _conf}, {n, ids} ->
+            {:ok, _} =
+              from(q in Question, where: q.id == ^id)
+              |> Repo.update_all(
+                set: [
+                  chapter_id: ch_id,
+                  classification_status: :uncategorized,
+                  classification_confidence: nil
+                ]
+              )
+              |> then(fn res -> {:ok, res} end)
+
+            {n + 1, [id | ids]}
+          end)
+
+        Mix.shell().info("Applied chapter to #{applied} rows.")
+
+        # Enqueue classifier in batches of 50 so the classifier doesn't
+        # receive a single mega-job.
+        reset_ids
+        |> Enum.chunk_every(50)
+        |> Enum.each(&FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions/1)
+
+        Mix.shell().info("Enqueued #{length(reset_ids)} for section classification.")
+    end
+  end
+
   # -- classify_missing -------------------------------------------------------
 
   defp classify_missing(course_id, dry_run?) do
@@ -440,7 +533,10 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
       if dry_run? do
         Mix.shell().info("(dry-run — pass --confirm to enqueue classifier)")
       else
-        FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(ids)
+        ids
+        |> Enum.chunk_every(50)
+        |> Enum.each(&FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions/1)
+
         Mix.shell().info("Enqueued #{length(ids)} for classification.")
       end
     end
@@ -508,6 +604,12 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
 
   defp split_subcommand([]), do: {nil, []}
   defp split_subcommand([sub | rest]), do: {sub, rest}
+
+  # Postgrex returns uuid columns as 16-byte binaries; jsonb ->> returns strings.
+  # Normalize both to the canonical "xxxxxxxx-xxxx-..." string form for logging
+  # and Ecto params.
+  defp normalize_uuid(<<_::binary-size(16)>> = bin), do: Ecto.UUID.load!(bin)
+  defp normalize_uuid(s) when is_binary(s), do: s
 
   defp fetch_course!(opts) do
     case opts[:course] do
