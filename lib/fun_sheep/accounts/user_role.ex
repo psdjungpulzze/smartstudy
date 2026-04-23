@@ -32,6 +32,7 @@ defmodule FunSheep.Accounts.UserRole do
     field :alerts_goal_achieved, :boolean, default: true
 
     belongs_to :school, FunSheep.Geo.School
+    belongs_to :pinned_test_schedule, FunSheep.Assessments.TestSchedule
 
     has_many :student_guardians, FunSheep.Accounts.StudentGuardian, foreign_key: :guardian_id
 
@@ -63,7 +64,8 @@ defmodule FunSheep.Accounts.UserRole do
       :digest_frequency,
       :alerts_skipped_days,
       :alerts_readiness_drop,
-      :alerts_goal_achieved
+      :alerts_goal_achieved,
+      :pinned_test_schedule_id
     ])
     |> validate_required([:interactor_user_id, :role, :email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/)
@@ -72,6 +74,7 @@ defmodule FunSheep.Accounts.UserRole do
       message: "already has this role"
     )
     |> foreign_key_constraint(:school_id)
+    |> foreign_key_constraint(:pinned_test_schedule_id)
   end
 
   @doc "Returns true if the account has been suspended."

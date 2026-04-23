@@ -44,7 +44,9 @@ defmodule FunSheepWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
       assert html =~ "Welcome to Fun Sheep!"
-      assert html =~ "Add a Course"
+      # Options-first empty state: LMS first, manual fallback second.
+      assert html =~ "Connect School LMS"
+      assert html =~ "Add a course manually"
     end
 
     test "shows 'no upcoming tests' empty state when courses exist but no tests are scheduled",
@@ -62,7 +64,9 @@ defmodule FunSheepWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
       assert html =~ "No upcoming tests"
-      assert html =~ "Go to Courses"
+      # Options-first: LMS connect stays prominent; fallback switches to "Create a test manually"
+      assert html =~ "Connect School LMS"
+      assert html =~ "Create a test manually"
     end
 
     test "renders focus card and study path when an upcoming test exists", %{conn: conn} do
@@ -90,6 +94,71 @@ defmodule FunSheepWeb.DashboardLiveTest do
       assert html =~ "Midterm Exam"
       assert html =~ "Your Study Path"
       assert html =~ "Readiness"
+    end
+  end
+
+  describe "primary test pinning" do
+    defp course_with_tests(user_role, test_specs) do
+      {:ok, course} =
+        Courses.create_course(%{
+          name: "Algebra II",
+          subject: "Math",
+          grade: "10",
+          created_by_id: user_role.id
+        })
+
+      Enum.map(test_specs, fn {name, days_out} ->
+        {:ok, schedule} =
+          Assessments.create_test_schedule(%{
+            name: name,
+            test_date: Date.add(Date.utc_today(), days_out),
+            scope: %{chapter_ids: []},
+            user_role_id: user_role.id,
+            course_id: course.id
+          })
+
+        schedule
+      end)
+    end
+
+    test "pin_test event promotes a non-nearest test to primary", %{conn: conn} do
+      {conn, user_role} = user_role_conn(conn)
+      [_near, far] = course_with_tests(user_role, [{"Near Test", 5}, {"Far Test", 30}])
+
+      {:ok, view, _html} = live(conn, ~p"/dashboard")
+
+      # By default, Near is primary (nearest deadline). Far is in "Other Tests".
+      assert view |> render() =~ "Other Tests"
+
+      # Pin the far one.
+      view
+      |> element("button[phx-click='pin_test'][phx-value-schedule-id='#{far.id}']")
+      |> render_click()
+
+      # Pin is persisted.
+      assert Assessments.pinned_test_id(user_role.id) == far.id
+
+      # Re-mount to confirm the pin survives reload.
+      {:ok, _view2, html2} = live(conn, ~p"/dashboard")
+      assert html2 =~ "Far Test"
+      # Near now appears in Other Tests section.
+      assert html2 =~ "Near Test"
+      assert html2 =~ "Other Tests"
+    end
+
+    test "unpin_test event reverts to nearest-deadline primary", %{conn: conn} do
+      {conn, user_role} = user_role_conn(conn)
+      [_near, far] = course_with_tests(user_role, [{"Near Test", 5}, {"Far Test", 30}])
+      {:ok, _} = Assessments.pin_test(user_role.id, far.id)
+
+      {:ok, view, _html} = live(conn, ~p"/dashboard")
+
+      # The pinned focus card renders an unpin_test button (filled star).
+      view
+      |> element("button[phx-click='unpin_test']")
+      |> render_click()
+
+      assert Assessments.pinned_test_id(user_role.id) == nil
     end
   end
 end

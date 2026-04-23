@@ -12,7 +12,8 @@ defmodule FunSheepWeb.DashboardLive do
   def mount(_params, _session, socket) do
     user_role_id = socket.assigns.current_user["id"]
 
-    {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations} =
+    {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations,
+     pinned_id} =
       case Ecto.UUID.cast(user_role_id) do
         {:ok, _uuid} ->
           tests = Assessments.list_upcoming_schedules(user_role_id, 90)
@@ -29,15 +30,17 @@ defmodule FunSheepWeb.DashboardLive do
           review = SpacedRepetition.review_stats(user_role_id)
           daily = StudySessions.daily_summary(user_role_id)
           int = Integrations.list_for_user(user_role_id)
-          {tests_with_readiness, gam, count, review, daily, int}
+          pinned = Assessments.pinned_test_id(user_role_id)
+          {tests_with_readiness, gam, count, review, daily, int, pinned}
 
         :error ->
-          {[], default_gamification(), 0, default_review_stats(), default_daily_summary(), []}
+          {[], default_gamification(), 0, default_review_stats(), default_daily_summary(), [],
+           nil}
       end
 
-    # Most urgent test = first (already sorted by date ascending)
-    primary_test = List.first(upcoming_tests)
-    other_tests = Enum.drop(upcoming_tests, 1)
+    # Primary = pinned test (if still upcoming) or nearest-deadline fallback.
+    # "Stale pins" (test has passed / deleted) silently degrade to nearest-deadline.
+    {primary_test, other_tests} = split_primary_and_other(upcoming_tests, pinned_id)
 
     socket =
       socket
@@ -45,6 +48,7 @@ defmodule FunSheepWeb.DashboardLive do
         page_title: "Learn",
         primary_test: primary_test,
         other_tests: other_tests,
+        pinned_test_id: pinned_id,
         gamification: gamification,
         course_count: course_count,
         review_stats: review_stats,
@@ -110,6 +114,60 @@ defmodule FunSheepWeb.DashboardLive do
   end
 
   @impl true
+  def handle_event("pin_test", %{"schedule-id" => schedule_id}, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+
+    case Assessments.pin_test(user_role_id, schedule_id) do
+      {:ok, _} ->
+        {:noreply, socket |> refresh_primary() |> put_flash(:info, "Pinned as your focus test.")}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "That test doesn't belong to you.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Couldn't pin that test.")}
+    end
+  end
+
+  @impl true
+  def handle_event("unpin_test", _params, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+
+    case Assessments.unpin_test(user_role_id) do
+      {:ok, _} ->
+        {:noreply, refresh_primary(socket)}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  defp refresh_primary(socket) do
+    upcoming = socket.assigns.other_tests ++ List.wrap(socket.assigns.primary_test)
+    pinned_id = Assessments.pinned_test_id(socket.assigns.current_user["id"])
+    {primary, other} = split_primary_and_other(upcoming, pinned_id)
+
+    assign(socket, primary_test: primary, other_tests: other, pinned_test_id: pinned_id)
+  end
+
+  # Given an upcoming-tests list (wrapped `%{test: ts, readiness: _, attempts_count: _}`
+  # per mount) and an optional pinned test_schedule_id, returns `{primary, other}`.
+  # If the pinned test is still in the upcoming list, it's promoted to primary;
+  # otherwise the nearest-deadline entry (head of the date-sorted list) is primary.
+  defp split_primary_and_other(upcoming, pinned_id) when is_list(upcoming) do
+    pinned_entry =
+      if pinned_id, do: Enum.find(upcoming, fn %{test: ts} -> ts.id == pinned_id end), else: nil
+
+    case pinned_entry do
+      nil ->
+        {List.first(upcoming), Enum.drop(upcoming, 1)}
+
+      entry ->
+        {entry, Enum.reject(upcoming, fn e -> e.test.id == entry.test.id end)}
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="space-y-4 sm:space-y-6">
@@ -141,7 +199,10 @@ defmodule FunSheepWeb.DashboardLive do
 
       <%!-- ── Primary Test: The Focus ── --%>
       <div :if={@primary_test} class="animate-slide-up">
-        <.focus_card test={@primary_test} />
+        <.focus_card
+          test={@primary_test}
+          pinned?={@pinned_test_id == @primary_test.test.id}
+        />
       </div>
 
       <%!-- ── Study Path (journey nodes) ── --%>
@@ -160,7 +221,7 @@ defmodule FunSheepWeb.DashboardLive do
           Other Tests
         </h2>
         <div class="space-y-2">
-          <.test_row :for={t <- @other_tests} test={t} />
+          <.test_row :for={t <- @other_tests} test={t} pinned_id={@pinned_test_id} />
         </div>
       </div>
 
@@ -193,6 +254,9 @@ defmodule FunSheepWeb.DashboardLive do
   end
 
   # ── Focus Card: Most Urgent Test ─────────────────────────────────────────
+
+  attr :test, :map, required: true
+  attr :pinned?, :boolean, default: false
 
   defp focus_card(assigns) do
     days_left = Date.diff(assigns.test.test.test_date, Date.utc_today())
@@ -281,6 +345,27 @@ defmodule FunSheepWeb.DashboardLive do
           </p>
           <%!-- Stop propagation so these buttons don't trigger the card's phx-click --%>
           <div class="flex items-center gap-2" phx-click="noop" phx-value-stop="true">
+            <button
+              :if={@pinned?}
+              type="button"
+              phx-click="unpin_test"
+              class="bg-white/20 border border-white/30 text-white hover:bg-white/30 rounded-full p-1.5 sm:p-2 cursor-pointer transition-colors"
+              aria-label="Unpin as focus test"
+              title="Pinned as your focus — click to unpin"
+            >
+              <.icon name="hero-star-solid" class="w-4 h-4" />
+            </button>
+            <button
+              :if={not @pinned?}
+              type="button"
+              phx-click="pin_test"
+              phx-value-schedule-id={@schedule_id}
+              class="bg-white/20 border border-white/30 text-white hover:bg-white/30 rounded-full p-1.5 sm:p-2 cursor-pointer transition-colors"
+              aria-label="Pin as focus test"
+              title="Pin as your focus test"
+            >
+              <.icon name="hero-star" class="w-4 h-4" />
+            </button>
             <.link
               navigate={~p"/courses/#{@course_id}/tests/#{@schedule_id}/edit"}
               class="bg-white/20 border border-white/30 text-white hover:bg-white/30 rounded-full p-1.5 sm:p-2 cursor-pointer transition-colors"
@@ -438,6 +523,9 @@ defmodule FunSheepWeb.DashboardLive do
 
   # ── Test Row: Compact row for secondary tests ────────────────────────────
 
+  attr :test, :map, required: true
+  attr :pinned_id, :string, default: nil
+
   defp test_row(assigns) do
     days = Date.diff(assigns.test.test.test_date, Date.utc_today())
 
@@ -447,6 +535,7 @@ defmodule FunSheepWeb.DashboardLive do
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id
     attempts_count = Map.get(assigns.test, :attempts_count, 0)
+    pinned? = assigns.pinned_id == schedule_id
 
     assigns =
       assigns
@@ -455,34 +544,56 @@ defmodule FunSheepWeb.DashboardLive do
       |> assign(:course_id, course_id)
       |> assign(:schedule_id, schedule_id)
       |> assign(:attempts_count, attempts_count)
+      |> assign(:pinned?, pinned?)
 
     ~H"""
-    <.link
-      navigate={~p"/courses/#{@course_id}/tests/#{@schedule_id}/assess"}
-      class="bg-white rounded-2xl border border-gray-100 p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 card-hover block touch-target"
-    >
-      <div class={["w-1.5 h-10 rounded-full shrink-0", test_urgency_color(@test.test.test_date)]} />
-      <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-green-50 flex items-center justify-center text-base sm:text-lg shrink-0">
-        {subject_emoji(if @test.test.course, do: @test.test.course.subject, else: nil)}
-      </div>
-      <div class="flex-1 min-w-0">
-        <p class="font-bold text-gray-900 text-sm truncate">{@test.test.name}</p>
-        <p class="text-xs text-gray-400 truncate">
-          {if @test.test.course, do: @test.test.course.name, else: ""} · {Calendar.strftime(
-            @test.test.test_date,
-            "%b %d"
-          )} · {@attempts_count} answered
-        </p>
-      </div>
-      <div class="text-right shrink-0">
-        <p class={["text-sm font-extrabold", days_text_color(@days)]}>{@days}d</p>
-      </div>
-      <div :if={@readiness_pct} class="text-right shrink-0">
-        <p class={["text-sm font-extrabold", readiness_pct_color(@readiness_pct)]}>
-          {@readiness_pct}%
-        </p>
-      </div>
-    </.link>
+    <div class="bg-white rounded-2xl border border-gray-100 p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 card-hover touch-target">
+      <.link
+        navigate={~p"/courses/#{@course_id}/tests/#{@schedule_id}/assess"}
+        class="flex-1 flex items-center gap-2.5 sm:gap-3 min-w-0"
+      >
+        <div class={[
+          "w-1.5 h-10 rounded-full shrink-0",
+          test_urgency_color(@test.test.test_date)
+        ]} />
+        <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-green-50 flex items-center justify-center text-base sm:text-lg shrink-0">
+          {subject_emoji(if @test.test.course, do: @test.test.course.subject, else: nil)}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="font-bold text-gray-900 text-sm truncate">{@test.test.name}</p>
+          <p class="text-xs text-gray-400 truncate">
+            {if @test.test.course, do: @test.test.course.name, else: ""} · {Calendar.strftime(
+              @test.test.test_date,
+              "%b %d"
+            )} · {@attempts_count} answered
+          </p>
+        </div>
+        <div class="text-right shrink-0">
+          <p class={["text-sm font-extrabold", days_text_color(@days)]}>{@days}d</p>
+        </div>
+        <div :if={@readiness_pct} class="text-right shrink-0">
+          <p class={["text-sm font-extrabold", readiness_pct_color(@readiness_pct)]}>
+            {@readiness_pct}%
+          </p>
+        </div>
+      </.link>
+      <button
+        type="button"
+        phx-click={if @pinned?, do: "unpin_test", else: "pin_test"}
+        phx-value-schedule-id={@schedule_id}
+        class={[
+          "shrink-0 rounded-full p-1.5 sm:p-2 transition-colors cursor-pointer",
+          if(@pinned?,
+            do: "text-[#4CD964] hover:bg-green-50",
+            else: "text-gray-300 hover:text-gray-500 hover:bg-gray-50"
+          )
+        ]}
+        aria-label={if @pinned?, do: "Unpin as focus test", else: "Pin as focus test"}
+        title={if @pinned?, do: "Pinned as your focus — click to unpin", else: "Pin as focus test"}
+      >
+        <.icon name={if @pinned?, do: "hero-star-solid", else: "hero-star"} class="w-4 h-4" />
+      </button>
+    </div>
     """
   end
 
@@ -549,8 +660,8 @@ defmodule FunSheepWeb.DashboardLive do
         wool_level={@gamification.streak.wool_level}
         message={
           if @course_count == 0,
-            do: "Let's add your first course!",
-            else: "Schedule a test to start your journey!"
+            do: "Let's get you set up!",
+            else: "Let's pick what you're studying for!"
         }
       />
 
@@ -558,17 +669,23 @@ defmodule FunSheepWeb.DashboardLive do
         {if @course_count == 0, do: "Welcome to Fun Sheep!", else: "No upcoming tests"}
       </h3>
       <p class="text-gray-500 text-sm mt-1 mb-5 max-w-sm mx-auto">
-        {if @course_count == 0,
-          do: "Add a course and schedule your first test. I'll guide you to 100% readiness!",
-          else: "Schedule a test from one of your courses and I'll build your study path."}
+        Connect your school's LMS — Google Classroom or Canvas — and we'll automatically import your upcoming tests. Or add a test manually if your school isn't connected.
       </p>
 
-      <.link
-        navigate={if @course_count == 0, do: ~p"/courses", else: ~p"/courses"}
-        class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-bold px-6 py-3 sm:py-2.5 rounded-full shadow-md text-sm transition-colors touch-target inline-flex items-center justify-center"
-      >
-        {if @course_count == 0, do: "Add a Course", else: "Go to Courses"}
-      </.link>
+      <div class="flex flex-col sm:flex-row gap-2 justify-center items-stretch sm:items-center max-w-md mx-auto">
+        <.link
+          navigate={~p"/integrations"}
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-bold px-6 py-3 sm:py-2.5 rounded-full shadow-md text-sm transition-colors touch-target inline-flex items-center justify-center gap-2"
+        >
+          <.icon name="hero-link" class="w-4 h-4" /> Connect School LMS
+        </.link>
+        <.link
+          navigate={~p"/courses"}
+          class="bg-white hover:bg-gray-50 text-gray-700 font-bold px-6 py-3 sm:py-2.5 rounded-full border border-gray-200 text-sm transition-colors touch-target inline-flex items-center justify-center"
+        >
+          {if @course_count == 0, do: "Add a course manually", else: "Create a test manually"}
+        </.link>
+      </div>
     </div>
     """
   end
