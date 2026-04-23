@@ -28,7 +28,18 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   import Ecto.Query
   require Logger
 
-  @default_confidence_threshold 0.85
+  # Default lowered from 0.85 → 0.5 on 2026-04-22. The original threshold was
+  # set conservatively against the I-1 invariant (only adaptive-eligible
+  # questions reach students), but in production gpt-4o-mini's calibrated
+  # confidence on real chapter→section mapping for AP Biology landed in the
+  # 0.5–0.7 range *for valid* assignments — so 0.85 rejected nearly every
+  # otherwise-good classification, leaving 925 questions stuck at
+  # :low_confidence and invisible to delivery (course d44628ca incident).
+  # 0.5 is the floor below which the LLM is genuinely guessing; the
+  # `valid_section_id` check (section must exist in this chapter) prevents
+  # randomly-confident-but-wrong assignments from leaking through.
+  # Override via `CLASSIFIER_CONFIDENCE_THRESHOLD` env var for tuning.
+  @default_confidence_threshold 0.5
 
   # Interactor only applies `assistant_attrs` on first provision, so pushing
   # a config change (model, prompt, token cap) requires registering under a
