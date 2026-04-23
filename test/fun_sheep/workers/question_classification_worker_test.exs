@@ -148,10 +148,12 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
 
       expect(AgentsMock, :resolve_or_create_assistant, fn _attrs -> {:ok, "mock-id"} end)
 
+      # New shape: LLM returns section_number (1-indexed), worker resolves
+      # to the real UUID. Eliminates UUID-hallucination as a failure mode.
       expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
         {:ok,
          Jason.encode!(%{
-           "section_id" => section.id,
+           "section_number" => 1,
            "confidence" => 0.95,
            "rationale" => "clearly an adding-fractions question"
          })}
@@ -165,6 +167,54 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
       reloaded = Repo.get!(Question, question.id)
       assert reloaded.classification_status == :ai_classified
       assert reloaded.section_id == section.id
+    end
+
+    test "still accepts the legacy section_id shape (forward-compat)" do
+      %{section: section, question: question} = fixture()
+
+      expect(AgentsMock, :resolve_or_create_assistant, fn _attrs -> {:ok, "mock-id"} end)
+
+      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+        {:ok,
+         Jason.encode!(%{
+           "section_id" => section.id,
+           "confidence" => 0.9,
+           "rationale" => "fallback path"
+         })}
+      end)
+
+      assert :ok =
+               QuestionClassificationWorker.perform(%Oban.Job{
+                 args: %{"question_ids" => [question.id]}
+               })
+
+      assert Repo.get!(Question, question.id).classification_status == :ai_classified
+    end
+
+    test "out-of-range section_number routes to :low_confidence (no crash, no hallucination leak)" do
+      %{question: question} = fixture()
+
+      expect(AgentsMock, :resolve_or_create_assistant, fn _attrs -> {:ok, "mock-id"} end)
+
+      # The fixture chapter has exactly 1 section. Asking for #5 must NOT
+      # silently pick a random section — it must mark :low_confidence.
+      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+        {:ok,
+         Jason.encode!(%{
+           "section_number" => 5,
+           "confidence" => 0.9,
+           "rationale" => "guessing"
+         })}
+      end)
+
+      assert :ok =
+               QuestionClassificationWorker.perform(%Oban.Job{
+                 args: %{"question_ids" => [question.id]}
+               })
+
+      reloaded = Repo.get!(Question, question.id)
+      assert reloaded.classification_status == :low_confidence
+      assert is_nil(reloaded.section_id)
     end
   end
 
