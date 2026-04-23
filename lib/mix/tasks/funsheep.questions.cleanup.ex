@@ -153,7 +153,12 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
     print_line("  -> this is the real inventory the engine can serve (I-1)", "")
 
     Mix.shell().info("")
-    print_line("Passed but missing section_id (I-1 violation):", count_passed_no_section(course_id))
+
+    print_line(
+      "Passed but missing section_id (I-1 violation):",
+      count_passed_no_section(course_id)
+    )
+
     print_line("Null chapter_id (any status):", count_null_chapter(course_id))
 
     Mix.shell().info("\nNeeds-review buckets:")
@@ -197,7 +202,8 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
 
   defp count_passed_no_section(course_id) do
     from(q in Question,
-      where: q.course_id == ^course_id and q.validation_status == :passed and is_nil(q.section_id),
+      where:
+        q.course_id == ^course_id and q.validation_status == :passed and is_nil(q.section_id),
       select: count(q.id)
     )
     |> Repo.one()
@@ -282,7 +288,10 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
     candidates = Repo.all(base)
     total = length(candidates)
 
-    Mix.shell().info("\n=== APPLY EXPLANATIONS (#{if dry_run?, do: "DRY-RUN", else: "CONFIRMED"}) ===")
+    Mix.shell().info(
+      "\n=== APPLY EXPLANATIONS (#{if dry_run?, do: "DRY-RUN", else: "CONFIRMED"}) ==="
+    )
+
     Mix.shell().info("Candidates: #{total}\n")
 
     if total == 0 do
@@ -515,8 +524,7 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
     ids =
       from(q in Question,
         where: q.course_id == ^course_id,
-        where:
-          (q.validation_status == :passed and is_nil(q.section_id)) or is_nil(q.chapter_id),
+        where: (q.validation_status == :passed and is_nil(q.section_id)) or is_nil(q.chapter_id),
         select: q.id
       )
       |> Repo.all()

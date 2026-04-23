@@ -1332,8 +1332,7 @@ defmodule FunSheepWeb.AssessmentLive do
           navigate={~p"/courses/#{@schedule.course_id}/practice?schedule_id=#{@schedule.id}"}
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors inline-flex items-center gap-2"
         >
-          <.icon name="hero-academic-cap" class="w-5 h-5" />
-          Practice Weak Topics
+          <.icon name="hero-academic-cap" class="w-5 h-5" /> Practice Weak Topics
         </.link>
         <div class="flex justify-center gap-3">
           <.link
