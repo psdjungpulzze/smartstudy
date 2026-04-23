@@ -1,18 +1,24 @@
 defmodule FunSheepWeb.PracticeLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Courses, Engagement, Gamification, Questions, Tutor}
-  alias FunSheep.Assessments.PracticeEngine
+  alias FunSheep.{Assessments, Courses, Engagement, Gamification, Questions, Tutor}
+  alias FunSheep.Assessments.{PracticeEngine, ScopeReadiness}
   alias FunSheep.Gamification.FpEconomy
 
   @xp_per_correct FpEconomy.xp_per_correct()
 
   @impl true
-  def mount(%{"course_id" => course_id}, _session, socket) do
+  def mount(%{"course_id" => course_id} = params, _session, socket) do
     course = Courses.get_course_with_chapters!(course_id)
     user_role_id = socket.assigns.current_user["user_role_id"]
 
-    state = PracticeEngine.start_practice(user_role_id, course_id)
+    # Teacher-review fix #2: when the student arrives from the diagnostic
+    # summary's "Practice Weak Topics" CTA with a `schedule_id`, scope the
+    # practice session to the chapters in that test's scope. Otherwise
+    # practice draws from the whole course (legacy behavior).
+    {schedule, scope_opts} = resolve_schedule_scope(params)
+
+    state = PracticeEngine.start_practice(user_role_id, course_id, scope_opts)
     total_questions = length(state.questions)
 
     socket =
@@ -22,6 +28,7 @@ defmodule FunSheepWeb.PracticeLive do
         course: course,
         chapters: course.chapters,
         selected_chapter_id: nil,
+        test_schedule: schedule,
         engine_state: state,
         current_question: nil,
         selected_answer: nil,
@@ -42,6 +49,19 @@ defmodule FunSheepWeb.PracticeLive do
 
     {:ok, socket}
   end
+
+  defp resolve_schedule_scope(%{"schedule_id" => schedule_id})
+       when is_binary(schedule_id) and schedule_id != "" do
+    case Assessments.get_test_schedule_with_course!(schedule_id) do
+      %{} = schedule ->
+        chapter_ids = ScopeReadiness.scope_chapter_ids(schedule)
+        {schedule, %{test_schedule_id: schedule.id, chapter_ids: chapter_ids}}
+    end
+  rescue
+    Ecto.NoResultsError -> {nil, %{}}
+  end
+
+  defp resolve_schedule_scope(_params), do: {nil, %{}}
 
   @impl true
   def handle_event("filter_chapter", %{"chapter_id" => chapter_id}, socket) do
@@ -126,7 +146,12 @@ defmodule FunSheepWeb.PracticeLive do
          engine_state: new_state,
          feedback: %{
            is_correct: is_correct,
-           correct_answer: question.answer
+           correct_answer: question.answer,
+           # Teacher-review fix #3: show the canonical explanation inline
+           # on wrong-answer feedback instead of gating learning behind a
+           # Tutor click. Presence is optional — the generator is supposed
+           # to always fill this, but legacy rows may be empty.
+           explanation: question.explanation
          }
        )}
     end
@@ -422,6 +447,13 @@ defmodule FunSheepWeb.PracticeLive do
     """
   end
 
+  # Safe skill-name accessor. Questions can appear here with either a loaded
+  # section (preloaded via `list_weak_questions`) or with `section: nil` if
+  # they predate classifier runs. Returns nil when we have nothing to show
+  # so the badge can be hidden entirely rather than rendering "Practicing: ".
+  defp skill_name(%{section: %{name: name}}) when is_binary(name) and name != "", do: name
+  defp skill_name(_), do: nil
+
   defp difficulty_badge_class(difficulty) do
     case difficulty do
       :easy -> "bg-[#E8F8EB] text-[#4CD964]"
@@ -523,7 +555,7 @@ defmodule FunSheepWeb.PracticeLive do
 
       <%!-- Question card --%>
       <div :if={@current_question && !@practice_complete} class="bg-white rounded-2xl shadow-md p-8">
-        <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center justify-between mb-3">
           <p class="text-sm text-[#8E8E93]">
             Question {@question_number}
             <span :if={@current_question.chapter}>
@@ -533,6 +565,19 @@ defmodule FunSheepWeb.PracticeLive do
           <span class={"px-3 py-1 rounded-full text-xs font-medium #{difficulty_badge_class(@current_question.difficulty)}"}>
             {difficulty_label(@current_question.difficulty)}
           </span>
+        </div>
+
+        <%!-- Teacher-review fix #4: show the skill being practiced.
+             Metacognitive awareness (Flavell) — students who know what
+             skill they're drilling retain more. Only renders when the
+             question has a classified section; unclassified questions
+             shouldn't even reach the adaptive engine per I-1. --%>
+        <div
+          :if={skill_name(@current_question)}
+          class="mb-6 inline-flex items-center gap-2 px-3 py-1 bg-[#E8F8EB] text-[#4CD964] rounded-full text-xs font-medium"
+        >
+          <.icon name="hero-sparkles" class="w-3.5 h-3.5" />
+          Practicing: {skill_name(@current_question)}
         </div>
 
         <%!-- Attached figures (tables, graphs, diagrams) from source material --%>
@@ -611,6 +656,21 @@ defmodule FunSheepWeb.PracticeLive do
                 Correct answer: {@feedback.correct_answer}
               </p>
             </div>
+          </div>
+
+          <%!-- Teacher-review fix #3: show the canonical explanation inline
+               so wrong-answer feedback teaches. Only shown after submit and
+               when we actually have an explanation to share. --%>
+          <div
+            :if={@feedback.explanation && String.trim(@feedback.explanation) != ""}
+            class="mt-3 p-4 bg-[#F5F5F7] rounded-xl border border-[#E5E5EA]"
+          >
+            <p class="text-xs font-medium text-[#8E8E93] uppercase tracking-wide mb-1">
+              Why
+            </p>
+            <p class="text-sm text-[#1C1C1E] leading-relaxed">
+              {@feedback.explanation}
+            </p>
           </div>
 
           <div class="flex justify-end mt-4">

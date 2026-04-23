@@ -25,10 +25,18 @@ defmodule FunSheep.Assessments.PracticeEngine do
 
   def start_practice(user_role_id, course_id, opts \\ %{}) do
     opts = merge_opts(opts)
-    deficits = Questions.skill_deficits(user_role_id, course_id)
+    chapter_ids = opts.chapter_ids || []
+
+    deficits = Questions.skill_deficits(user_role_id, course_id, chapter_ids: chapter_ids)
 
     weak_pool =
-      Questions.list_weak_questions(user_role_id, course_id, opts.chapter_id, opts.limit * 3)
+      Questions.list_weak_questions(
+        user_role_id,
+        course_id,
+        opts.chapter_id,
+        opts.limit * 3,
+        chapter_ids: chapter_ids
+      )
 
     if weak_pool == [] do
       empty_state(user_role_id, course_id, opts, deficits)
@@ -49,9 +57,18 @@ defmodule FunSheep.Assessments.PracticeEngine do
           MapSet.new()
         )
 
+      # Snapshot "previously wrong" IDs for every question that could enter
+      # this session. Used in `summary/1` to compute `improved` as real
+      # wrong→right transitions — the teacher's priority fix #6.
+      pool_ids = Enum.map(weak_pool ++ review_pool, & &1.id)
+
+      previously_wrong_ids =
+        Questions.previously_wrong_question_ids(user_role_id, pool_ids)
+
       %{
         user_role_id: user_role_id,
         course_id: course_id,
+        test_schedule_id: opts.test_schedule_id,
         questions: questions,
         current_index: 0,
         attempts: [],
@@ -60,7 +77,8 @@ defmodule FunSheep.Assessments.PracticeEngine do
         skill_deficits: deficits,
         weak_pool: weak_pool,
         review_pool: review_pool,
-        served_ids: MapSet.new()
+        served_ids: MapSet.new(),
+        previously_wrong_ids: previously_wrong_ids
       }
     end
   end
@@ -116,13 +134,22 @@ defmodule FunSheep.Assessments.PracticeEngine do
   def summary(state) do
     total = length(state.attempts)
     correct = Enum.count(state.attempts, & &1.is_correct)
+    previously_wrong = Map.get(state, :previously_wrong_ids, MapSet.new())
+
+    # Improved = attempts in this session that were correct AND the student
+    # had previously answered the same question wrong (before session start).
+    # Replaces the old meaningless `improved: correct`.
+    improved =
+      Enum.count(state.attempts, fn a ->
+        a.is_correct and MapSet.member?(previously_wrong, a.question_id)
+      end)
 
     %{
       total: total,
       correct: correct,
       incorrect: total - correct,
       score: if(total > 0, do: Float.round(correct / total * 100, 1), else: 0.0),
-      improved: correct
+      improved: improved
     }
   end
 
@@ -131,7 +158,9 @@ defmodule FunSheep.Assessments.PracticeEngine do
       limit: Map.get(opts, :limit, @default_limit),
       interleave_ratio: Map.get(opts, :interleave_ratio, @default_interleave_ratio),
       review_floor: Map.get(opts, :review_floor, @default_review_floor),
-      chapter_id: Map.get(opts, :chapter_id)
+      chapter_id: Map.get(opts, :chapter_id),
+      chapter_ids: Map.get(opts, :chapter_ids),
+      test_schedule_id: Map.get(opts, :test_schedule_id)
     }
   end
 
@@ -139,6 +168,7 @@ defmodule FunSheep.Assessments.PracticeEngine do
     %{
       user_role_id: user_role_id,
       course_id: course_id,
+      test_schedule_id: opts.test_schedule_id,
       questions: [],
       current_index: 0,
       attempts: [],
@@ -147,7 +177,8 @@ defmodule FunSheep.Assessments.PracticeEngine do
       skill_deficits: deficits,
       weak_pool: [],
       review_pool: [],
-      served_ids: MapSet.new()
+      served_ids: MapSet.new(),
+      previously_wrong_ids: MapSet.new()
     }
   end
 

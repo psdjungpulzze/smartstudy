@@ -492,11 +492,15 @@ defmodule FunSheep.Questions do
   backfill the remainder so the user always receives a full session when any
   weak questions exist.
   """
-  def list_weak_questions(user_role_id, course_id, chapter_id \\ nil, limit \\ 20) do
+  def list_weak_questions(user_role_id, course_id, chapter_id \\ nil, limit \\ 20, opts \\ []) do
     recent_ids = recently_attempted_question_ids(user_role_id, limit)
+    chapter_ids = Keyword.get(opts, :chapter_ids, [])
 
     primary =
-      weak_questions_query(user_role_id, course_id, chapter_id, limit, exclude: recent_ids)
+      weak_questions_query(user_role_id, course_id, chapter_id, limit,
+        exclude: recent_ids,
+        chapter_ids: chapter_ids
+      )
       |> Repo.all()
 
     if length(primary) >= limit do
@@ -507,7 +511,8 @@ defmodule FunSheep.Questions do
 
       backfill =
         weak_questions_query(user_role_id, course_id, chapter_id, shortfall,
-          exclude: already_picked
+          exclude: already_picked,
+          chapter_ids: chapter_ids
         )
         |> Repo.all()
 
@@ -517,6 +522,7 @@ defmodule FunSheep.Questions do
 
   defp weak_questions_query(user_role_id, course_id, chapter_id, limit, opts) do
     exclude_ids = Keyword.get(opts, :exclude, [])
+    chapter_ids = Keyword.get(opts, :chapter_ids, [])
 
     from(q in Question,
       join: qa in QuestionAttempt,
@@ -545,9 +551,10 @@ defmodule FunSheep.Questions do
         desc: max(qa.inserted_at)
       ],
       limit: ^limit,
-      preload: [:chapter, :stats]
+      preload: [:chapter, :section, :stats]
     )
     |> maybe_filter_chapter_for_practice(chapter_id)
+    |> maybe_filter_chapter_ids(chapter_ids)
     |> maybe_exclude_question_ids(exclude_ids)
   end
 
@@ -557,27 +564,64 @@ defmodule FunSheep.Questions do
     where(query, [q], q.chapter_id == ^chapter_id)
   end
 
+  # Scopes practice to the specific chapters in a test schedule. Empty list
+  # falls through unfiltered so returning students without a schedule_id
+  # query param keep getting the course-wide behavior.
+  defp maybe_filter_chapter_ids(query, []), do: query
+
+  defp maybe_filter_chapter_ids(query, chapter_ids) when is_list(chapter_ids) do
+    where(query, [q], q.chapter_id in ^chapter_ids)
+  end
+
+  @doc """
+  Returns the subset of `question_ids` that this user has previously
+  answered incorrectly at least once. Used by `PracticeEngine` to compute
+  real wrong→right "improved" counts in the summary — without this, the
+  summary can't distinguish "just correct" from "learned to get right."
+  """
+  def previously_wrong_question_ids(_user_role_id, []), do: MapSet.new()
+
+  def previously_wrong_question_ids(user_role_id, question_ids)
+      when is_list(question_ids) do
+    from(qa in QuestionAttempt,
+      where:
+        qa.user_role_id == ^user_role_id and
+          qa.question_id in ^question_ids and
+          qa.is_correct == false,
+      distinct: true,
+      select: qa.question_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
   @doc """
   Returns per-skill deficit scores for a user in a course.
   `deficit = 1 - correct/total` in [0.0, 1.0]. Higher = weaker.
   Returns `%{section_id => %{correct, total, deficit}}`.
   """
-  def skill_deficits(user_role_id, course_id) do
-    from(q in Question,
-      join: qa in QuestionAttempt,
-      on: qa.question_id == q.id,
-      where:
-        qa.user_role_id == ^user_role_id and
-          q.course_id == ^course_id and
-          not is_nil(q.section_id) and
-          q.classification_status in ^@adaptive_classifications,
-      group_by: q.section_id,
-      select: %{
-        section_id: q.section_id,
-        correct: fragment("COUNT(*) FILTER (WHERE ?)", qa.is_correct),
-        total: count(qa.id)
-      }
-    )
+  def skill_deficits(user_role_id, course_id, opts \\ []) do
+    chapter_ids = Keyword.get(opts, :chapter_ids, [])
+
+    base =
+      from(q in Question,
+        join: qa in QuestionAttempt,
+        on: qa.question_id == q.id,
+        where:
+          qa.user_role_id == ^user_role_id and
+            q.course_id == ^course_id and
+            not is_nil(q.section_id) and
+            q.classification_status in ^@adaptive_classifications,
+        group_by: q.section_id,
+        select: %{
+          section_id: q.section_id,
+          correct: fragment("COUNT(*) FILTER (WHERE ?)", qa.is_correct),
+          total: count(qa.id)
+        }
+      )
+
+    base
+    |> maybe_filter_chapter_ids(chapter_ids)
     |> Repo.all()
     |> Map.new(fn row ->
       deficit =
