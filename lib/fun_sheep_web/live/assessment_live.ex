@@ -110,6 +110,8 @@ defmodule FunSheepWeb.AssessmentLive do
     initial_phase =
       case readiness do
         :ready -> if(question_sources != [], do: :setup, else: :testing)
+        # Some chapters ready — start immediately with available questions
+        {:scope_partial, _} -> if(question_sources != [], do: :setup, else: :testing)
         _ -> :readiness_block
       end
 
@@ -286,24 +288,6 @@ defmodule FunSheepWeb.AssessmentLive do
     {:noreply, put_flash(socket, :info, flash_message)}
   end
 
-  def handle_event("start_with_partial", _params, socket) do
-    schedule = socket.assigns.schedule
-
-    socket =
-      if socket.assigns.question_sources != [] do
-        assign(socket, phase: :setup, readiness: :ready)
-      else
-        state = Engine.start_assessment(schedule)
-
-        socket
-        |> assign(engine_state: state, phase: :testing, readiness: :ready)
-        |> advance_to_next_question()
-        |> save_state_to_cache()
-      end
-
-    {:noreply, socket}
-  end
-
   @impl true
   # Course-level pipeline event: discovery/OCR/generation/validation all
   # broadcast `{:processing_update, ...}` on `course:{id}`. Any such event
@@ -327,11 +311,13 @@ defmodule FunSheepWeb.AssessmentLive do
   defp maybe_transition_on_readiness(%{assigns: %{phase: :readiness_block}} = socket) do
     readiness = Assessments.scope_readiness(socket.assigns.schedule)
 
+    can_start = readiness == :ready or match?({:scope_partial, _}, readiness)
+
     cond do
-      readiness == :ready and socket.assigns.question_sources != [] ->
+      can_start and socket.assigns.question_sources != [] ->
         assign(socket, readiness: readiness, phase: :setup)
 
-      readiness == :ready ->
+      can_start ->
         state = Engine.start_assessment(socket.assigns.schedule)
 
         socket
@@ -631,7 +617,6 @@ defmodule FunSheepWeb.AssessmentLive do
   defp render_readiness_block(assigns) do
     copy = readiness_copy(assigns.readiness)
     retry_chapter_count = retry_chapter_count(assigns.readiness)
-    show_start_partial? = match?({:scope_partial, _}, assigns.readiness)
 
     assigns =
       assign(assigns,
@@ -639,8 +624,7 @@ defmodule FunSheepWeb.AssessmentLive do
         body: copy.body,
         tone: copy.tone,
         show_retry?: copy.show_retry?,
-        retry_chapter_count: retry_chapter_count,
-        show_start_partial?: show_start_partial?
+        retry_chapter_count: retry_chapter_count
       )
 
     ~H"""
@@ -664,16 +648,9 @@ defmodule FunSheepWeb.AssessmentLive do
         <button
           :if={@show_retry?}
           phx-click="retry_generation"
-          class="border border-[#4CD964] text-[#4CD964] hover:bg-[#E8F8EB] font-medium px-6 py-2 rounded-full transition-colors"
-        >
-          Generate Questions Now
-        </button>
-        <button
-          :if={@show_start_partial?}
-          phx-click="start_with_partial"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
         >
-          Start with Available Chapters
+          Generate Questions Now
         </button>
       </div>
     </div>

@@ -238,7 +238,7 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       refute html =~ "Question 1"
     end
 
-    test "shows scope_partial screen when some chapters ready and some missing", %{conn: conn} do
+    test "auto-starts assessment when some chapters ready and some missing", %{conn: conn} do
       user_role = ContentFixtures.create_user_role()
       course = ready_course(user_role)
 
@@ -267,8 +267,9 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       {:ok, _view, html} =
         live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
 
-      assert html =~ "Some chapters still need questions"
-      assert html =~ "Generate Questions Now"
+      # scope_partial no longer blocks — assessment starts with the ready chapter's questions
+      refute html =~ "Some chapters still need questions"
+      refute html =~ "Course is still processing"
     end
 
     test "shows course_failed screen when course processing failed", %{conn: conn} do
