@@ -56,6 +56,89 @@ defmodule FunSheepWeb.AdminPagesTest do
       assert html =~ "Teacher"
       assert html =~ "Admin"
     end
+
+    test "shows Free lessons button for free-plan students and saves bonus", %{conn: conn} do
+      {:ok, student} =
+        Accounts.create_user_role(%{
+          interactor_user_id: Ecto.UUID.generate(),
+          role: :student,
+          email: "free_student@test.com",
+          display_name: "Free Student"
+        })
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
+
+      assert has_element?(view, "button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+
+      view
+      |> element("button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+      |> render_click()
+
+      assert has_element?(view, "form[phx-submit='save_bonus']")
+      assert render(view) =~ "free_student@test.com"
+      assert render(view) =~ "50 base + 0 bonus"
+
+      view
+      |> form("form[phx-submit='save_bonus']", bonus: "30")
+      |> render_submit()
+
+      assert FunSheep.Billing.lifetime_usage(student.id).limit == 80
+      assert render(view) =~ "Free lessons updated for free_student@test.com"
+    end
+
+    test "Free lessons button is hidden for non-students", %{conn: conn} do
+      {:ok, parent} =
+        Accounts.create_user_role(%{
+          interactor_user_id: Ecto.UUID.generate(),
+          role: :parent,
+          email: "p@test.com",
+          display_name: "Parent"
+        })
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
+
+      refute has_element?(view, "button[phx-click='open_bonus'][phx-value-id='#{parent.id}']")
+    end
+
+    test "Free lessons button is hidden for paid-plan students", %{conn: conn} do
+      {:ok, student} =
+        Accounts.create_user_role(%{
+          interactor_user_id: Ecto.UUID.generate(),
+          role: :student,
+          email: "paid@test.com",
+          display_name: "Paid Student"
+        })
+
+      {:ok, sub} = FunSheep.Billing.get_or_create_subscription(student.id)
+      {:ok, _} = FunSheep.Billing.update_subscription(sub, %{plan: "monthly"})
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
+
+      refute has_element?(view, "button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+    end
+
+    test "rejects non-integer bonus input", %{conn: conn} do
+      {:ok, student} =
+        Accounts.create_user_role(%{
+          interactor_user_id: Ecto.UUID.generate(),
+          role: :student,
+          email: "validate@test.com",
+          display_name: "Validate"
+        })
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
+
+      view
+      |> element("button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+      |> render_click()
+
+      view
+      |> form("form[phx-submit='save_bonus']", bonus: "abc")
+      |> render_submit()
+
+      assert render(view) =~ "Bonus must be a non-negative whole number."
+      assert FunSheep.Billing.lifetime_usage(student.id).limit == 50
+    end
   end
 
   describe "/admin/courses" do

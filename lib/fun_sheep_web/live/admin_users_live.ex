@@ -5,8 +5,11 @@ defmodule FunSheepWeb.AdminUsersLive do
   """
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Accounts, Admin}
+  import Ecto.Query, only: [from: 2]
+
+  alias FunSheep.{Accounts, Admin, Billing, Repo}
   alias FunSheep.Accounts.UserRole
+  alias FunSheep.Billing.Subscription
 
   @page_size 25
 
@@ -18,6 +21,7 @@ defmodule FunSheepWeb.AdminUsersLive do
      |> assign(:search, "")
      |> assign(:role_filter, nil)
      |> assign(:page, 0)
+     |> assign(:editing_bonus, nil)
      |> load_users()}
   end
 
@@ -117,6 +121,57 @@ defmodule FunSheepWeb.AdminUsersLive do
     end
   end
 
+  def handle_event("open_bonus", %{"id" => id}, socket) do
+    target = Accounts.get_user_role!(id)
+    {:ok, sub} = Billing.get_or_create_subscription(target.id)
+    stats = Billing.usage_stats(target.id)
+
+    editing = %{
+      user_id: target.id,
+      email: target.email,
+      bonus: sub.bonus_free_tests || 0,
+      used: stats.total_tests,
+      limit: stats.initial_limit
+    }
+
+    {:noreply, assign(socket, :editing_bonus, editing)}
+  end
+
+  def handle_event("close_bonus", _, socket) do
+    {:noreply, assign(socket, :editing_bonus, nil)}
+  end
+
+  def handle_event("save_bonus", %{"bonus" => raw}, socket) do
+    case parse_bonus(raw) do
+      {:ok, bonus} ->
+        target = Accounts.get_user_role!(socket.assigns.editing_bonus.user_id)
+
+        case Admin.set_bonus_free_tests(target, bonus, socket.assigns.current_user) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Free lessons updated for #{target.email}.")
+             |> assign(:editing_bonus, nil)
+             |> load_users()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to update free lessons.")}
+        end
+
+      :error ->
+        {:noreply, put_flash(socket, :error, "Bonus must be a non-negative whole number.")}
+    end
+  end
+
+  defp parse_bonus(raw) when is_binary(raw) do
+    case Integer.parse(String.trim(raw)) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp parse_bonus(_), do: :error
+
   defp load_users(socket) do
     opts = [
       search: socket.assigns.search,
@@ -127,12 +182,43 @@ defmodule FunSheepWeb.AdminUsersLive do
 
     users = Accounts.list_users_for_admin(opts)
     total = Accounts.count_users_for_admin(Keyword.take(opts, [:search, :role]))
+    subs_by_user = subscriptions_for(users)
 
     socket
     |> assign(:users, users)
+    |> assign(:subs_by_user, subs_by_user)
     |> assign(:total, total)
     |> assign(:page_size, @page_size)
   end
+
+  defp subscriptions_for([]), do: %{}
+
+  defp subscriptions_for(users) do
+    student_ids =
+      users
+      |> Enum.filter(&(&1.role == :student))
+      |> Enum.map(& &1.id)
+
+    case student_ids do
+      [] ->
+        %{}
+
+      ids ->
+        from(s in Subscription, where: s.user_role_id in ^ids)
+        |> Repo.all()
+        |> Map.new(&{&1.user_role_id, &1})
+    end
+  end
+
+  defp on_free_plan?(%UserRole{role: :student} = u, subs_by_user) do
+    case Map.get(subs_by_user, u.id) do
+      nil -> true
+      %Subscription{plan: "free"} -> true
+      _ -> false
+    end
+  end
+
+  defp on_free_plan?(_user, _subs), do: false
 
   @impl true
   def render(assigns) do
@@ -233,6 +319,16 @@ defmodule FunSheepWeb.AdminUsersLive do
                     Reinstate
                   </button>
                   <button
+                    :if={on_free_plan?(u, @subs_by_user)}
+                    type="button"
+                    phx-click="open_bonus"
+                    phx-value-id={u.id}
+                    title="Grant or reset bonus free lessons"
+                    class="px-3 py-1 rounded-full text-xs font-medium text-[#1C1C1E] border border-[#4CD964]/40 hover:bg-[#E8F8EB]"
+                  >
+                    Free lessons
+                  </button>
+                  <button
                     :if={u.role != :admin}
                     type="button"
                     phx-click="promote"
@@ -277,6 +373,8 @@ defmodule FunSheepWeb.AdminUsersLive do
         </table>
       </div>
 
+      <.bonus_modal :if={@editing_bonus} editing={@editing_bonus} />
+
       <div class="mt-4 flex items-center justify-between text-sm text-[#8E8E93]">
         <div>
           Page {@page + 1} of {max(div(@total - 1, @page_size) + 1, 1)}
@@ -312,6 +410,86 @@ defmodule FunSheepWeb.AdminUsersLive do
     else
       "#{base} bg-white text-[#1C1C1E] border-[#E5E5EA] hover:border-[#4CD964]/40"
     end
+  end
+
+  attr :editing, :map, required: true
+
+  defp bonus_modal(assigns) do
+    ~H"""
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      phx-click="close_bonus"
+    >
+      <div
+        class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4"
+        phx-click-away="close_bonus"
+        phx-window-keydown="close_bonus"
+        phx-key="escape"
+        onclick="event.stopPropagation()"
+      >
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-bold text-[#1C1C1E]">Free lessons</h2>
+            <p class="text-xs text-[#8E8E93] mt-0.5">{@editing.email}</p>
+          </div>
+          <button
+            type="button"
+            phx-click="close_bonus"
+            aria-label="Close"
+            class="text-[#8E8E93] hover:text-[#1C1C1E] text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="bg-[#F5F5F7] rounded-xl p-3 text-sm text-[#1C1C1E] mb-4">
+          Used <span class="font-semibold">{@editing.used}</span>
+          of <span class="font-semibold">{@editing.limit}</span>
+          lifetime free lessons
+          <span class="text-[#8E8E93]">
+            (50 base + {@editing.bonus} bonus)
+          </span>
+        </div>
+
+        <.form for={%{}} phx-submit="save_bonus" class="space-y-4">
+          <div>
+            <label for="bonus" class="block text-sm font-medium text-[#1C1C1E] mb-1">
+              Bonus free lessons
+            </label>
+            <input
+              id="bonus"
+              type="number"
+              name="bonus"
+              min="0"
+              step="1"
+              value={@editing.bonus}
+              class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-lg outline-none transition-colors"
+              autofocus
+            />
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Granted on top of the 50-lesson base. Set to 0 to revoke.
+            </p>
+          </div>
+
+          <div class="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              phx-click="close_bonus"
+              class="px-4 py-2 rounded-full text-sm font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="px-4 py-2 rounded-full text-sm font-medium text-white bg-[#4CD964] hover:bg-[#3DBF55] shadow-md"
+            >
+              Save
+            </button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
   end
 
   attr :role, :atom, required: true

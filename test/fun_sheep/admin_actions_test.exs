@@ -1,7 +1,7 @@
 defmodule FunSheep.AdminActionsTest do
   use FunSheep.DataCase, async: true
 
-  alias FunSheep.{Accounts, Admin, Courses}
+  alias FunSheep.{Accounts, Admin, Billing, Courses}
   alias FunSheep.Accounts.UserRole
 
   defp create_user(role, email) do
@@ -84,6 +84,45 @@ defmodule FunSheep.AdminActionsTest do
       target = create_user(:student, "nope@test.com")
 
       assert {:error, :not_admin} = Admin.demote_admin(target, actor(operator))
+    end
+  end
+
+  describe "set_bonus_free_tests/3" do
+    test "updates the subscription bonus and audits the change" do
+      operator = create_user(:admin, "op_bonus@test.com")
+      target = create_user(:student, "bonus_grant@test.com")
+
+      assert {:ok, sub} = Admin.set_bonus_free_tests(target, 25, actor(operator))
+      assert sub.bonus_free_tests == 25
+      assert Billing.lifetime_usage(target.id).limit == 75
+
+      logs = Admin.list_audit_logs()
+
+      assert Enum.any?(logs, fn l ->
+               l.action == "user.set_bonus_free_tests" and
+                 l.target_id == target.id and
+                 l.metadata["new_bonus"] == 25 and
+                 l.metadata["previous_bonus"] == 0
+             end)
+    end
+
+    test "setting bonus to 0 revokes a prior grant" do
+      operator = create_user(:admin, "op_revoke@test.com")
+      target = create_user(:student, "revoke_me@test.com")
+
+      {:ok, _} = Admin.set_bonus_free_tests(target, 10, actor(operator))
+      assert Billing.lifetime_usage(target.id).limit == 60
+
+      {:ok, _} = Admin.set_bonus_free_tests(target, 0, actor(operator))
+      assert Billing.lifetime_usage(target.id).limit == 50
+    end
+
+    test "rejects negative or non-integer values" do
+      operator = create_user(:admin, "op_bad@test.com")
+      target = create_user(:student, "bad_input@test.com")
+
+      assert {:error, :invalid_bonus} = Admin.set_bonus_free_tests(target, -1, actor(operator))
+      assert {:error, :invalid_bonus} = Admin.set_bonus_free_tests(target, "5", actor(operator))
     end
   end
 

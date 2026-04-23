@@ -52,6 +52,15 @@ defmodule FunSheep.BillingUsageTest do
       record_tests(s.id, 3)
       assert %{used: 3, remaining: 47} = Billing.lifetime_usage(s.id)
     end
+
+    test "adds bonus_free_tests on top of the base limit" do
+      s = create_student()
+      {:ok, sub} = Billing.get_or_create_subscription(s.id)
+      {:ok, _} = Billing.update_subscription(sub, %{bonus_free_tests: 25})
+
+      record_tests(s.id, 10)
+      assert %{used: 10, limit: 75, remaining: 65} = Billing.lifetime_usage(s.id)
+    end
   end
 
   describe "weekly_usage/1" do
@@ -207,6 +216,23 @@ defmodule FunSheep.BillingUsageTest do
 
       # Weekly is 0, so state is :fresh, but lifetime is 51 > 50 — blocked.
       refute Billing.can_start_test?(s.id)
+    end
+
+    test "true again once a bonus is granted that lifts the cap above usage" do
+      s = create_student()
+      long_ago = DateTime.add(DateTime.utc_now(), -30, :day) |> DateTime.truncate(:second)
+
+      for _ <- 1..51 do
+        {:ok, t} = Billing.record_test_usage(s.id, "quick_test")
+        Ecto.Changeset.change(t, inserted_at: long_ago) |> Repo.update!()
+      end
+
+      refute Billing.can_start_test?(s.id)
+
+      {:ok, sub} = Billing.get_or_create_subscription(s.id)
+      {:ok, _} = Billing.update_subscription(sub, %{bonus_free_tests: 5})
+
+      assert Billing.can_start_test?(s.id)
     end
   end
 end

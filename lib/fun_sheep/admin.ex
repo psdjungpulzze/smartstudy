@@ -70,6 +70,8 @@ defmodule FunSheep.Admin do
 
   alias FunSheep.Accounts
   alias FunSheep.Accounts.UserRole
+  alias FunSheep.Billing
+  alias FunSheep.Billing.Subscription
   alias FunSheep.Courses
   alias FunSheep.Courses.Course
 
@@ -145,6 +147,35 @@ defmodule FunSheep.Admin do
   end
 
   def demote_admin(%UserRole{}, _actor), do: {:error, :not_admin}
+
+  @doc """
+  Sets the bonus free tests granted to a user (added on top of the
+  default lifetime cap). Pass `0` to revoke any prior grant.
+
+  Only meaningful for free-plan students; paid plans are unlimited.
+  Returns `{:error, :invalid_bonus}` for non-integer or negative values.
+  """
+  def set_bonus_free_tests(%UserRole{} = target, bonus, actor)
+      when is_integer(bonus) and bonus >= 0 do
+    {:ok, sub} = Billing.get_or_create_subscription(target.id)
+    previous = sub.bonus_free_tests || 0
+
+    case Billing.update_subscription(sub, %{bonus_free_tests: bonus}) do
+      {:ok, %Subscription{} = updated} ->
+        record_actor_event(actor, "user.set_bonus_free_tests", target, %{
+          "email" => target.email,
+          "previous_bonus" => previous,
+          "new_bonus" => bonus
+        })
+
+        {:ok, updated}
+
+      err ->
+        err
+    end
+  end
+
+  def set_bonus_free_tests(%UserRole{}, _bonus, _actor), do: {:error, :invalid_bonus}
 
   @doc "Deletes a course and every dependent record. Irreversible."
   def delete_course(%Course{} = course, actor) do

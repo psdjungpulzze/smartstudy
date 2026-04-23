@@ -24,6 +24,10 @@ defmodule FunSheep.Billing.Subscription do
     field :current_period_end, :utc_datetime
     field :cancelled_at, :utc_datetime
     field :metadata, :map, default: %{}
+    # Admin-granted bonus free tests, added on top of the base free-tier
+    # lifetime cap. Used to comp users (support requests, beta feedback,
+    # influencer accounts) without deleting usage history.
+    field :bonus_free_tests, :integer, default: 0
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
 
@@ -51,12 +55,14 @@ defmodule FunSheep.Billing.Subscription do
       :current_period_end,
       :cancelled_at,
       :metadata,
+      :bonus_free_tests,
       :paid_by_user_role_id,
       :origin_practice_request_id
     ])
     |> validate_required([:user_role_id, :plan, :status])
     |> validate_inclusion(:plan, @plans)
     |> validate_inclusion(:status, @statuses)
+    |> validate_number(:bonus_free_tests, greater_than_or_equal_to: 0)
     |> unique_constraint(:user_role_id)
     |> foreign_key_constraint(:user_role_id)
     |> foreign_key_constraint(:paid_by_user_role_id)

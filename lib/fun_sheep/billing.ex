@@ -237,9 +237,10 @@ defmodule FunSheep.Billing do
   defp check_free_tier_limits(user_role_id) do
     total_tests = count_total_tests(user_role_id)
     weekly_tests = count_weekly_tests(user_role_id)
+    initial_limit = effective_initial_limit(user_role_id)
 
     cond do
-      total_tests < @initial_free_tests ->
+      total_tests < initial_limit ->
         :ok
 
       weekly_tests < @weekly_free_tests ->
@@ -250,7 +251,7 @@ defmodule FunSheep.Billing do
          %{
            total_tests: total_tests,
            weekly_tests: weekly_tests,
-           initial_limit: @initial_free_tests,
+           initial_limit: initial_limit,
            weekly_limit: @weekly_free_tests,
            resets_at: next_week_reset()
          }}
@@ -261,6 +262,7 @@ defmodule FunSheep.Billing do
     {:ok, sub} = get_or_create_subscription(user_role_id)
     total = count_total_tests(user_role_id)
     weekly = count_weekly_tests(user_role_id)
+    initial_limit = @initial_free_tests + (sub.bonus_free_tests || 0)
 
     %{
       plan: sub.plan,
@@ -268,11 +270,11 @@ defmodule FunSheep.Billing do
       paid: Subscription.paid?(sub),
       total_tests: total,
       weekly_tests: weekly,
-      initial_limit: @initial_free_tests,
+      initial_limit: initial_limit,
       weekly_limit: @weekly_free_tests,
-      initial_remaining: max(0, @initial_free_tests - total),
+      initial_remaining: max(0, initial_limit - total),
       weekly_remaining: max(0, @weekly_free_tests - weekly),
-      can_test: sub.plan != "free" or total < @initial_free_tests or weekly < @weekly_free_tests,
+      can_test: sub.plan != "free" or total < initial_limit or weekly < @weekly_free_tests,
       resets_at: next_week_reset(),
       subscription: sub
     }
@@ -312,8 +314,18 @@ defmodule FunSheep.Billing do
   """
   def lifetime_usage(user_role_id) do
     used = count_total_tests(user_role_id)
-    limit = @initial_free_tests
+    limit = effective_initial_limit(user_role_id)
     %{used: used, limit: limit, remaining: max(0, limit - used)}
+  end
+
+  defp effective_initial_limit(user_role_id) do
+    bonus =
+      case get_subscription(user_role_id) do
+        %Subscription{bonus_free_tests: b} when is_integer(b) -> b
+        _ -> 0
+      end
+
+    @initial_free_tests + bonus
   end
 
   @doc """
@@ -354,7 +366,7 @@ defmodule FunSheep.Billing do
         false
 
       _ ->
-        count_total_tests(user_role_id) < @initial_free_tests
+        count_total_tests(user_role_id) < effective_initial_limit(user_role_id)
     end
   end
 
