@@ -326,6 +326,14 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     end)
   end
 
+  # Materials-count threshold above which we skip the per-material page-count
+  # probe and go straight to sampling. A real textbook is usually 1–a few
+  # large PDFs; hundreds of files almost always means one-JPG-per-page
+  # uploads, and probing each would fire N DB queries (saturating the
+  # connection pool on large courses — observed as
+  # DBConnection.ConnectionError 15000ms checkout timeout).
+  @sampling_materials_threshold 50
+
   # Adaptive snippet builder. The old path assumed each material was a full
   # textbook (20+ pages) and that the TOC lived in the front matter. That
   # breaks when users upload one JPG per page — hundreds of 1-page
@@ -333,16 +341,23 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   # 26+" logic collapses to "show page 1, scan nothing" and the global 80K
   # truncation keeps only the first ~20 of hundreds of pages. Pick the
   # strategy from the shape of the upload.
+  defp collect_ocr_text([]), do: ""
+
+  defp collect_ocr_text(materials)
+       when length(materials) >= @sampling_materials_threshold do
+    sampled_snippet(materials)
+  end
+
   defp collect_ocr_text(materials) do
     max_pages =
       materials
       |> Enum.map(&page_count/1)
       |> Enum.max(fn -> 0 end)
 
-    cond do
-      materials == [] -> ""
-      max_pages >= 10 -> per_material_snippet(materials)
-      true -> sampled_snippet(materials)
+    if max_pages >= 10 do
+      per_material_snippet(materials)
+    else
+      sampled_snippet(materials)
     end
   end
 
