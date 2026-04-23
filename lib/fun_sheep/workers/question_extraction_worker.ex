@@ -18,7 +18,7 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
     ]
 
   alias FunSheep.{Content, Courses, Repo}
-  alias FunSheep.Questions.Question
+  alias FunSheep.Questions.{Extractor, Question}
 
   import Ecto.Query
 
@@ -179,97 +179,152 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
     end
   end
 
-  # Pattern-based question extraction from OCR text.
-  # Looks for numbered questions, multiple choice patterns, etc.
-  defp extract_questions(ocr_pages, _course) do
+  # Phase 3: AI-first extraction via `FunSheep.Questions.Extractor`
+  # with regex as a LAST-RESORT fallback only when the AI path returns
+  # nothing AND the material_kind suggests a rigidly-formatted Q&A
+  # source. The regex patterns are kept below for that fallback —
+  # they're the source of 322 garbage rows in the April audit when
+  # they ran on textbook prose, so they must NEVER be primary again.
+  defp extract_questions(ocr_pages, course) do
     ocr_pages
-    |> Enum.flat_map(fn page ->
-      text = page.extracted_text || ""
-      source_page = page.page_number
+    |> Enum.group_by(& &1.material_id)
+    |> Enum.flat_map(fn {material_id, pages} ->
+      material = List.first(pages).material
 
-      questions = []
+      # Stitch pages into one text blob for the AI call — the extractor
+      # samples 12KB + 2KB anyway, so one call per material is cheaper
+      # than one per page and lets the AI reason about questions that
+      # span page breaks.
+      combined_text =
+        pages
+        |> Enum.map(& &1.extracted_text)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join("\n\n")
 
-      # Pattern 1: Numbered questions with answers
-      # "1. What is biology? Answer: Biology is the study of life."
-      questions =
-        questions ++
-          (Regex.scan(~r/(\d+)\.\s+(.+?)\s*(?:Answer|Ans|A)[:\.]?\s*(.+?)(?=\n\d+\.|\z)/ms, text)
-           |> Enum.map(fn [_full, _num, content, answer] ->
-             %{
-               content: String.trim(content),
-               answer: String.trim(answer),
-               question_type: :short_answer,
-               difficulty: :medium,
-               source_page: source_page,
-               is_generated: false,
-               metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
-             }
-           end))
+      ref = %{material_id: material_id, source_title: material.file_name}
 
-      # Pattern 2: Multiple choice (A/B/C/D)
-      mc_pattern =
-        ~r/(\d+)\.\s+(.+?)\n\s*[Aa][.)]\s*(.+?)\n\s*[Bb][.)]\s*(.+?)\n\s*[Cc][.)]\s*(.+?)\n\s*[Dd][.)]\s*(.+?)(?:\n|$)/ms
+      ai_questions =
+        Extractor.extract(combined_text,
+          subject: course.subject,
+          source: :material,
+          source_ref: ref,
+          grounding_refs: [%{"type" => "material", "id" => material_id}]
+        )
 
-      questions =
-        questions ++
-          (Regex.scan(mc_pattern, text)
-           |> Enum.map(fn [_full, _num, question, a, b, c, d] ->
-             %{
-               content: String.trim(question),
-               answer: "",
-               question_type: :multiple_choice,
-               options: %{
-                 "A" => String.trim(a),
-                 "B" => String.trim(b),
-                 "C" => String.trim(c),
-                 "D" => String.trim(d)
-               },
-               difficulty: :medium,
-               source_page: source_page,
-               is_generated: false,
-               metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
-             }
-           end))
+      if ai_questions != [] do
+        ai_questions
+      else
+        # Fallback to legacy regex ONLY when AI returned nothing.
+        # Restricted to sample_questions/mixed where the rigid format
+        # assumption is defensible.
+        if material.classified_kind in [:question_bank, :mixed] or
+             material.material_kind == :sample_questions do
+          Logger.info("[Questions] AI empty; falling back to regex for material #{material_id}")
 
-      # Pattern 3: True/False questions
-      questions =
-        questions ++
-          (Regex.scan(~r/(\d+)\.\s+(.+?)\s*\(?\s*(True|False|T|F)\s*\)?/mi, text)
-           |> Enum.map(fn [_full, _num, content, answer] ->
-             %{
-               content: String.trim(content),
-               answer: normalize_tf(answer),
-               question_type: :true_false,
-               difficulty: :easy,
-               source_page: source_page,
-               is_generated: false,
-               metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
-             }
-           end))
-
-      # Pattern 4: "Question:" prefix pattern
-      questions =
-        questions ++
-          (Regex.scan(
-             ~r/Question\s*\d*\s*[:\.]?\s*(.+?)\s*Answer\s*[:\.]?\s*(.+?)(?=Question|\z)/ms,
-             text
-           )
-           |> Enum.map(fn [_full, content, answer] ->
-             %{
-               content: String.trim(content),
-               answer: String.trim(answer),
-               question_type: :short_answer,
-               difficulty: :medium,
-               source_page: source_page,
-               is_generated: false,
-               metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
-             }
-           end))
-
-      questions
+          Enum.flat_map(pages, &legacy_regex_extract/1)
+        else
+          []
+        end
+      end
     end)
-    |> Enum.reject(fn q -> String.length(q.content) < 10 end)
-    |> Enum.uniq_by(& &1.content)
+    |> Enum.uniq_by(&String.downcase(String.trim(&1.content)))
+  end
+
+  # Legacy regex extractor — ONLY invoked as a fallback when the AI
+  # path returns nothing on a known-structured source. Kept intact to
+  # avoid any behavior drift versus pre-Phase-3 extraction.
+  defp legacy_regex_extract(page) do
+    text = page.extracted_text || ""
+    source_page = page.page_number
+
+    questions = []
+
+    # Pattern 1: Numbered questions with answers
+    # "1. What is biology? Answer: Biology is the study of life."
+    questions =
+      questions ++
+        (Regex.scan(~r/(\d+)\.\s+(.+?)\s*(?:Answer|Ans|A)[:\.]?\s*(.+?)(?=\n\d+\.|\z)/ms, text)
+         |> Enum.map(fn [_full, _num, content, answer] ->
+           %{
+             content: String.trim(content),
+             answer: String.trim(answer),
+             question_type: :short_answer,
+             difficulty: :medium,
+             source_page: source_page,
+             is_generated: false,
+             source_type: :user_uploaded,
+             metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
+           }
+         end))
+
+    # Pattern 2: Multiple choice (A/B/C/D)
+    mc_pattern =
+      ~r/(\d+)\.\s+(.+?)\n\s*[Aa][.)]\s*(.+?)\n\s*[Bb][.)]\s*(.+?)\n\s*[Cc][.)]\s*(.+?)\n\s*[Dd][.)]\s*(.+?)(?:\n|$)/ms
+
+    questions =
+      questions ++
+        (Regex.scan(mc_pattern, text)
+         |> Enum.map(fn [_full, _num, question, a, b, c, d] ->
+           %{
+             content: String.trim(question),
+             answer: "",
+             question_type: :multiple_choice,
+             options: %{
+               "A" => String.trim(a),
+               "B" => String.trim(b),
+               "C" => String.trim(c),
+               "D" => String.trim(d)
+             },
+             difficulty: :medium,
+             source_page: source_page,
+             is_generated: false,
+             source_type: :user_uploaded,
+             metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
+           }
+         end))
+
+    # Pattern 3: True/False questions
+    questions =
+      questions ++
+        (Regex.scan(~r/(\d+)\.\s+(.+?)\s*\(?\s*(True|False|T|F)\s*\)?/mi, text)
+         |> Enum.map(fn [_full, _num, content, answer] ->
+           %{
+             content: String.trim(content),
+             answer: normalize_tf(answer),
+             question_type: :true_false,
+             difficulty: :easy,
+             source_page: source_page,
+             is_generated: false,
+             source_type: :user_uploaded,
+             metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
+           }
+         end))
+
+    # Pattern 4: "Question:" prefix pattern
+    questions =
+      questions ++
+        (Regex.scan(
+           ~r/Question\s*\d*\s*[:\.]?\s*(.+?)\s*Answer\s*[:\.]?\s*(.+?)(?=Question|\z)/ms,
+           text
+         )
+         |> Enum.map(fn [_full, content, answer] ->
+           %{
+             content: String.trim(content),
+             answer: String.trim(answer),
+             question_type: :short_answer,
+             difficulty: :medium,
+             source_page: source_page,
+             is_generated: false,
+             source_type: :user_uploaded,
+             metadata: %{"source" => "ocr_extraction", "material_id" => page.material_id}
+           }
+         end))
+
+    # Phase 3 gate: even the legacy regex output goes through the same
+    # pre-insert validator the AI path uses, so the April-audit garbage
+    # patterns can't leak in via the fallback.
+    questions
+    |> Enum.filter(&Extractor.accept_legacy?/1)
   end
 
   defp normalize_tf(val) do
