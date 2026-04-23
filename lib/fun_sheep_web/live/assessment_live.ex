@@ -4,8 +4,9 @@ defmodule FunSheepWeb.AssessmentLive do
   import FunSheepWeb.BillingComponents
 
   alias FunSheep.{Assessments, Billing, Engagement, Gamification, Questions}
-  alias FunSheep.Assessments.{Engine, StateCache}
+  alias FunSheep.Assessments.{Engine, SessionStore, StateCache}
   alias FunSheep.Gamification.FpEconomy
+  alias FunSheep.Questions.FreeformGrader
 
   @xp_per_correct FpEconomy.xp_per_correct()
 
@@ -19,13 +20,35 @@ defmodule FunSheepWeb.AssessmentLive do
       Phoenix.PubSub.subscribe(FunSheep.PubSub, "course:#{course_id}")
     end
 
-    # On reconnect, try to restore cached state instead of resetting
+    # On reconnect, try ETS cache first, then DB, before treating as fresh start
     case StateCache.get(user_role_id, schedule_id) do
       {:ok, cached} ->
         {:ok, restore_from_cache(socket, course_id, schedule, cached)}
 
       :miss ->
-        mount_fresh(socket, user_role_id, role, course_id, schedule)
+        case SessionStore.load(user_role_id, schedule_id) do
+          {:ok, persisted} ->
+            # Warm ETS from DB so future reconnects within the same run hit ETS
+            StateCache.put(user_role_id, schedule_id, persisted)
+            socket = restore_from_cache(socket, course_id, schedule, persisted)
+
+            # After a server restart, current_question is nil; advance the engine
+            # so the student sees the next question rather than a blank screen.
+            socket =
+              if persisted.phase == :testing and is_nil(persisted[:current_question]) and
+                   not is_nil(persisted[:engine_state]) do
+                socket
+                |> advance_to_next_question()
+                |> save_state_to_cache()
+              else
+                socket
+              end
+
+            {:ok, socket}
+
+          :miss ->
+            mount_fresh(socket, user_role_id, role, course_id, schedule)
+        end
     end
   end
 
@@ -55,7 +78,9 @@ defmodule FunSheepWeb.AssessmentLive do
             question_sources: [],
             enabled_sources: MapSet.new(),
             phase: :blocked,
-            readiness: nil
+            readiness: nil,
+            grading: false,
+            grading_task: nil
           )
 
         {:ok, socket}
@@ -84,7 +109,9 @@ defmodule FunSheepWeb.AssessmentLive do
       assessment_complete: cached.assessment_complete,
       summary: cached.summary,
       phase: cached.phase,
-      readiness: nil
+      readiness: nil,
+      grading: false,
+      grading_task: nil
     )
   end
 
@@ -132,7 +159,9 @@ defmodule FunSheepWeb.AssessmentLive do
         question_sources: question_sources,
         enabled_sources: enabled_sources,
         phase: initial_phase,
-        readiness: readiness
+        readiness: readiness,
+        grading: false,
+        grading_task: nil
       )
 
     # If no sources to filter and scope is ready, start immediately
@@ -219,45 +248,22 @@ defmodule FunSheepWeb.AssessmentLive do
     if answer == nil or question == nil do
       {:noreply, socket}
     else
-      is_correct = check_answer(question, answer)
-      time_taken = System.monotonic_time(:second) - start_time
+      freeform? = question.question_type in [:short_answer, :free_response]
 
-      # Record the attempt in the database
-      user_role_id = socket.assigns.current_user["user_role_id"]
+      if freeform? do
+        task = Task.async(fn -> FreeformGrader.grade(question, answer) end)
 
-      if user_role_id do
-        Questions.record_attempt_with_stats(%{
-          user_role_id: user_role_id,
-          question_id: question.id,
-          answer_given: answer,
-          is_correct: is_correct,
-          time_taken_seconds: max(time_taken, 0),
-          difficulty_at_attempt: to_string(state.current_difficulty)
-        })
+        {:noreply,
+         socket
+         |> assign(grading: true, grading_task: task.ref)}
+      else
+        is_correct = check_answer(question, answer)
 
-        if is_correct do
-          Gamification.award_xp(user_role_id, @xp_per_correct, "assessment",
-            source_id: question.id
-          )
-        end
+        socket =
+          apply_grading_result(socket, question, answer, state, start_time, is_correct, nil)
 
-        Gamification.record_activity(user_role_id)
+        {:noreply, socket}
       end
-
-      new_state = Engine.record_answer(state, question.id, answer, is_correct)
-
-      socket =
-        socket
-        |> assign(
-          engine_state: new_state,
-          feedback: %{
-            is_correct: is_correct,
-            correct_answer: question.answer
-          }
-        )
-        |> save_state_to_cache()
-
-      {:noreply, socket}
     end
   end
 
@@ -293,6 +299,65 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   @impl true
+  def handle_info({ref, {:ok, %{correct: is_correct, feedback: ai_feedback}}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+
+    %{
+      current_question: question,
+      selected_answer: answer,
+      engine_state: state,
+      start_time: start_time
+    } = socket.assigns
+
+    socket =
+      socket
+      |> assign(grading: false, grading_task: nil)
+      |> apply_grading_result(question, answer, state, start_time, is_correct, ai_feedback)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({ref, {:error, _reason}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+
+    %{
+      current_question: question,
+      selected_answer: answer,
+      engine_state: state,
+      start_time: start_time
+    } = socket.assigns
+
+    is_correct = check_answer(question, answer)
+
+    socket =
+      socket
+      |> assign(grading: false, grading_task: nil)
+      |> apply_grading_result(question, answer, state, start_time, is_correct, nil)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, socket)
+      when socket.assigns.grading_task == ref do
+    %{
+      current_question: question,
+      selected_answer: answer,
+      engine_state: state,
+      start_time: start_time
+    } = socket.assigns
+
+    is_correct = check_answer(question, answer)
+
+    socket =
+      socket
+      |> assign(grading: false, grading_task: nil)
+      |> apply_grading_result(question, answer, state, start_time, is_correct, nil)
+
+    {:noreply, socket}
+  end
+
   # Course-level pipeline event: discovery/OCR/generation/validation all
   # broadcast `{:processing_update, ...}` on `course:{id}`. Any such event
   # might have just tipped the scope into `:ready`; re-check and transition
@@ -311,6 +376,41 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  defp apply_grading_result(socket, question, answer, state, start_time, is_correct, ai_feedback) do
+    time_taken = System.monotonic_time(:second) - start_time
+    user_role_id = socket.assigns.current_user["user_role_id"]
+
+    if user_role_id do
+      Questions.record_attempt_with_stats(%{
+        user_role_id: user_role_id,
+        question_id: question.id,
+        answer_given: answer,
+        is_correct: is_correct,
+        time_taken_seconds: max(time_taken, 0),
+        difficulty_at_attempt: to_string(state.current_difficulty)
+      })
+
+      if is_correct do
+        Gamification.award_xp(user_role_id, @xp_per_correct, "assessment", source_id: question.id)
+      end
+
+      Gamification.record_activity(user_role_id)
+    end
+
+    new_state = Engine.record_answer(state, question.id, answer, is_correct)
+
+    socket
+    |> assign(
+      engine_state: new_state,
+      feedback: %{
+        is_correct: is_correct,
+        correct_answer: question.answer,
+        ai_feedback: ai_feedback
+      }
+    )
+    |> save_state_to_cache()
+  end
 
   defp maybe_transition_on_readiness(%{assigns: %{phase: :readiness_block}} = socket) do
     readiness = Assessments.scope_readiness(socket.assigns.schedule)
@@ -407,8 +507,9 @@ defmodule FunSheepWeb.AssessmentLive do
 
     if assessment_complete or no_questions_available do
       StateCache.delete(user_role_id, schedule_id)
+      SessionStore.delete(user_role_id, schedule_id)
     else
-      StateCache.put(user_role_id, schedule_id, %{
+      state = %{
         engine_state: socket.assigns.engine_state,
         current_question: socket.assigns.current_question,
         current_question_stats: Map.get(socket.assigns, :current_question_stats),
@@ -419,7 +520,10 @@ defmodule FunSheepWeb.AssessmentLive do
         assessment_complete: assessment_complete,
         summary: Map.get(socket.assigns, :summary),
         phase: socket.assigns.phase
-      })
+      }
+
+      StateCache.put(user_role_id, schedule_id, state)
+      SessionStore.save(user_role_id, schedule_id, state)
     end
 
     socket
@@ -513,6 +617,7 @@ defmodule FunSheepWeb.AssessmentLive do
               question_number={@question_number}
               engine_state={@engine_state}
               question_stats={assigns[:current_question_stats]}
+              grading={assigns[:grading] || false}
             />
         <% end %>
       </div>
@@ -783,6 +888,7 @@ defmodule FunSheepWeb.AssessmentLive do
   attr :question_number, :integer, required: true
   attr :engine_state, :map, required: true
   attr :question_stats, :map, default: nil
+  attr :grading, :boolean, default: false
 
   defp render_question(assigns) do
     assigns =
@@ -844,8 +950,17 @@ defmodule FunSheepWeb.AssessmentLive do
             ]}>
               {if @feedback.is_correct, do: "Correct!", else: "Incorrect"}
             </p>
-            <p :if={!@feedback.is_correct} class="text-sm text-[#8E8E93] mt-1">
+            <p
+              :if={!@feedback.is_correct and is_nil(@feedback[:ai_feedback])}
+              class="text-sm text-[#8E8E93] mt-1"
+            >
               Correct answer: {@feedback.correct_answer}
+            </p>
+            <p
+              :if={!@feedback.is_correct and @feedback[:ai_feedback]}
+              class="text-sm text-[#8E8E93] mt-1"
+            >
+              {@feedback.ai_feedback}
             </p>
           </div>
         </div>
@@ -863,7 +978,15 @@ defmodule FunSheepWeb.AssessmentLive do
         </div>
       </div>
 
-      <div :if={@feedback == nil} class="flex justify-end mt-6">
+      <div :if={@feedback == nil and @grading} class="flex justify-end mt-6">
+        <div class="flex items-center gap-2 text-[#8E8E93]">
+          <div class="w-4 h-4 border-2 border-[#4CD964] border-t-transparent rounded-full animate-spin">
+          </div>
+          <span class="text-sm">Grading your answer...</span>
+        </div>
+      </div>
+
+      <div :if={@feedback == nil and !@grading} class="flex justify-end mt-6">
         <button
           phx-click="submit_answer"
           disabled={@selected_answer == nil}

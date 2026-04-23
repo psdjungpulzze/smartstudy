@@ -224,6 +224,9 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
             do: "question answered",
             else: "questions answered"}
         </p>
+        <p class="mt-1 text-xs text-[#C7C7CC]">
+          Based on all your attempts across all practice sessions
+        </p>
       </div>
 
       <%!-- Chapter Breakdown Section --%>
