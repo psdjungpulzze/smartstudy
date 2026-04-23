@@ -139,7 +139,6 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
         assert Repo.get!(Question, q.id).validation_status == :passed
       end
     end
-
   end
 
   describe "total failure" do
