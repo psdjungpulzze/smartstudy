@@ -362,8 +362,113 @@ defmodule FunSheepWeb.AssessmentLiveTest do
       html = render_click(view, "retry_generation")
       # Still shows the readiness block until the broadcast fires.
       assert html =~ "No questions for the selected chapters"
-      # But the click surfaces a flash so the user knows it registered.
-      assert html =~ "Generating questions for 1 chapter"
+      # The click now seeds a named progress panel so the user sees the
+      # chapter by name instead of a generic toast.
+      assert html =~ "Regenerating questions"
+      assert html =~ "Empty"
+      assert html =~ "Waiting to start"
+      refute html =~ "usually takes about a minute"
+    end
+
+    test "progress events update the panel in real time", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+      course = ready_course(user_role)
+
+      {:ok, empty_chapter} =
+        FunSheep.Courses.create_chapter(%{
+          name: "Photosynthesis",
+          position: 1,
+          course_id: course.id
+        })
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Live Progress",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [empty_chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      render_click(view, "retry_generation")
+
+      base =
+        FunSheep.Progress.Event.new(
+          job_id: "chapter:#{empty_chapter.id}",
+          topic_type: :course,
+          topic_id: course.id,
+          scope: :question_regeneration,
+          phase_total: 3,
+          subject_id: empty_chapter.id,
+          subject_label: "Photosynthesis"
+        )
+
+      generating = FunSheep.Progress.phase(base, :generating, "Generating questions with AI", 2)
+
+      html = render(view)
+      assert html =~ "Photosynthesis"
+      assert html =~ "Generating questions with AI"
+      assert html =~ "Step 2 of 3"
+
+      saving = FunSheep.Progress.phase(generating, :saving, "Saving questions", 3)
+      FunSheep.Progress.tick(saving, 7, 10, "questions")
+      html = render(view)
+      assert html =~ "7 of 10 questions"
+      # tick must carry the current phase metadata (:saving / Step 3 of 3),
+      # not revert to the original :queued base — regression guard.
+      assert html =~ "Saving questions"
+
+      FunSheep.Progress.succeeded(saving, "questions", 10)
+      html = render(view)
+      assert html =~ "10 questions ready"
+      assert html =~ "All complete"
+    end
+
+    test "failure events render a visible failed state", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+      course = ready_course(user_role)
+
+      {:ok, empty_chapter} =
+        FunSheep.Courses.create_chapter(%{name: "Genetics", position: 1, course_id: course.id})
+
+      {:ok, schedule} =
+        FunSheep.Assessments.create_test_schedule(%{
+          name: "Fail",
+          test_date: Date.add(Date.utc_today(), 7),
+          scope: %{"chapter_ids" => [empty_chapter.id]},
+          user_role_id: user_role.id,
+          course_id: course.id
+        })
+
+      conn = auth_conn(conn, user_role)
+
+      {:ok, view, _html} =
+        live(conn, ~p"/courses/#{course.id}/tests/#{schedule.id}/assess")
+
+      render_click(view, "retry_generation")
+
+      base =
+        FunSheep.Progress.Event.new(
+          job_id: "chapter:#{empty_chapter.id}",
+          topic_type: :course,
+          topic_id: course.id,
+          scope: :question_regeneration,
+          phase_total: 3,
+          subject_id: empty_chapter.id,
+          subject_label: "Genetics"
+        )
+
+      FunSheep.Progress.failed(base, :ai_unavailable, "AI service unavailable")
+
+      html = render(view)
+      assert html =~ "Genetics"
+      assert html =~ "AI service unavailable"
+      assert html =~ "failed"
     end
 
     test "PubSub {:questions_ready, ...} transitions the view when scope becomes ready", %{

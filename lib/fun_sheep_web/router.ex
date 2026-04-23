@@ -226,6 +226,7 @@ defmodule FunSheepWeb.Router do
       live "/login", DevLoginLive, :index
       post "/auth", DevAuthController, :create
       delete "/auth", DevAuthController, :delete
+      get "/progress/broadcast", DevProgressController, :broadcast
     end
 
     scope "/dev" do
