@@ -99,6 +99,85 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  Returns `%{source_type => count}` of student-visible questions for a
+  course. Powers the admin source-health dashboard (Phase 8) and the
+  per-course source-mix check in the coverage auditor (Phase 6).
+
+  Rows without a `source_type` (pre-backfill) are grouped under `:unknown`
+  so the migration window surfaces visibly — once backfill completes the
+  `:unknown` bucket should drop to 0.
+  """
+  def questions_by_source_type(course_id, opts \\ []) do
+    statuses = Keyword.get(opts, :statuses, @student_visible)
+
+    from(q in Question,
+      where: q.course_id == ^course_id,
+      where: q.validation_status in ^statuses,
+      group_by: q.source_type,
+      select: {q.source_type, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new(fn
+      {nil, c} -> {:unknown, c}
+      pair -> pair
+    end)
+  end
+
+  @doc """
+  Returns `%{{chapter_id, difficulty} => count}` of student-visible,
+  adaptive-eligible questions for a course. Powers the Phase 6 coverage
+  auditor (which chapters / difficulties are below the per-tuple target)
+  and the coverage heatmap in the admin dashboard (Phase 8).
+  """
+  def coverage_by_chapter(course_id) do
+    from(q in Question,
+      where: q.course_id == ^course_id,
+      where: q.validation_status in ^@student_visible,
+      where: not is_nil(q.section_id),
+      where: q.classification_status in ^@adaptive_classifications,
+      where: not is_nil(q.chapter_id),
+      group_by: [q.chapter_id, q.difficulty],
+      select: {q.chapter_id, q.difficulty, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {chapter_id, difficulty, count} -> {{chapter_id, difficulty}, count} end)
+  end
+
+  @doc """
+  Counts unattempted, adaptive-eligible questions for a specific student
+  in a (course, chapter, difficulty) tuple. Used by Phase 6's within-session
+  demand-driven generation: when the supply for a tuple drops below a
+  threshold, enqueue more AI generation targeting that difficulty.
+
+  "Unattempted" = no row in `question_attempts` for this `(user_role_id,
+  question_id)` pair. Questions the student has answered — right or wrong —
+  are excluded so this reflects the true "how many fresh hard questions
+  can we still show them" metric.
+  """
+  def unattempted_supply_for(user_role_id, course_id, chapter_id, difficulty) do
+    from(q in Question,
+      left_join:
+        qa in subquery(
+          from(a in QuestionAttempt,
+            where: a.user_role_id == ^user_role_id,
+            distinct: a.question_id,
+            select: %{question_id: a.question_id}
+          )
+        ),
+      on: qa.question_id == q.id,
+      where: q.course_id == ^course_id,
+      where: q.chapter_id == ^chapter_id,
+      where: q.difficulty == ^difficulty,
+      where: q.validation_status in ^@student_visible,
+      where: not is_nil(q.section_id),
+      where: q.classification_status in ^@adaptive_classifications,
+      where: is_nil(qa.question_id),
+      select: count(q.id)
+    )
+    |> Repo.one()
+  end
+
+  @doc """
   Counts ALL questions regardless of validation state. For progress UI during
   the generate→validate pipeline.
   """
