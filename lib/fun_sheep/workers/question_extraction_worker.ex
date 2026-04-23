@@ -112,29 +112,59 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
     )
   end
 
-  # Regex-based question extraction is reliable on sample-question materials
-  # (practice tests, past exams, Q&A banks) and noisy on textbook prose.
-  # Prefer sample_questions materials; only fall back to textbook-like
-  # materials when the user hasn't supplied any question sources.
-  @question_kinds [:sample_questions]
-  @textbook_fallback_kinds [:textbook, :supplementary_book]
+  # Phase 2: prefer the AI-verified `classified_kind` over the user-supplied
+  # `material_kind`. The classifier routes extraction via
+  # `MaterialClassificationWorker.route/1`:
+  #
+  #   :question_bank / :mixed         → extract
+  #   :knowledge_content              → skip (feeds generator as grounding)
+  #   :answer_key / :unusable         → skip (the Phase 0 disaster: 462
+  #                                     garbage questions came from an
+  #                                     answer-key image extracted as a
+  #                                     textbook)
+  #   :uncertain / nil                → fall back to user material_kind
+  #                                     (legacy courses whose materials
+  #                                     predate the classifier)
+
+  alias FunSheep.Workers.MaterialClassificationWorker
 
   defp collect_ocr_pages(course_id) do
     materials = Content.list_materials_by_course(course_id)
-    completed = Enum.filter(materials, &(&1.ocr_status == :completed))
 
-    question_ids =
-      completed
-      |> Enum.filter(&(&1.material_kind in @question_kinds))
-      |> Enum.map(& &1.id)
+    completed =
+      materials
+      |> Enum.filter(&(&1.ocr_status == :completed))
+
+    # Split by classifier routing: anything the classifier says is a
+    # Q&A source (or the legacy sample_questions fallback) is a primary
+    # candidate. Prose-only materials are deliberately excluded — the
+    # regex extractor on textbook prose was the root cause of 322 OCR
+    # garbage rows in the April audit.
+    {primary, fallback} =
+      Enum.split_with(completed, fn m ->
+        MaterialClassificationWorker.route(m) in [:extract, :extract_and_ground]
+      end)
 
     completed_ids =
-      if question_ids != [] do
-        question_ids
-      else
-        completed
-        |> Enum.filter(&(&1.material_kind in @textbook_fallback_kinds))
-        |> Enum.map(& &1.id)
+      cond do
+        primary != [] ->
+          Enum.map(primary, & &1.id)
+
+        # Legacy fallback: no classifier verdicts yet and no user-tagged
+        # sample_questions — try textbook-like materials so the pipeline
+        # doesn't block pre-Phase-2 courses. Questions extracted from
+        # these still flow through the Phase 3 AI extractor later, which
+        # catches most garbage before it reaches students.
+        fallback != [] ->
+          fallback
+          |> Enum.filter(fn m ->
+            m.classified_kind in [nil, :uncertain] and
+              m.material_kind in [:textbook, :supplementary_book]
+          end)
+          |> Enum.map(& &1.id)
+
+        true ->
+          []
       end
 
     if completed_ids == [] do

@@ -274,9 +274,12 @@ defmodule FunSheep.Workers.PdfOcrPollerWorker do
 
   defp post_completion_hooks(%UploadedMaterial{id: material_id, course_id: course_id}) do
     # Mirror OCRMaterialWorker: once a material completes its OCR, kick off
-    # relevance + completeness checks and advance the course's OCR counter.
+    # relevance + completeness + content-kind classification and advance
+    # the course's OCR counter. The content-kind classifier is the Phase 2
+    # guardrail that prevents the mid-April "answer-key-as-textbook" flow.
     FunSheep.Workers.MaterialRelevanceWorker.enqueue(material_id)
     FunSheep.Workers.TextbookCompletenessWorker.enqueue(material_id)
+    FunSheep.Workers.MaterialClassificationWorker.enqueue(material_id)
     advance_course(course_id)
   end
 
