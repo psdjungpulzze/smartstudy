@@ -79,7 +79,10 @@ defmodule FunSheep.Interactor.Auth do
       client_secret: client_secret()
     ]
 
-    case Req.post(url, form: body) do
+    # Use the dedicated FunSheep.Finch pool — Auth.get_token/0 sits in
+    # front of every other Interactor call (the worker queue ↔ LLM hot
+    # path), so it must not compete with the same-pool requests it gates.
+    case Req.post(url, form: body, finch: FunSheep.Finch) do
       {:ok, %{status: 200, body: %{"access_token" => token, "expires_in" => expires_in}}} ->
         expires_at =
           DateTime.utc_now()
