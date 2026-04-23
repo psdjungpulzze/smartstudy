@@ -417,18 +417,7 @@ defmodule FunSheepWeb.AssessmentLive do
     socket
   end
 
-  defp check_answer(question, answer) do
-    case question.question_type do
-      :multiple_choice ->
-        String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-
-      :true_false ->
-        String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-
-      _other ->
-        String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-    end
-  end
+  defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
   defp difficulty_badge_class(difficulty) do
     case difficulty do

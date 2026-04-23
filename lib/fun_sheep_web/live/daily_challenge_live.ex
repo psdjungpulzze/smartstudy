@@ -231,9 +231,7 @@ defmodule FunSheepWeb.DailyChallengeLive do
     end
   end
 
-  defp check_answer(question, answer) do
-    String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-  end
+  defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
   defp format_time(seconds) do
     mins = div(seconds, 60)

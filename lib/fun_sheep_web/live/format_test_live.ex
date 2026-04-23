@@ -269,9 +269,7 @@ defmodule FunSheepWeb.FormatTestLive do
     assign(socket, submitted: true, results: results)
   end
 
-  defp check_answer(question, answer) do
-    String.downcase(String.trim(answer)) == String.downcase(String.trim(question.answer))
-  end
+  defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
   defp format_time(nil), do: "No Limit"
 
