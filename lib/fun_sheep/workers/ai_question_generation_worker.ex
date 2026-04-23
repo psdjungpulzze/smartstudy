@@ -97,7 +97,11 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
           case send_to_ai(prompt, course, ch) do
             {:ok, questions} ->
-              inserted = insert_questions(questions, course, ch, context[:figures] || [])
+              inserted =
+                insert_questions(questions, course, ch, context[:figures] || [],
+                  mode: mode,
+                  grounding_material_ids: context[:grounding_material_ids] || []
+                )
 
               broadcast(course_id, %{
                 sub_step: "Created #{inserted} questions for #{String.slice(ch.name, 0, 40)}"
@@ -132,7 +136,9 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
           inserted =
             insert_questions(questions, course, chapter, context[:figures] || [],
-              progress: progress_event
+              progress: progress_event,
+              mode: mode,
+              grounding_material_ids: context[:grounding_material_ids] || []
             )
 
           Logger.info(
@@ -206,7 +212,8 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   # Build context from OCR materials and existing questions
   defp build_context(course, chapter, args) do
-    material_text = collect_material_text(course.id, args["source_material_id"])
+    {material_text, material_ids} =
+      collect_material_text_with_refs(course.id, args["source_material_id"])
 
     existing_questions =
       if chapter do
@@ -226,7 +233,11 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       existing_questions: existing_questions,
       chapter_names: Enum.map(course.chapters, & &1.name),
       figures: figures,
-      hobbies: hobbies
+      hobbies: hobbies,
+      # Phase 4: material_ids that fed the prompt, persisted per
+      # question as grounding_refs. Empty when generating from
+      # curriculum with no materials.
+      grounding_material_ids: material_ids
     }
   end
 
@@ -253,27 +264,46 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     Enum.take(base, 30)
   end
 
-  defp collect_material_text(course_id, specific_material_id) do
+  # Phase 4: return both the text AND the material IDs that produced it,
+  # so the generator can persist them as `grounding_refs` on each
+  # inserted question. Without this, `generation_mode` and
+  # `grounding_refs` were NULL on 100% of AI-generated rows in the
+  # April audit — admin had no way to trace which materials fed which
+  # generated questions.
+  defp collect_material_text_with_refs(course_id, specific_material_id) do
     materials =
       if specific_material_id do
         [Content.get_uploaded_material!(specific_material_id)]
       else
         Content.list_materials_by_course(course_id)
         |> Enum.filter(&(&1.ocr_status == :completed))
+        # Phase 2 routing: only feed knowledge-classified or mixed
+        # materials as grounding. Answer-key / unusable classifications
+        # are explicitly excluded so the generator never grounds on an
+        # answer sheet.
+        |> Enum.filter(fn m ->
+          FunSheep.Workers.MaterialClassificationWorker.route(m) in [
+            :ground,
+            :extract_and_ground
+          ]
+        end)
       end
 
     material_ids = Enum.map(materials, & &1.id)
 
     if material_ids == [] do
-      ""
+      {"", []}
     else
-      from(p in Content.OcrPage,
-        where: p.material_id in ^material_ids,
-        order_by: [asc: p.material_id, asc: p.page_number],
-        select: p.extracted_text
-      )
-      |> Repo.all()
-      |> Enum.join("\n\n")
+      text =
+        from(p in Content.OcrPage,
+          where: p.material_id in ^material_ids,
+          order_by: [asc: p.material_id, asc: p.page_number],
+          select: p.extracted_text
+        )
+        |> Repo.all()
+        |> Enum.join("\n\n")
+
+      {text, material_ids}
     end
   end
 
@@ -401,6 +431,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     - "question_type": one of "multiple_choice", "true_false", "short_answer"
     - "options": for multiple_choice, an object like {"A": "...", "B": "...", "C": "...", "D": "..."}
     - "difficulty": one of "easy", "medium", "hard"
+    - "explanation": REQUIRED — 1–2 sentences explaining why the answer is correct, citing the concept or mechanism. Questions without a non-empty explanation will be rejected at insert time and never reach students (Phase 4 quality gate).
     - "figure_ids": (optional) array of figure IDs from the FIGURES AVAILABLE list, when the question depends on a visual
     - "table_spec": (optional) JSON table spec when the question requires a table you are inventing. Format: {"headers": [...], "rows": [[...], ...], "caption": "..."}
 
@@ -490,10 +521,17 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     Jason.decode(cleaned)
   end
 
-  defp insert_questions(questions, course, chapter, available_figures, opts \\ []) do
+  defp insert_questions(questions, course, chapter, available_figures, opts) do
     available_figure_ids = MapSet.new(available_figures, & &1.id)
     progress_event = opts[:progress]
     total = length(questions)
+    mode = opts[:mode] || "from_material"
+    grounding_material_ids = opts[:grounding_material_ids] || []
+
+    # Phase 4: Pre-computed grounding_refs for every question generated
+    # in this batch. All questions from a given call share the same
+    # grounding (same prompt, same context), so we build the list once.
+    grounding_refs = build_grounding_refs(grounding_material_ids)
 
     {count, inserted_ids} =
       questions
@@ -504,43 +542,63 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
         has_visual = claimed_figure_ids != [] or table_spec != nil
 
         new_state =
-          case validate_figure_dependency(q_data["content"], has_visual) do
-            :ok ->
-              attrs = %{
-                content: q_data["content"],
-                answer: q_data["answer"],
-                question_type: normalize_question_type(q_data["question_type"]),
-                options: q_data["options"],
-                difficulty: normalize_difficulty(q_data["difficulty"]),
-                explanation: q_data["explanation"],
-                hobby_context: sanitize_hobby_context(q_data["hobby_context"]),
-                is_generated: true,
-                course_id: course.id,
-                chapter_id: if(chapter, do: chapter.id),
-                metadata:
-                  %{"source" => "ai_generation"}
-                  |> maybe_put_meta("table_spec", table_spec)
-              }
+          cond do
+            # Phase 4: Enforce explanation at INSERT time. The April
+            # audit found 1,916 of 2,141 needs_review rows were stuck
+            # on "missing_explanation" — the validator kept flagging
+            # them because the generator never provided one. Block at
+            # source rather than let them pile up for human cleanup.
+            missing_explanation?(q_data) ->
+              Logger.warning(
+                "[AIGen] Rejected question (missing explanation): #{String.slice(q_data["content"] || "", 0, 120)}"
+              )
 
-              case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
-                {:ok, question} ->
-                  attach_figures(question, claimed_figure_ids)
-                  {count + 1, [question.id | ids]}
+              {count, ids}
 
-                {:error, changeset} ->
+            true ->
+              case validate_figure_dependency(q_data["content"], has_visual) do
+                :ok ->
+                  attrs = %{
+                    content: q_data["content"],
+                    answer: q_data["answer"],
+                    question_type: normalize_question_type(q_data["question_type"]),
+                    options: q_data["options"],
+                    difficulty: normalize_difficulty(q_data["difficulty"]),
+                    explanation: q_data["explanation"],
+                    hobby_context: sanitize_hobby_context(q_data["hobby_context"]),
+                    is_generated: true,
+                    # Phase 1 provenance fields, finally populated on AI
+                    # rows (they were NULL on 100% of prod AI rows).
+                    source_type: :ai_generated,
+                    generation_mode: mode,
+                    grounding_refs: grounding_refs,
+                    course_id: course.id,
+                    chapter_id: if(chapter, do: chapter.id),
+                    metadata:
+                      %{"source" => "ai_generation", "mode" => mode}
+                      |> maybe_put_meta("table_spec", table_spec)
+                  }
+
+                  case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
+                    {:ok, question} ->
+                      attach_figures(question, claimed_figure_ids)
+                      {count + 1, [question.id | ids]}
+
+                    {:error, changeset} ->
+                      Logger.warning(
+                        "[AIGen] Failed to insert question: #{inspect(changeset.errors)}"
+                      )
+
+                      {count, ids}
+                  end
+
+                {:error, reason} ->
                   Logger.warning(
-                    "[AIGen] Failed to insert question: #{inspect(changeset.errors)}"
+                    "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
                   )
 
                   {count, ids}
               end
-
-            {:error, reason} ->
-              Logger.warning(
-                "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
-              )
-
-              {count, ids}
           end
 
         if progress_event, do: Progress.tick(progress_event, idx, total, "questions")
@@ -600,6 +658,32 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   end
 
   defp sanitize_table_spec(_), do: nil
+
+  # Phase 4 helpers ---------------------------------------------------------
+
+  # Builds the `grounding_refs` jsonb payload shared by every question in
+  # a single generation batch. Empty list → `%{}` so the DB default
+  # matches unseeded rows.
+  defp build_grounding_refs([]), do: %{}
+
+  defp build_grounding_refs(material_ids) when is_list(material_ids) do
+    refs =
+      Enum.map(material_ids, fn id ->
+        %{"type" => "material", "id" => id}
+      end)
+
+    %{"refs" => refs}
+  end
+
+  # A question with an empty or whitespace-only `explanation` is the
+  # exact failure pattern the April audit caught 1,916 times on AP Bio.
+  # The validator rejected each of them for missing_explanation. Block
+  # at source instead.
+  defp missing_explanation?(%{"explanation" => e}) when is_binary(e) do
+    String.trim(e) == ""
+  end
+
+  defp missing_explanation?(_), do: true
 
   defp maybe_put_meta(map, _k, nil), do: map
   defp maybe_put_meta(map, k, v), do: Map.put(map, k, v)
