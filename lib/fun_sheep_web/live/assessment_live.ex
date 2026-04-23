@@ -2,10 +2,12 @@ defmodule FunSheepWeb.AssessmentLive do
   use FunSheepWeb, :live_view
 
   import FunSheepWeb.BillingComponents
+  import FunSheepWeb.ProgressPanel, only: [panel: 1]
 
-  alias FunSheep.{Assessments, Billing, Engagement, Gamification, Questions}
+  alias FunSheep.{Assessments, Billing, Courses, Engagement, Gamification, Progress, Questions}
   alias FunSheep.Assessments.{Engine, StateCache}
   alias FunSheep.Gamification.FpEconomy
+  alias FunSheep.Progress.Event, as: ProgressEvent
 
   @xp_per_correct FpEconomy.xp_per_correct()
 
@@ -17,6 +19,7 @@ defmodule FunSheepWeb.AssessmentLive do
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(FunSheep.PubSub, "course:#{course_id}")
+      Progress.subscribe(:course, course_id)
     end
 
     # On reconnect, try to restore cached state instead of resetting
@@ -55,7 +58,8 @@ defmodule FunSheepWeb.AssessmentLive do
             question_sources: [],
             enabled_sources: MapSet.new(),
             phase: :blocked,
-            readiness: nil
+            readiness: nil,
+            generation_progress: %{}
           )
 
         {:ok, socket}
@@ -84,7 +88,8 @@ defmodule FunSheepWeb.AssessmentLive do
       assessment_complete: cached.assessment_complete,
       summary: cached.summary,
       phase: cached.phase,
-      readiness: nil
+      readiness: nil,
+      generation_progress: %{}
     )
   end
 
@@ -130,7 +135,8 @@ defmodule FunSheepWeb.AssessmentLive do
         question_sources: question_sources,
         enabled_sources: enabled_sources,
         phase: initial_phase,
-        readiness: readiness
+        readiness: readiness,
+        generation_progress: %{}
       )
 
     # If no sources to filter and scope is ready, start immediately
@@ -267,23 +273,47 @@ defmodule FunSheepWeb.AssessmentLive do
 
   # Student clicked "Generate now" on the readiness-block screen. Re-enqueue
   # generation for every chapter still below threshold. Idempotent — the
-  # worker's Oban uniqueness (5-min window) collapses duplicates. Surface a
-  # flash so the click feels responsive; without one the page looks frozen
-  # until the ~30s–2min broadcast arrives and flips the phase to :setup.
+  # worker's Oban uniqueness (5-min window) collapses duplicates. Seed a
+  # :queued progress event per chapter immediately so the UI shows real-time,
+  # named feedback from click to completion (see
+  # .claude/rules/i/progress-feedback.md).
   def handle_event("retry_generation", _params, socket) do
-    queued = Assessments.ensure_generation_queued(socket.assigns.schedule)
+    course_id = socket.assigns.course_id
+    queued_ids = Assessments.ensure_generation_queued(socket.assigns.schedule)
+    chapters = Courses.list_chapters_by_ids(queued_ids)
 
-    flash_message =
-      case length(queued) do
-        0 ->
-          "Already queued — questions will appear here as soon as they're ready."
+    seeded =
+      Map.new(chapters, fn chapter ->
+        {chapter.id,
+         ProgressEvent.new(
+           job_id: "chapter:#{chapter.id}",
+           topic_type: :course,
+           topic_id: course_id,
+           scope: :question_regeneration,
+           phase_total: 3,
+           subject_id: chapter.id,
+           subject_label: chapter.name
+         )}
+      end)
 
-        n ->
-          "Generating questions for #{n} chapter#{if n == 1, do: "", else: "s"}. " <>
-            "This usually takes about a minute."
+    # Merge: keep existing in-flight entries (don't clobber a running event
+    # with a fresh :queued one); add new ones for chapters not yet tracked.
+    merged_progress =
+      Map.merge(seeded, socket.assigns.generation_progress, fn _id, new, existing ->
+        if ProgressEvent.terminal?(existing), do: new, else: existing
+      end)
+
+    flash =
+      if queued_ids == [] and socket.assigns.generation_progress == %{} do
+        "Already queued — questions will appear here as soon as they're ready."
+      else
+        nil
       end
 
-    {:noreply, put_flash(socket, :info, flash_message)}
+    socket = assign(socket, generation_progress: merged_progress)
+    socket = if flash, do: put_flash(socket, :info, flash), else: socket
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -303,6 +333,17 @@ defmodule FunSheepWeb.AssessmentLive do
   def handle_info({:questions_ready, %{chapter_ids: _ids}}, socket) do
     {:noreply, maybe_transition_on_readiness(socket)}
   end
+
+  # Real-time regeneration progress. Each chapter is keyed separately so the
+  # panel can render concurrent chapters as independent rows with their own
+  # phase/progress state. See .claude/rules/i/progress-feedback.md.
+  def handle_info({:progress, %ProgressEvent{scope: :question_regeneration} = event}, socket) do
+    key = event.subject_id || event.job_id
+    updated = Map.put(socket.assigns.generation_progress, key, event)
+    {:noreply, assign(socket, generation_progress: updated)}
+  end
+
+  def handle_info({:progress, _event}, socket), do: {:noreply, socket}
 
   def handle_info(_other, socket), do: {:noreply, socket}
 
@@ -454,6 +495,7 @@ defmodule FunSheepWeb.AssessmentLive do
       |> Map.put_new(:no_questions_available, false)
       |> Map.put_new(:summary, nil)
       |> Map.put_new(:readiness, nil)
+      |> Map.put_new(:generation_progress, %{})
 
     ~H"""
     <div class="max-w-3xl mx-auto">
@@ -493,11 +535,25 @@ defmodule FunSheepWeb.AssessmentLive do
 
         <%= cond do %>
           <% @phase == :readiness_block -> %>
+            <.render_generation_progress
+              :if={map_size(@generation_progress) > 0}
+              progress={@generation_progress}
+            />
             <.render_readiness_block
+              :if={not all_terminal_success?(@generation_progress)}
               readiness={@readiness}
               schedule={@schedule}
               course_id={@course_id}
+              has_progress?={map_size(@generation_progress) > 0}
             />
+            <div
+              :if={all_terminal_success?(@generation_progress)}
+              class="bg-white rounded-2xl shadow-md p-6 mt-4 text-center"
+            >
+              <p class="text-sm text-[#8E8E93]">
+                Questions are being validated. This screen will refresh automatically once they're ready.
+              </p>
+            </div>
           <% @phase == :setup -> %>
             <.render_source_setup
               question_sources={@question_sources}
@@ -620,6 +676,7 @@ defmodule FunSheepWeb.AssessmentLive do
   attr :readiness, :any, required: true
   attr :schedule, :map, required: true
   attr :course_id, :string, required: true
+  attr :has_progress?, :boolean, default: false
 
   defp render_readiness_block(assigns) do
     copy = readiness_copy(assigns.readiness)
@@ -635,14 +692,20 @@ defmodule FunSheepWeb.AssessmentLive do
       )
 
     ~H"""
-    <div class="bg-white rounded-2xl shadow-md p-8 text-center">
+    <div class={[
+      "bg-white rounded-2xl shadow-md p-8 text-center",
+      if(@has_progress?, do: "mt-4", else: "")
+    ]}>
       <.icon
         name={readiness_icon(@tone)}
         class={"w-16 h-16 mx-auto mb-4 #{readiness_icon_class(@tone)}"}
       />
       <h2 class="text-2xl font-bold text-[#1C1C1E]">{@heading}</h2>
       <p class="text-[#8E8E93] mt-3 max-w-md mx-auto">{@body}</p>
-      <div :if={@show_retry? and @retry_chapter_count > 0} class="mt-4 text-sm text-[#8E8E93]">
+      <div
+        :if={@show_retry? and @retry_chapter_count > 0 and not @has_progress?}
+        class="mt-4 text-sm text-[#8E8E93]"
+      >
         {@retry_chapter_count} chapter{if @retry_chapter_count != 1, do: "s"} will generate questions now.
       </div>
       <div class="flex justify-center gap-3 mt-6">
@@ -653,7 +716,7 @@ defmodule FunSheepWeb.AssessmentLive do
           Go to Course Page
         </.link>
         <button
-          :if={@show_retry?}
+          :if={@show_retry? and not @has_progress?}
           phx-click="retry_generation"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
         >
@@ -661,6 +724,39 @@ defmodule FunSheepWeb.AssessmentLive do
         </button>
       </div>
     </div>
+    """
+  end
+
+  attr :progress, :map, required: true
+
+  defp render_generation_progress(assigns) do
+    events =
+      assigns.progress
+      |> Map.values()
+      |> Enum.sort_by(&{&1.status != :running, &1.subject_label || ""})
+
+    running_count = Enum.count(events, fn e -> e.status in [:queued, :running] end)
+    total = length(events)
+
+    subtitle =
+      cond do
+        running_count > 0 ->
+          "Working on #{running_count} chapter#{if running_count == 1, do: "", else: "s"} — " <>
+            "each takes about a minute. You can leave this page; progress keeps going."
+
+        true ->
+          "All chapters processed."
+      end
+
+    assigns =
+      assign(assigns,
+        events: events,
+        title: "Regenerating questions · #{total} chapter#{if total == 1, do: "", else: "s"}",
+        subtitle: subtitle
+      )
+
+    ~H"""
+    <.panel title={@title} subtitle={@subtitle} events={@events} />
     """
   end
 
@@ -733,6 +829,16 @@ defmodule FunSheepWeb.AssessmentLive do
   defp retry_chapter_count({:scope_empty, ids}), do: length(ids)
   defp retry_chapter_count({:scope_partial, %{missing: missing}}), do: length(missing)
   defp retry_chapter_count(_), do: 0
+
+  # True when at least one progress entry exists and every entry is in the
+  # :succeeded terminal state. Used to swap the readiness-block copy for a
+  # "validating" interstitial, since the stale "no questions yet" wording
+  # contradicts what the progress panel is showing.
+  defp all_terminal_success?(progress) when map_size(progress) == 0, do: false
+
+  defp all_terminal_success?(progress) do
+    Enum.all?(progress, fn {_k, %{status: s}} -> s == :succeeded end)
+  end
 
   defp readiness_icon(:error), do: "hero-exclamation-triangle"
   defp readiness_icon(:warning), do: "hero-clock"

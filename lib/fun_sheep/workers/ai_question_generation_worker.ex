@@ -33,10 +33,16 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       states: [:available, :scheduled, :executing, :retryable]
     ]
 
-  alias FunSheep.{Courses, Content, Learning, Repo}
+  alias FunSheep.{Courses, Content, Learning, Progress, Repo}
+  alias FunSheep.Progress.Event, as: ProgressEvent
   alias FunSheep.Questions
   alias FunSheep.Questions.Question
   alias FunSheep.Interactor.Agents
+
+  # Phases we broadcast for a single-chapter regeneration job. See
+  # `.claude/rules/i/progress-feedback.md` — users must always be able to tell
+  # which step is running and how many remain.
+  @regeneration_phase_total 3
 
   import Ecto.Query
   require Logger
@@ -112,27 +118,71 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       :ok
     else
       chapter = if chapter_id, do: Courses.get_chapter!(chapter_id)
+      progress_event = regeneration_base_event(course_id, chapter, count)
+
+      progress_event = maybe_phase(progress_event, :preparing, "Preparing chapter context", 1)
       context = build_context(course, chapter, args)
       prompt = build_prompt(mode, course, chapter, context, count)
 
+      progress_event = maybe_phase(progress_event, :generating, "Generating questions with AI", 2)
+
       case send_to_ai(prompt, course, chapter) do
         {:ok, questions} ->
-          inserted = insert_questions(questions, course, chapter, context[:figures] || [])
+          progress_event = maybe_phase(progress_event, :saving, "Saving questions", 3)
+
+          inserted =
+            insert_questions(questions, course, chapter, context[:figures] || [],
+              progress: progress_event
+            )
 
           Logger.info(
             "[AIGen] Inserted #{inserted} AI-generated questions for course #{course_id}"
           )
+
+          if progress_event, do: Progress.succeeded(progress_event, "questions", inserted)
 
           finalize_course(course_id, inserted)
           :ok
 
         {:error, reason} ->
           Logger.error("[AIGen] Failed to generate questions: #{inspect(reason)}")
+
+          if progress_event do
+            Progress.failed(
+              progress_event,
+              :ai_unavailable,
+              "AI service unavailable — please try again."
+            )
+          end
+
           # Still finalize so the course doesn't stay stuck in "generating"
           finalize_course(course_id, 0)
           {:error, reason}
       end
     end
+  end
+
+  defp maybe_phase(nil, _phase, _label, _index), do: nil
+
+  defp maybe_phase(%ProgressEvent{} = e, phase, label, index),
+    do: Progress.phase(e, phase, label, index)
+
+  # Build a base progress event for a single-chapter regeneration job. Returns
+  # nil when there is no chapter (legacy course-wide path), so the caller can
+  # short-circuit.
+  defp regeneration_base_event(_course_id, nil, _count), do: nil
+
+  defp regeneration_base_event(course_id, chapter, count) do
+    ProgressEvent.new(
+      job_id: "chapter:#{chapter.id}",
+      topic_type: :course,
+      topic_id: course_id,
+      scope: :question_regeneration,
+      phase_total: @regeneration_phase_total,
+      subject_id: chapter.id,
+      subject_label: chapter.name,
+      detail: "#{count} questions for #{chapter.name}"
+    )
   end
 
   @doc """
@@ -440,50 +490,61 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     Jason.decode(cleaned)
   end
 
-  defp insert_questions(questions, course, chapter, available_figures) do
+  defp insert_questions(questions, course, chapter, available_figures, opts \\ []) do
     available_figure_ids = MapSet.new(available_figures, & &1.id)
+    progress_event = opts[:progress]
+    total = length(questions)
 
     {count, inserted_ids} =
-      Enum.reduce(questions, {0, []}, fn q_data, {count, ids} ->
+      questions
+      |> Enum.with_index(1)
+      |> Enum.reduce({0, []}, fn {q_data, idx}, {count, ids} ->
         claimed_figure_ids = sanitize_figure_ids(q_data["figure_ids"], available_figure_ids)
         table_spec = sanitize_table_spec(q_data["table_spec"])
         has_visual = claimed_figure_ids != [] or table_spec != nil
 
-        case validate_figure_dependency(q_data["content"], has_visual) do
-          :ok ->
-            attrs = %{
-              content: q_data["content"],
-              answer: q_data["answer"],
-              question_type: normalize_question_type(q_data["question_type"]),
-              options: q_data["options"],
-              difficulty: normalize_difficulty(q_data["difficulty"]),
-              explanation: q_data["explanation"],
-              hobby_context: sanitize_hobby_context(q_data["hobby_context"]),
-              is_generated: true,
-              course_id: course.id,
-              chapter_id: if(chapter, do: chapter.id),
-              metadata:
-                %{"source" => "ai_generation"}
-                |> maybe_put_meta("table_spec", table_spec)
-            }
+        new_state =
+          case validate_figure_dependency(q_data["content"], has_visual) do
+            :ok ->
+              attrs = %{
+                content: q_data["content"],
+                answer: q_data["answer"],
+                question_type: normalize_question_type(q_data["question_type"]),
+                options: q_data["options"],
+                difficulty: normalize_difficulty(q_data["difficulty"]),
+                explanation: q_data["explanation"],
+                hobby_context: sanitize_hobby_context(q_data["hobby_context"]),
+                is_generated: true,
+                course_id: course.id,
+                chapter_id: if(chapter, do: chapter.id),
+                metadata:
+                  %{"source" => "ai_generation"}
+                  |> maybe_put_meta("table_spec", table_spec)
+              }
 
-            case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
-              {:ok, question} ->
-                attach_figures(question, claimed_figure_ids)
-                {count + 1, [question.id | ids]}
+              case %Question{} |> Question.changeset(attrs) |> Repo.insert() do
+                {:ok, question} ->
+                  attach_figures(question, claimed_figure_ids)
+                  {count + 1, [question.id | ids]}
 
-              {:error, changeset} ->
-                Logger.warning("[AIGen] Failed to insert question: #{inspect(changeset.errors)}")
-                {count, ids}
-            end
+                {:error, changeset} ->
+                  Logger.warning(
+                    "[AIGen] Failed to insert question: #{inspect(changeset.errors)}"
+                  )
 
-          {:error, reason} ->
-            Logger.warning(
-              "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
-            )
+                  {count, ids}
+              end
 
-            {count, ids}
-        end
+            {:error, reason} ->
+              Logger.warning(
+                "[AIGen] Rejected question (#{reason}): #{String.slice(q_data["content"] || "", 0, 120)}"
+              )
+
+              {count, ids}
+          end
+
+        if progress_event, do: Progress.tick(progress_event, idx, total, "questions")
+        new_state
       end)
 
     enqueue_validation(inserted_ids, course.id)
