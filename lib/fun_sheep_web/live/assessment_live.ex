@@ -267,10 +267,23 @@ defmodule FunSheepWeb.AssessmentLive do
 
   # Student clicked "Generate now" on the readiness-block screen. Re-enqueue
   # generation for every chapter still below threshold. Idempotent — the
-  # worker's Oban uniqueness (5-min window) collapses duplicates.
+  # worker's Oban uniqueness (5-min window) collapses duplicates. Surface a
+  # flash so the click feels responsive; without one the page looks frozen
+  # until the ~30s–2min broadcast arrives and flips the phase to :setup.
   def handle_event("retry_generation", _params, socket) do
-    Assessments.ensure_generation_queued(socket.assigns.schedule)
-    {:noreply, socket}
+    queued = Assessments.ensure_generation_queued(socket.assigns.schedule)
+
+    flash_message =
+      case length(queued) do
+        0 ->
+          "Already queued — questions will appear here as soon as they're ready."
+
+        n ->
+          "Generating questions for #{n} chapter#{if n == 1, do: "", else: "s"}. " <>
+            "This usually takes about a minute."
+      end
+
+    {:noreply, put_flash(socket, :info, flash_message)}
   end
 
   @impl true
