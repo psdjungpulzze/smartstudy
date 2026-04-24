@@ -44,6 +44,7 @@ defmodule FunSheepWeb.PracticeRequestLive.AskComponent do
     assign(socket,
       state: :not_applicable,
       weekly: %{used: 0, limit: 20, remaining: 20, resets_at: nil},
+      paid_stats: %{questions: 0, correct: 0},
       guardians: [],
       pending_request: nil,
       show_modal: false,
@@ -59,11 +60,13 @@ defmodule FunSheepWeb.PracticeRequestLive.AskComponent do
     weekly = Billing.weekly_usage(student_id)
     guardians = Accounts.list_active_guardian_roles_for_student(student_id, only: :parent)
     pending = fetch_pending(student_id)
+    paid_stats = if state == :paid, do: Billing.paid_weekly_stats(student_id), else: %{questions: 0, correct: 0}
 
     socket
     |> assign(
       state: state,
       weekly: weekly,
+      paid_stats: paid_stats,
       guardians: guardians,
       pending_request: pending,
       show_modal: socket.assigns[:show_modal] || false,
@@ -160,7 +163,12 @@ defmodule FunSheepWeb.PracticeRequestLive.AskComponent do
         <% :not_applicable -> %>
           <%!-- Nothing — not a student --%>
         <% :paid -> %>
-          <BillingComponents.usage_meter state={:paid} variant={:card} />
+          <BillingComponents.usage_meter
+            state={:paid}
+            variant={:card}
+            questions={@paid_stats.questions}
+            correct={@paid_stats.correct}
+          />
         <% _ -> %>
           <BillingComponents.usage_meter
             state={@state}

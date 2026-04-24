@@ -33,9 +33,12 @@ defmodule FunSheepWeb.BillingComponents do
   attr :remaining, :integer, default: 20
   attr :resets_at, :any, default: nil
   attr :variant, :atom, default: :pill, values: [:pill, :card]
+  attr :questions, :integer, default: 0
+  attr :correct, :integer, default: 0
 
   def usage_meter(%{state: :not_applicable} = assigns), do: ~H""
   def usage_meter(%{state: :paid, variant: :pill} = assigns), do: paid_pill(assigns)
+  def usage_meter(%{state: :paid, variant: :card} = assigns), do: paid_card(assigns)
   def usage_meter(%{variant: :pill} = assigns), do: meter_pill(assigns)
   def usage_meter(%{variant: :card} = assigns), do: meter_card(assigns)
 
@@ -45,6 +48,38 @@ defmodule FunSheepWeb.BillingComponents do
       <span aria-hidden="true">💚</span>
       <span>Unlimited practice</span>
     </span>
+    """
+  end
+
+  defp paid_card(assigns) do
+    accuracy =
+      if assigns.questions > 0, do: round(assigns.correct / assigns.questions * 100), else: nil
+
+    assigns = assign(assigns, accuracy: accuracy)
+
+    ~H"""
+    <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-[#1C1C1E] dark:text-white">
+          This week
+        </h3>
+        <.usage_meter state={:paid} variant={:pill} />
+      </div>
+
+      <div class="flex items-center gap-6">
+        <div>
+          <p class="text-2xl font-bold text-[#1C1C1E] dark:text-white">{@questions}</p>
+          <p class="text-sm text-[#8E8E93]">questions</p>
+        </div>
+        <div :if={@accuracy}>
+          <p class="text-2xl font-bold text-[#1C1C1E] dark:text-white">{@accuracy}%</p>
+          <p class="text-sm text-[#8E8E93]">accuracy</p>
+        </div>
+        <div :if={is_nil(@accuracy)} class="text-sm text-[#8E8E93]">
+          Start practicing to see your stats
+        </div>
+      </div>
+    </div>
     """
   end
 

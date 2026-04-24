@@ -22,6 +22,7 @@ defmodule FunSheep.Billing do
 
   alias FunSheep.Repo
   alias FunSheep.Billing.{Subscription, TestUsage}
+  alias FunSheep.Questions.QuestionAttempt
   alias FunSheep.Interactor.Billing, as: BillingClient
 
   @initial_free_tests 50
@@ -419,6 +420,26 @@ defmodule FunSheep.Billing do
       nil -> DateTime.utc_now() |> DateTime.truncate(:second)
       ts -> DateTime.add(ts, 7, :day) |> DateTime.truncate(:second)
     end
+  end
+
+  @doc """
+  Returns question stats for the past 7 days for a paid (unlimited) student.
+  Used by the dashboard card to show motivating progress instead of a quota meter.
+  """
+  def paid_weekly_stats(user_role_id) do
+    week_ago = DateTime.add(DateTime.utc_now(), -7, :day)
+
+    result =
+      from(a in QuestionAttempt,
+        where: a.user_role_id == ^user_role_id and a.inserted_at >= ^week_ago,
+        select: %{
+          total: count(a.id),
+          correct: sum(fragment("CASE WHEN ? THEN 1 ELSE 0 END", a.is_correct))
+        }
+      )
+      |> Repo.one()
+
+    %{questions: result.total || 0, correct: result.correct || 0}
   end
 
   ## Query Helpers
