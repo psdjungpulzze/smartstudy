@@ -9,6 +9,11 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
   @impl true
   def mount(%{"course_id" => course_id, "schedule_id" => schedule_id}, _session, socket) do
     user_role_id = socket.assigns.current_user["user_role_id"]
+
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(FunSheep.PubSub, "student_progress:#{user_role_id}")
+    end
+
     schedule = Assessments.get_test_schedule_with_course!(schedule_id)
     readiness = Assessments.latest_readiness(user_role_id, schedule_id)
     history = Assessments.list_readiness_history(user_role_id, schedule_id, 5)
@@ -87,6 +92,26 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
      |> put_flash(:info, "Test schedule deleted.")
      |> push_navigate(to: ~p"/courses/#{socket.assigns.course_id}/tests")}
   end
+
+  @impl true
+  def handle_info(:readiness_updated, socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    schedule_id = socket.assigns.schedule.id
+    schedule = socket.assigns.schedule
+    readiness = Assessments.latest_readiness(user_role_id, schedule_id)
+    attempts_count = Assessments.attempts_count_for_schedule(user_role_id, schedule)
+    mastery_map = Assessments.topic_mastery_map(user_role_id, schedule_id)
+
+    {:noreply,
+     assign(socket,
+       readiness: readiness,
+       attempts_count: attempts_count,
+       mastery_map: mastery_map,
+       readiness_state: readiness_state(mastery_map)
+     )}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   # --- State Detection ---
 
@@ -251,6 +276,16 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
                 else: "questions answered"}
           <% end %>
         </p>
+        <%!-- P1: Show full_test_readiness in State B so students see both the
+             "what I know" score and the conservative "projected full-test" score --%>
+        <div :if={@readiness_state == :in_progress && @readiness && @readiness.full_test_readiness > 0}
+             class="mt-2 flex items-center justify-center gap-2 text-xs text-[#8E8E93]">
+          <span>Projected full-test score:</span>
+          <span class={"font-semibold #{score_text_color(@readiness.full_test_readiness)}"}>
+            {round(@readiness.full_test_readiness)}%
+          </span>
+          <span class="text-[#C7C7CC]">(assuming 0% on untested topics)</span>
+        </div>
         <p :if={@readiness_state == :in_progress} class="mt-1 text-xs text-[#C7C7CC]">
           Complete the assessment for your full readiness picture
         </p>

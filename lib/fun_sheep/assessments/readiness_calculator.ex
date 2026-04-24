@@ -27,9 +27,18 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
   # Minimum attempts before a skill enters the weakest-N pool. Prevents a
   # student's aggregate from dropping the moment they start a fresh topic.
   @min_signal_attempts 3
+  # Minimum aggregate score shown in the probing phase. Prevents displaying
+  # 0% when a student has answered some questions all wrong on first attempt —
+  # they are still learning the terrain, not confirmed weak across the board.
+  @probing_score_floor 3.0
 
   def calculate(user_role_id, test_schedule) do
-    chapter_ids = get_in(test_schedule.scope, ["chapter_ids"]) || []
+    raw_chapter_ids = get_in(test_schedule.scope, ["chapter_ids"]) || []
+
+    # P4: strip phantom IDs — chapters deleted from the course after the
+    # schedule was created would make assessment_complete? return false forever.
+    real_sections = Courses.list_sections_by_chapters(raw_chapter_ids)
+    chapter_ids = real_sections |> Enum.map(& &1.chapter_id) |> Enum.uniq()
 
     chapter_scores =
       Enum.into(chapter_ids, %{}, fn ch_id ->
@@ -37,7 +46,7 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
       end)
 
     {skill_scores, empty_section_ids, coverage_pct} =
-      calculate_skill_scores(user_role_id, chapter_ids)
+      calculate_skill_scores(user_role_id, real_sections)
 
     aggregate = aggregate_score(skill_scores, chapter_scores)
 
@@ -147,8 +156,7 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
   # coverage — a student needing medium/hard content would get stuck.
   defp calculate_skill_scores(_user_role_id, []), do: {%{}, [], 100.0}
 
-  defp calculate_skill_scores(user_role_id, chapter_ids) do
-    all_sections = Courses.list_sections_by_chapters(chapter_ids)
+  defp calculate_skill_scores(user_role_id, all_sections) do
     total_count = length(all_sections)
 
     section_ids = Enum.map(all_sections, & &1.id)
@@ -215,9 +223,11 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
             [] ->
               # Every attempted skill is still in the probing window; show a
               # gentle non-zero hint so the bar visibly responds to early work.
+              # Floor at @probing_score_floor so we never display 0% on a
+              # student's very first attempts (avoids alarming false negatives).
               all_attempted
               |> Enum.map(& &1.score)
-              |> then(fn scores -> Enum.sum(scores) / length(scores) / 2 end)
+              |> then(fn scores -> max(Enum.sum(scores) / length(scores) / 2, @probing_score_floor) end)
 
             skills ->
               weakest_n_average(skills)
