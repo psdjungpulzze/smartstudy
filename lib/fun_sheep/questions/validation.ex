@@ -10,8 +10,8 @@ defmodule FunSheep.Questions.Validation do
 
   A question is only shown to students when `validation_status == :passed`.
 
-  This module builds the prompt, calls the `question_quality_reviewer` Interactor
-  assistant, parses the structured response, and applies the verdict.
+  This module builds the prompt, calls the direct LLM client, parses the
+  structured response, and applies the verdict.
   """
 
   alias FunSheep.{Courses, Repo}

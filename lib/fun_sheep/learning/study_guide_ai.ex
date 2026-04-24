@@ -3,7 +3,7 @@ defmodule FunSheep.Learning.StudyGuideAI do
   On-demand AI content generation for study guides.
 
   Generates explanations for wrong questions and chapter concept summaries
-  via the Interactor AI agents platform. Returns mock content in mock mode.
+  via the direct Anthropic API.
 
   This is the "lazy" part of the hybrid approach — content is generated
   when the student clicks to expand, not at guide creation time.

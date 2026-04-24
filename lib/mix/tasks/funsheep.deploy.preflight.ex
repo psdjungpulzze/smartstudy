@@ -44,6 +44,8 @@ defmodule Mix.Tasks.Funsheep.Deploy.Preflight do
     {"GCS_BUCKET", :nonempty},
     {"GCS_SERVICE_ACCOUNT", :nonempty},
     {"GOOGLE_VISION_API_KEY", :google_api_key},
+    {"ANTHROPIC_API_KEY", :nonempty},
+    {"OPENAI_API_KEY", :nonempty},
     {"SMTP_HOST", :nonempty},
     {"SMTP_PORT", :port},
     {"SMTP_USERNAME", :nonempty},
