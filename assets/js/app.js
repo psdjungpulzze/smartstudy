@@ -154,10 +154,19 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
 
       if (cancelled) return
 
-      await putFileInChunks(upload_url, file, () => {
-        // Per-chunk tick: no-op for now; aggregate progress is per-file.
-        // Finer-grained progress could pushEvent here if needed later.
-      })
+      try {
+        await putFileInChunks(upload_url, file, () => {
+          // Per-chunk tick: no-op for now; aggregate progress is per-file.
+          // Finer-grained progress could pushEvent here if needed later.
+        })
+      } catch (putErr) {
+        // GCS returns CORS headers on the OPTIONS preflight but not on the
+        // actual PUT response, so browsers throw TypeError even when the
+        // upload landed. Re-throw plain Errors (4xx/5xx from GCS) so genuine
+        // failures are still counted; swallow TypeErrors and let
+        // finalizeUpload confirm via object_info whether the file made it.
+        if (!(putErr instanceof TypeError)) throw putErr
+      }
 
       if (cancelled) return
 
