@@ -10,9 +10,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
   """
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Courses, Questions, Tutor, Tutorials}
+  alias FunSheep.{Assessments, Billing, Courses, Questions, Tutor, Tutorials}
   alias FunSheep.Assessments.QuickTestEngine
   alias FunSheep.Gamification
+  alias FunSheep.Questions.{FreeformGrader, ScoredFreeformGrader}
 
   @batch_size 30
   @tutorial_key "quick_practice"
@@ -55,7 +56,11 @@ defmodule FunSheepWeb.QuickPracticeLive do
         tutor_session_id: nil,
         tutor_messages: [],
         tutor_loading: false,
-        tutor_input: ""
+        tutor_input: "",
+        # Async grading state
+        grading: false,
+        grading_task: nil,
+        pending_grade_result: nil
       )
 
     {:ok, socket}
@@ -148,7 +153,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "known", true, :i_know)
+      record_attempt(socket, question, "known", true, confidence: :i_know)
       new_state = QuickTestEngine.mark_known(state, question.id)
 
       socket =
@@ -175,7 +180,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "not_sure", false, :not_sure)
+      record_attempt(socket, question, "not_sure", false, confidence: :not_sure)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
 
       {:noreply,
@@ -196,7 +201,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "dont_know", false, :dont_know)
+      record_attempt(socket, question, "dont_know", false, confidence: :dont_know)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
 
       {:noreply,
@@ -257,30 +262,50 @@ defmodule FunSheepWeb.QuickPracticeLive do
     if answer == nil or question == nil do
       {:noreply, socket}
     else
-      is_correct = check_answer(question, answer)
-      new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
+      freeform? = question.question_type in [:short_answer, :free_response]
 
-      new_stats =
-        if is_correct,
-          do: %{stats | correct: stats.correct + 1},
-          else: %{stats | incorrect: stats.incorrect + 1}
+      if freeform? do
+        user_role_id = socket.assigns.current_user["user_role_id"]
 
-      new_streak =
-        if is_correct,
-          do: socket.assigns.session_streak + 1,
-          else: 0
+        grader =
+          if Billing.subscription_has_scored_grading?(user_role_id),
+            do: ScoredFreeformGrader,
+            else: FreeformGrader
 
-      # Defer DB insert until confidence is selected (Phase 2 — collect confidence first)
-      {:noreply,
-       assign(socket,
-         engine_state: new_state,
-         stats: new_stats,
-         feedback: %{is_correct: is_correct, correct_answer: question.answer},
-         pending_is_correct: is_correct,
-         pending_answer: answer,
-         card_phase: :feedback,
-         session_streak: new_streak
-       )}
+        task = Task.async(fn -> grader.grade(question, answer) end)
+
+        {:noreply,
+         assign(socket,
+           grading: true,
+           grading_task: task.ref,
+           pending_grade_result: nil
+         )}
+      else
+        is_correct = check_answer(question, answer)
+        new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
+
+        new_stats =
+          if is_correct,
+            do: %{stats | correct: stats.correct + 1},
+            else: %{stats | incorrect: stats.incorrect + 1}
+
+        new_streak =
+          if is_correct,
+            do: socket.assigns.session_streak + 1,
+            else: 0
+
+        # Defer DB insert until confidence is selected (Phase 2 — collect confidence first)
+        {:noreply,
+         assign(socket,
+           engine_state: new_state,
+           stats: new_stats,
+           feedback: %{is_correct: is_correct, correct_answer: question.answer, grade_result: nil},
+           pending_is_correct: is_correct,
+           pending_answer: answer,
+           card_phase: :feedback,
+           session_streak: new_streak
+         )}
+      end
     end
   end
 
@@ -291,7 +316,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     confidence = String.to_existing_atom(confidence_str)
 
     if question && not is_nil(is_correct) do
-      record_attempt(socket, question, answer || "unknown", is_correct, confidence)
+      record_attempt(socket, question, answer || "unknown", is_correct, confidence: confidence)
     end
 
     socket =
@@ -447,7 +472,36 @@ defmodule FunSheepWeb.QuickPracticeLive do
     {:noreply, assign(socket, tutor_input: value)}
   end
 
+  # ── Freeform grading task results ──
+
   @impl true
+  def handle_info({ref, {:ok, %{score: _score, is_correct: is_correct} = grade_result}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+    apply_freeform_grading_result(socket, is_correct, grade_result)
+  end
+
+  def handle_info({ref, {:ok, %{correct: is_correct, feedback: _ai_feedback}}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+    apply_freeform_grading_result(socket, is_correct, nil)
+  end
+
+  def handle_info({ref, {:error, _reason}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+    %{current_question: question, selected_answer: answer} = socket.assigns
+    is_correct = check_answer(question, answer)
+    apply_freeform_grading_result(socket, is_correct, nil)
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, socket)
+      when socket.assigns.grading_task == ref do
+    %{current_question: question, selected_answer: answer} = socket.assigns
+    is_correct = check_answer(question, answer)
+    apply_freeform_grading_result(socket, is_correct, nil)
+  end
+
   def handle_info({:tutor_quick_action, action, question}, socket) do
     session_id = socket.assigns.tutor_session_id
 
@@ -524,19 +578,70 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
-  defp record_attempt(socket, question, answer_given, is_correct, confidence \\ nil) do
+  defp record_attempt(socket, question, answer_given, is_correct, opts \\ []) do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
-      Questions.record_attempt_with_stats(%{
+      confidence = Keyword.get(opts, :confidence)
+      grade_result = Keyword.get(opts, :grade_result)
+
+      base_attrs = %{
         user_role_id: user_role_id,
         question_id: question.id,
         answer_given: answer_given,
         is_correct: is_correct,
         difficulty_at_attempt: to_string(question.difficulty),
         confidence: confidence
-      })
+      }
+
+      attrs =
+        if grade_result do
+          Map.merge(base_attrs, %{
+            score: grade_result.score,
+            score_max: grade_result.max_score,
+            score_feedback: grade_result.feedback,
+            grader_path: to_string(grade_result.grader_path)
+          })
+        else
+          base_attrs
+        end
+
+      Questions.record_attempt_with_stats(attrs)
     end
+  end
+
+  defp apply_freeform_grading_result(socket, is_correct, grade_result) do
+    %{current_question: question, selected_answer: answer, engine_state: state, stats: stats} =
+      socket.assigns
+
+    record_attempt(socket, question, answer, is_correct, grade_result: grade_result)
+    new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
+
+    new_stats =
+      if is_correct,
+        do: %{stats | correct: stats.correct + 1},
+        else: %{stats | incorrect: stats.incorrect + 1}
+
+    new_streak =
+      if is_correct,
+        do: socket.assigns.session_streak + 1,
+        else: 0
+
+    {:noreply,
+     assign(socket,
+       grading: false,
+       grading_task: nil,
+       pending_grade_result: grade_result,
+       engine_state: new_state,
+       stats: new_stats,
+       feedback: %{
+         is_correct: is_correct,
+         correct_answer: question.answer,
+         grade_result: grade_result
+       },
+       card_phase: :feedback,
+       session_streak: new_streak
+     )}
   end
 
   defp ensure_tutor_session(socket) do
@@ -857,9 +962,21 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </div>
           </div>
 
+          <%!-- Grading spinner (freeform async grading) --%>
+          <div
+            :if={@current_question && !@session_complete && @grading}
+            class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5 flex flex-col items-center gap-3"
+          >
+            <div class="w-6 h-6 border-2 border-[#4CD964] border-t-transparent rounded-full animate-spin" />
+            <p class="text-sm text-[#8E8E93]">Grading your answer...</p>
+          </div>
+
           <%!-- Feedback phase (after answering or "don't know") --%>
           <div
-            :if={@current_question && !@session_complete && @card_phase in [:feedback, :reveal]}
+            :if={
+              @current_question && !@session_complete && @card_phase in [:feedback, :reveal] &&
+                !@grading
+            }
             class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5"
           >
             <%!-- Result banner --%>
@@ -895,6 +1012,25 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
             <%!-- Question recap --%>
             <p class="text-sm text-[#8E8E93] mb-3 text-center">{@current_question.content}</p>
+
+            <%!-- Rubric score badge — shown for premium users with scored grading --%>
+            <.practice_score_badge
+              :if={@feedback && @feedback[:grade_result]}
+              grade_result={@feedback.grade_result}
+            />
+
+            <%!-- Free-user upsell for freeform questions --%>
+            <div
+              :if={
+                @feedback && is_nil(@feedback[:grade_result]) &&
+                  @current_question.question_type in [:short_answer, :free_response]
+              }
+              class="text-xs text-[#8E8E93] text-center mb-3"
+            >
+              <.link navigate={~p"/subscription"} class="text-[#4CD964] hover:underline">
+                Upgrade to Premium for rubric scoring →
+              </.link>
+            </div>
 
             <%!-- Correct answer --%>
             <div class="bg-[#F5F5F7] rounded-xl p-4 mb-4 text-center">
@@ -1383,9 +1519,21 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </div>
           </div>
 
+          <%!-- Grading spinner (desktop, freeform async grading) --%>
+          <div
+            :if={@current_question && !@session_complete && @grading}
+            class="w-full bg-white rounded-2xl shadow-lg p-8 flex flex-col items-center gap-3"
+          >
+            <div class="w-8 h-8 border-2 border-[#4CD964] border-t-transparent rounded-full animate-spin" />
+            <p class="text-base text-[#8E8E93]">Grading your answer...</p>
+          </div>
+
           <%!-- Feedback phase (desktop) --%>
           <div
-            :if={@current_question && !@session_complete && @card_phase in [:feedback, :reveal]}
+            :if={
+              @current_question && !@session_complete && @card_phase in [:feedback, :reveal] &&
+                !@grading
+            }
             class="w-full bg-white rounded-2xl shadow-lg p-8"
           >
             <div
@@ -1419,6 +1567,25 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </div>
 
             <p class="text-base text-[#8E8E93] mb-4">{@current_question.content}</p>
+
+            <%!-- Rubric score badge (desktop) --%>
+            <.practice_score_badge
+              :if={@feedback && @feedback[:grade_result]}
+              grade_result={@feedback.grade_result}
+            />
+
+            <%!-- Free-user upsell for freeform questions (desktop) --%>
+            <div
+              :if={
+                @feedback && is_nil(@feedback[:grade_result]) &&
+                  @current_question.question_type in [:short_answer, :free_response]
+              }
+              class="text-sm text-[#8E8E93] mb-4"
+            >
+              <.link navigate={~p"/subscription"} class="text-[#4CD964] hover:underline">
+                Upgrade to Premium for rubric scoring →
+              </.link>
+            </div>
 
             <div class="bg-[#F5F5F7] rounded-xl p-5 mb-4">
               <p class="text-xs text-[#8E8E93] mb-1 uppercase tracking-wide font-medium">Answer</p>
@@ -1716,6 +1883,48 @@ defmodule FunSheepWeb.QuickPracticeLive do
     </div>
     """
   end
+
+  # ── Score badge component ──
+
+  attr :grade_result, :map, required: true
+
+  defp practice_score_badge(assigns) do
+    score = assigns.grade_result.score
+
+    {color, label} =
+      cond do
+        score <= 4 -> {"#FF3B30", practice_score_label(score)}
+        score <= 6 -> {"#FFCC00", practice_score_label(score)}
+        true -> {"#4CD964", practice_score_label(score)}
+      end
+
+    assigns =
+      assign(assigns,
+        score_color: color,
+        score_label: label
+      )
+
+    ~H"""
+    <div class="rounded-2xl border border-[#E5E5EA] p-3 mb-4">
+      <div class="text-xl font-bold" style={"color: #{@score_color};"}>
+        {@grade_result.score} / {@grade_result.max_score} · {@score_label}
+      </div>
+      <p :if={@grade_result.feedback} class="text-sm text-gray-700 mt-1">
+        {@grade_result.feedback}
+      </p>
+      <p :if={@grade_result.improvement_hint} class="text-xs text-[#8E8E93] mt-2">
+        💡 {@grade_result.improvement_hint}
+      </p>
+    </div>
+    """
+  end
+
+  defp practice_score_label(score) when score == 0, do: "No Credit"
+  defp practice_score_label(score) when score in 1..3, do: "Minimal"
+  defp practice_score_label(score) when score in 4..6, do: "Partial Credit"
+  defp practice_score_label(score) when score in 7..8, do: "Mostly Correct"
+  defp practice_score_label(score) when score in 9..10, do: "Full Credit"
+  defp practice_score_label(_), do: "Scored"
 
   # ── Tutor markdown renderer ──
 

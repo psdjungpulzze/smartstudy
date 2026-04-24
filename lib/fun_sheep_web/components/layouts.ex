@@ -121,6 +121,7 @@ defmodule FunSheepWeb.Layouts do
           %{label: "Learn", path: "/dashboard", icon: "hero-home"},
           %{label: "Courses", path: "/courses", icon: "hero-book-open"},
           %{label: "Practice", path: "/practice", icon: "hero-bolt"},
+          %{label: "Custom Tests", path: "/custom-tests", icon: "hero-clipboard-document-list"},
           %{label: "Flocks", path: "/leaderboard", icon: "hero-trophy"}
         ]
 
@@ -136,6 +137,7 @@ defmodule FunSheepWeb.Layouts do
           %{label: "Home", path: "/teacher", icon: "hero-home"},
           %{label: "My Classes", path: "/teacher/classes", icon: "hero-academic-cap"},
           %{label: "Students", path: "/teacher/students", icon: "hero-user-group"},
+          %{label: "Custom Tests", path: "/custom-tests", icon: "hero-clipboard-document-list"},
           %{label: "Reports", path: "/teacher/reports", icon: "hero-chart-bar"}
         ]
 

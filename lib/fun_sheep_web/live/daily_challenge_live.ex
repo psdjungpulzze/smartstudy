@@ -76,7 +76,12 @@ defmodule FunSheepWeb.DailyChallengeLive do
 
         case questions do
           [] ->
-            {:noreply, put_flash(socket, :error, "Challenge questions are not available right now. Please try again later.")}
+            {:noreply,
+             put_flash(
+               socket,
+               :error,
+               "Challenge questions are not available right now. Please try again later."
+             )}
 
           [first | _rest] ->
             timer_ref = Process.send_after(self(), :tick, 1_000)

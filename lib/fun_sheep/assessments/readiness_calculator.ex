@@ -227,7 +227,9 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
               # student's very first attempts (avoids alarming false negatives).
               all_attempted
               |> Enum.map(& &1.score)
-              |> then(fn scores -> max(Enum.sum(scores) / length(scores) / 2, @probing_score_floor) end)
+              |> then(fn scores ->
+                max(Enum.sum(scores) / length(scores) / 2, @probing_score_floor)
+              end)
 
             skills ->
               weakest_n_average(skills)
