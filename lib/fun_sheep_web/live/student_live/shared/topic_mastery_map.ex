@@ -45,7 +45,7 @@ defmodule FunSheepWeb.StudentLive.Shared.TopicMasteryMap do
             {chapter.chapter_name}
           </p>
           <div :if={chapter.topics == []} class="text-[11px] text-gray-400">
-            {gettext("No topics tagged yet.")}
+            {gettext("No concepts tagged yet.")}
           </div>
           <div :if={chapter.topics != []} class="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <button

@@ -399,7 +399,7 @@ defmodule FunSheepWeb.DashboardLive do
         <div class="mt-3 sm:mt-4">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs sm:text-sm font-bold text-white/90">
-              {if @has_coverage_gap?, do: "Readiness (available topics)", else: "Readiness"}
+              {if @has_coverage_gap?, do: "Readiness (available concepts)", else: "Readiness"}
             </span>
             <span class="text-xs sm:text-sm font-extrabold text-white">{@readiness}%</span>
           </div>
@@ -426,12 +426,12 @@ defmodule FunSheepWeb.DashboardLive do
             <span class="text-sm shrink-0 mt-0.5">⚠️</span>
             <div>
               <p class="text-[11px] sm:text-xs font-semibold text-white leading-snug">
-                {@empty_count} {if @empty_count == 1, do: "topic has", else: "topics have"} no questions yet
+                {@empty_count} {if @empty_count == 1, do: "concept has", else: "concepts have"} no questions yet
               </p>
               <p class="text-[10px] text-white/70 mt-0.5 leading-snug">
                 Estimated test readiness:
                 <span class="font-bold text-white">{@full_test_readiness}%</span>
-                &nbsp;·&nbsp; Questions for missing topics are being added.
+                &nbsp;·&nbsp; Questions for missing concepts are being added.
               </p>
             </div>
           </div>
@@ -447,7 +447,7 @@ defmodule FunSheepWeb.DashboardLive do
               <% tested_count = Enum.count(scores, fn {_, v} -> v.status != :insufficient_data end) %>
               <% total_count = map_size(scores) %>
               <p class="text-[11px] sm:text-xs font-medium text-white/80 mt-1.5">
-                {tested_count} of {total_count} topics assessed
+                {tested_count} of {total_count} concepts assessed
                 &middot; {@attempts_count} {if @attempts_count == 1,
                   do: "question answered",
                   else: "questions answered"}
@@ -463,10 +463,13 @@ defmodule FunSheepWeb.DashboardLive do
                     do: "question answered",
                     else: "questions answered"}
                 </p>
-                <span :if={total_needing_work > 0} class="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-semibold">
+                <span
+                  :if={total_needing_work > 0}
+                  class="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-semibold"
+                >
                   {total_needing_work} {if total_needing_work == 1,
-                    do: "topic needs work",
-                    else: "topics need work"}
+                    do: "concept needs work",
+                    else: "concepts need work"}
                 </span>
               </div>
           <% end %>

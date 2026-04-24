@@ -43,7 +43,10 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     case Assessments.calculate_and_save_readiness(user_role_id, schedule_id) do
       {:ok, readiness} ->
         history = Assessments.list_readiness_history(user_role_id, schedule_id, 5)
-        attempts_count = Assessments.attempts_count_for_schedule(user_role_id, socket.assigns.schedule)
+
+        attempts_count =
+          Assessments.attempts_count_for_schedule(user_role_id, socket.assigns.schedule)
+
         mastery_map = Assessments.topic_mastery_map(user_role_id, schedule_id)
 
         {:noreply,
@@ -264,13 +267,12 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
             <% :untested -> %>
               You haven't been tested yet — let's find out where you stand
             <% :in_progress -> %>
-              <% counts = topic_counts(@mastery_map) %>
-              Based on {counts.tested} of {counts.total} topics tested
+              <% counts = topic_counts(@mastery_map) %> Based on {counts.tested} of {counts.total} concepts tested
               &middot; {@attempts_count} {if @attempts_count == 1,
                 do: "question answered",
                 else: "questions answered"}
             <% :complete -> %>
-              Based on all {topic_counts(@mastery_map).total} topics
+              Based on all {topic_counts(@mastery_map).total} concepts
               &middot; {@attempts_count} {if @attempts_count == 1,
                 do: "question answered",
                 else: "questions answered"}
@@ -278,13 +280,15 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         </p>
         <%!-- P1: Show full_test_readiness in State B so students see both the
              "what I know" score and the conservative "projected full-test" score --%>
-        <div :if={@readiness_state == :in_progress && @readiness && @readiness.full_test_readiness > 0}
-             class="mt-2 flex items-center justify-center gap-2 text-xs text-[#8E8E93]">
+        <div
+          :if={@readiness_state == :in_progress && @readiness && @readiness.full_test_readiness > 0}
+          class="mt-2 flex items-center justify-center gap-2 text-xs text-[#8E8E93]"
+        >
           <span>Projected full-test score:</span>
           <span class={"font-semibold #{score_text_color(@readiness.full_test_readiness)}"}>
             {round(@readiness.full_test_readiness)}%
           </span>
-          <span class="text-[#C7C7CC]">(assuming 0% on untested topics)</span>
+          <span class="text-[#C7C7CC]">(assuming 0% on untested concepts)</span>
         </div>
         <p :if={@readiness_state == :in_progress} class="mt-1 text-xs text-[#C7C7CC]">
           Complete the assessment for your full readiness picture
@@ -292,11 +296,14 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
       </div>
 
       <%!-- State A: Untested --%>
-      <div :if={@readiness_state == :untested} class="bg-white rounded-2xl shadow-md p-6 sm:p-8 mb-6 text-center">
+      <div
+        :if={@readiness_state == :untested}
+        class="bg-white rounded-2xl shadow-md p-6 sm:p-8 mb-6 text-center"
+      >
         <div class="text-5xl mb-4">🐑</div>
         <h2 class="text-xl font-bold text-[#1C1C1E] mb-2">Let's find your starting point</h2>
         <p class="text-[#8E8E93] mb-6">
-          Take the diagnostic assessment to see which topics you're ready for and which need work.
+          Take the diagnostic assessment to see which concepts you're ready for and which need work.
         </p>
         <.link
           navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
@@ -306,15 +313,15 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         </.link>
         <div :if={@mastery_map != []} class="mt-8 text-left">
           <h3 class="text-sm font-semibold text-[#8E8E93] uppercase tracking-wide mb-3">
-            Topics in scope
+            Concepts in scope
           </h3>
           <div class="space-y-2">
             <div :for={chapter <- @mastery_map} class="bg-[#F2F2F7] rounded-xl p-3">
               <p class="font-medium text-[#1C1C1E] text-sm">{chapter.chapter_name}</p>
               <p class="text-xs text-[#8E8E93] mt-0.5">
                 {length(chapter.topics)} {if length(chapter.topics) == 1,
-                  do: "topic",
-                  else: "topics"}
+                  do: "concept",
+                  else: "concepts"}
               </p>
             </div>
           </div>
@@ -331,7 +338,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
               Assessment Progress
             </h2>
             <span class="text-sm font-semibold text-[#1C1C1E]">
-              {counts.tested} / {counts.total} topics
+              {counts.tested} / {counts.total} concepts
             </span>
           </div>
           <div class="w-full bg-[#E5E5EA] rounded-full h-2.5">
@@ -357,7 +364,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
           <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">
             Needs Work
             <span class="ml-2 text-sm font-normal text-[#FF3B30]">
-              {length(weak_topics)} topics
+              {length(weak_topics)} concepts
             </span>
           </h2>
           <div class="space-y-1">
@@ -382,7 +389,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         <div :if={untested != []} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
           <h2 class="text-base font-semibold text-[#8E8E93] mb-3">
             Not Yet Tested
-            <span class="ml-2 text-sm font-normal">{length(untested)} topics remaining</span>
+            <span class="ml-2 text-sm font-normal">{length(untested)} concepts remaining</span>
           </h2>
           <div class="space-y-0">
             <div
@@ -412,7 +419,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         <div :if={mastered != []} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
           <details>
             <summary class="cursor-pointer text-sm font-semibold text-[#4CD964] select-none">
-              ✓ {length(mastered)} {if length(mastered) == 1, do: "topic", else: "topics"} ready
+              ✓ {length(mastered)} {if length(mastered) == 1, do: "concept", else: "concepts"} ready
             </summary>
             <div class="mt-3 space-y-0">
               <div
@@ -446,7 +453,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
 
         <%!-- Full ranked topic list --%>
         <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
-          <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Topics by Readiness</h2>
+          <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Concepts by Readiness</h2>
           <div class="space-y-1">
             <.topic_row
               :for={topic <- all_topics}
@@ -461,7 +468,10 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
           <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Chapter Summary</h2>
           <div class="space-y-1">
-            <details :for={chapter <- @mastery_map} class="border-b border-[#F2F2F7] last:border-0 py-2">
+            <details
+              :for={chapter <- @mastery_map}
+              class="border-b border-[#F2F2F7] last:border-0 py-2"
+            >
               <% ch_score =
                 if chapter.topics == [],
                   do: 0.0,
@@ -622,7 +632,9 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
           {status_label(@topic.status)}
         </span>
         <.link
-          navigate={~p"/courses/#{@course_id}/practice?section_id=#{@topic.section_id}&schedule_id=#{@schedule_id}"}
+          navigate={
+            ~p"/courses/#{@course_id}/practice?section_id=#{@topic.section_id}&schedule_id=#{@schedule_id}"
+          }
           class="text-xs text-[#007AFF] hover:underline"
         >
           Practice →
