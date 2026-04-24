@@ -171,6 +171,49 @@ defmodule FunSheepWeb.ProfileSetupLiveTest do
     end
   end
 
+  describe "step 3 — connect school LMS (first-time onboarding)" do
+    setup %{conn: conn} do
+      {:ok, country} = Geo.create_country(%{name: "United States", code: "US"})
+
+      conn = auth_conn(conn)
+      {:ok, view, _html} = live(conn, ~p"/profile/setup")
+
+      # Walk to step 2
+      view
+      |> element("select[name=country_id]")
+      |> render_change(%{country_id: country.id})
+
+      render_click(view, "update_field", %{"field" => "selected_grade", "value" => "10"})
+      render_click(view, "next_step")
+
+      # Complete hobbies → first-timer should advance to step 3
+      html = render_click(view, "complete_hobbies")
+
+      %{conn: conn, view: view, step3_html: html}
+    end
+
+    test "complete_hobbies advances first-timer to step 3 (Connect)", %{step3_html: html} do
+      assert html =~ "Connect your school"
+      assert html =~ "Google Classroom"
+      assert html =~ "Canvas"
+      # Both CTAs present
+      assert html =~ ~r/phx-click="connect_lms"/
+      assert html =~ ~r/phx-click="skip_lms_connect"/
+      # Step indicator now reaches step 3
+      assert html =~ "Connect"
+    end
+
+    test "connect_lms redirects to /integrations", %{view: view} do
+      assert {:error, {:redirect, %{to: "/integrations"}}} =
+               render_click(view, "connect_lms")
+    end
+
+    test "skip_lms_connect redirects to /dashboard", %{view: view} do
+      assert {:error, {:redirect, %{to: "/dashboard"}}} =
+               render_click(view, "skip_lms_connect")
+    end
+  end
+
   describe "view mode for returning users" do
     test "first-time visit renders the wizard, not the summary", %{conn: conn} do
       conn = auth_conn(conn)
