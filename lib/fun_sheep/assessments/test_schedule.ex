@@ -16,6 +16,7 @@ defmodule FunSheep.Assessments.TestSchedule do
     field :name, :string
     field :test_date, :date
     field :scope, :map
+    field :format_description, :string
     field :external_provider, :string
     field :external_id, :string
     field :external_synced_at, :utc_datetime
@@ -45,6 +46,7 @@ defmodule FunSheep.Assessments.TestSchedule do
       :user_role_id,
       :course_id,
       :format_template_id,
+      :format_description,
       :external_provider,
       :external_id,
       :external_synced_at,
