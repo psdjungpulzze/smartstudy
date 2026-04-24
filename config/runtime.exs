@@ -194,7 +194,8 @@ if config_env() == :prod do
         pdf_ocr: 3,
         ingest: 1,
         integrations: 3,
-        notifications: 2
+        notifications: 2,
+        ebook: 5
       ]
     else
       false

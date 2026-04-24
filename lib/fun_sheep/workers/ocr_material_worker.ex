@@ -9,8 +9,11 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
 
   use Oban.Worker, queue: :ocr, max_attempts: 5
 
+  alias FunSheep.Content
   alias FunSheep.Courses
+  alias FunSheep.Ebook.FormatDetector
   alias FunSheep.OCR.Pipeline
+  alias FunSheep.Storage
 
   require Logger
 
@@ -44,6 +47,83 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
   end
 
   defp do_process(material_id, course_id, job) do
+    material = Content.get_uploaded_material!(material_id)
+
+    # Detect format from magic bytes before dispatching to the correct pipeline.
+    # This is best-effort: if storage get fails, we fall through to the existing
+    # PDF/image pipeline so the job doesn't silently stall.
+    material = detect_and_record_format(material)
+
+    case route_by_format(material, course_id) do
+      :handled ->
+        # Format-specific worker (e.g. EPUB) took over — this job is done.
+        :ok
+
+      :unsupported ->
+        # Format is known but not yet supported — already marked as failed.
+        advance_course(course_id)
+        :ok
+
+      :continue ->
+        # Fall through to the existing OCR pipeline (PDF / image).
+        do_process_ocr(material_id, course_id, job)
+    end
+  end
+
+  defp detect_and_record_format(material) do
+    ext =
+      (material.file_name || material.file_path || "")
+      |> Path.extname()
+      |> String.trim_leading(".")
+      |> String.downcase()
+
+    format =
+      case Storage.get(material.file_path) do
+        {:ok, bytes} ->
+          # Only read the first 16 bytes — we don't need the whole file for detection
+          header = :binary.part(bytes, 0, min(16, byte_size(bytes)))
+          FormatDetector.detect(header, ext)
+
+        {:error, _} ->
+          # Storage unavailable — fall back to extension only
+          FormatDetector.detect(<<>>, ext)
+      end
+
+    format_str = Atom.to_string(format)
+
+    case Content.update_uploaded_material(material, %{material_format: format_str}) do
+      {:ok, updated} -> updated
+      {:error, _} -> material
+    end
+  end
+
+  defp route_by_format(%{material_format: "epub"} = material, _course_id) do
+    Logger.info("[OCR] Routing material #{material.id} to EPUB pipeline")
+
+    %{"material_id" => material.id}
+    |> FunSheep.Workers.EbookExtractWorker.new()
+    |> Oban.insert()
+
+    :handled
+  end
+
+  defp route_by_format(%{material_format: format} = material, _course_id)
+       when format in ["mobi", "azw3"] do
+    Logger.info("[OCR] Unsupported ebook format #{format} for material #{material.id}")
+
+    Content.update_uploaded_material(material, %{
+      ocr_status: :failed,
+      ocr_error:
+        "#{String.upcase(format)} format is not yet supported. " <>
+          "Please convert to EPUB first and re-upload."
+    })
+
+    :unsupported
+  end
+
+  defp route_by_format(_material, _course_id), do: :continue
+
+  defp do_process_ocr(material_id, course_id, job) do
     case Pipeline.process(material_id) do
       {:ok, :dispatched} ->
         # PDF path: PdfOcrDispatchWorker + per-chunk pollers are now running.

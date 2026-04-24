@@ -1268,6 +1268,17 @@ defmodule FunSheepWeb.CourseDetailLive do
         </button>
       </div>
 
+      <%!-- DRM notice for EPUB uploads --%>
+      <div class="mb-3 flex items-start gap-2 px-3 py-2 bg-[#FFF9E6] border border-[#FFCC00] rounded-xl text-xs text-[#8E8E93]">
+        <.icon name="hero-information-circle" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
+        <span>
+          <strong class="text-[#1C1C1E]">EPUB files welcome.</strong>
+          EPUBs must be DRM-free to be processed. If your EPUB is from a library or
+          subscription service it may be DRM-protected and will fail — please use
+          a DRM-free copy instead.
+        </span>
+      </div>
+
       <%!-- Per-file upload queue (managed by DirectUploader JS hook) --%>
       <div id="upload-file-queue" phx-update="ignore"></div>
 

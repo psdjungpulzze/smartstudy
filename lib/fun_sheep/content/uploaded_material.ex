@@ -91,6 +91,15 @@ defmodule FunSheep.Content.UploadedMaterial do
     field :kind_classified_at, :utc_datetime
     field :kind_classification_notes, :string
 
+    # Format detected from magic bytes at OCR dispatch time.
+    # Values: "pdf", "epub", "mobi", "azw3", "image", "unknown"
+    field :material_format, :string, default: "unknown"
+
+    # Nullable JSON: populated by EbookExtractWorker for EPUB files.
+    # Shape: %{"title" => ..., "authors" => [...], "language" => ...,
+    #          "publisher" => ..., "isbn" => ..., "toc" => [...]}
+    field :ebook_metadata, :map
+
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :course, FunSheep.Courses.Course
 
@@ -127,6 +136,8 @@ defmodule FunSheep.Content.UploadedMaterial do
       :kind_confidence,
       :kind_classified_at,
       :kind_classification_notes,
+      :material_format,
+      :ebook_metadata,
       :user_role_id,
       :course_id
     ])

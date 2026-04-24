@@ -657,7 +657,7 @@ const Hooks = {
         const input = document.createElement("input")
         input.type = "file"
         input.multiple = true
-        input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv"
+        input.accept = ".pdf,.epub,.jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv"
 
         input.addEventListener("change", () => {
           this._startUpload(Array.from(input.files), {})
