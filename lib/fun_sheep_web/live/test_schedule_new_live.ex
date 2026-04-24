@@ -46,7 +46,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
        form: to_form(changeset),
        form_name: form_name,
        form_test_date: form_date,
-       # Format sections
+       # Format
+       format_description: "",
        format_sections: [],
        new_section_name: "",
        new_section_type: "multiple_choice",
@@ -164,6 +165,10 @@ defmodule FunSheepWeb.TestScheduleNewLive do
     {:noreply, assign(socket, form_name: name, form_test_date: test_date)}
   end
 
+  def handle_event("update_description", %{"format_description" => text}, socket) do
+    {:noreply, assign(socket, format_description: text)}
+  end
+
   def handle_event("update_section_form", params, socket) do
     {:noreply,
      assign(socket,
@@ -222,7 +227,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       test_date: test_date,
       scope: scope,
       user_role_id: user_role_id,
-      course_id: course_id
+      course_id: course_id,
+      format_description: socket.assigns.format_description
     }
 
     result =
@@ -497,7 +503,18 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       <%!-- Test Format (Optional) --%>
       <div class="bg-white rounded-2xl shadow-md p-8 mt-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-1">Test Format</h2>
-        <p class="text-sm text-[#8E8E93] mb-4">Define how the test is structured (optional)</p>
+        <p class="text-sm text-[#8E8E93] mb-4">
+          Paste the format you gave students — you can parse it into sections after saving
+        </p>
+
+        <form phx-change="update_description" class="mb-4">
+          <textarea
+            name="format_description"
+            rows="5"
+            placeholder={"e.g.\n20 MC (30 min)\nFRQ: 1 long - 7pts, 3 - 3pt questions (35 min)"}
+            class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-2xl outline-none transition-colors text-sm font-mono resize-none"
+          >{@format_description}</textarea>
+        </form>
 
         <%!-- Existing sections --%>
         <div :if={@format_sections != []} class="space-y-2 mb-4">
