@@ -12,8 +12,6 @@ defmodule FunSheep.Questions.FreeformGrader do
 
   require Logger
 
-  @assistant_name "funsheep_answer_grader"
-
   @system_prompt """
   You are a precise answer grader for a student study app. Given a question, a reference answer, and a student's answer, determine if the student's answer is scientifically/factually correct and addresses the core concept — even if worded differently from the reference answer.
 

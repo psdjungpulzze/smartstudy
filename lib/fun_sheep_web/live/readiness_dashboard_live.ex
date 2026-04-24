@@ -3,7 +3,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
 
   import FunSheepWeb.ShareButton
 
-  alias FunSheep.{Assessments, Courses}
+  alias FunSheep.Assessments
   alias FunSheep.Learning.StudyGuideGenerator
 
   @impl true

@@ -31,15 +31,6 @@ defmodule FunSheep.Questions.Validation do
 
   # Interactor only applies `assistant_attrs` on first provision, so the only
   # safe way to push a config change (model, prompt, token cap) is to register
-  # under a new name. Prior names: "question_validator" (gpt-4o/4000 tokens),
-  # "question_validator_v2" (gpt-4o-mini/2000 tokens),
-  # "question_quality_reviewer" (gpt-4o-mini/2000 tokens — caused the
-  # 2026-04-22 zombie loop on course d44628ca: 10-question batches' verdicts
-  # exceeded 2000 tokens, OpenAI truncated mid-stream, parse_failed kept
-  # firing in a loop driven by the sweeper). If config must change again,
-  # pick another descriptive name rather than reusing a prior one.
-  @assistant_name "question_quality_reviewer_v3"
-
   @assistant_system_prompt """
   You are a strict curriculum validator. Your job is to evaluate whether each
   question in a batch is ready to be shown to a student studying for an exam.
