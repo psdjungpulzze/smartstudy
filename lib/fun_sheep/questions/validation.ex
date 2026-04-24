@@ -112,23 +112,65 @@ defmodule FunSheep.Questions.Validation do
   @spec apply_verdict(Question.t(), map()) ::
           {:ok, Question.t()} | {:error, Ecto.Changeset.t()}
   def apply_verdict(%Question{} = question, verdict) when is_map(verdict) do
-    {status, score} = derive_status(verdict)
+    # Phase 7: a verdict produced by `missing_verdict/0` means the
+    # validator LLM returned nothing for this row. Treat that as a
+    # transient validator failure — leave the question :pending and
+    # let the StuckValidationSweeperWorker re-queue it, INSTEAD of
+    # burning a genuine :failed slot on a row that has never been
+    # properly reviewed. The April audit had 65 such rows permanently
+    # marked :failed for a content issue that was really a validator
+    # bug.
+    if validator_produced_no_verdict?(verdict) do
+      mark_pending_retry(question, verdict)
+    else
+      {status, score} = derive_status(verdict)
 
-    course = load_course(question.course_id)
-    valid_chapter_ids = MapSet.new(course.chapters, & &1.id)
+      course = load_course(question.course_id)
+      valid_chapter_ids = MapSet.new(course.chapters, & &1.id)
 
-    attrs =
-      %{
-        validation_status: status,
-        validation_score: score,
-        validation_report: verdict,
-        validated_at: DateTime.utc_now() |> DateTime.truncate(:second)
-      }
-      |> maybe_accept_categorization(verdict, valid_chapter_ids)
-      |> maybe_accept_explanation(question, verdict)
+      attrs =
+        %{
+          validation_status: status,
+          validation_score: score,
+          validation_report: verdict,
+          validated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        }
+        |> maybe_accept_categorization(verdict, valid_chapter_ids)
+        |> maybe_accept_explanation(question, verdict)
 
+      question
+      |> Question.changeset(attrs)
+      |> Repo.update()
+    end
+  end
+
+  # Identity check against the marker that `parse_batch_response/2`
+  # inserts when the LLM response lacked a verdict for a specific
+  # question. The worker sees `validation_status: :pending` and
+  # `validation_attempts` incremented, so the cap kicks in after a
+  # handful of genuinely-stuck tries.
+  defp validator_produced_no_verdict?(%{
+         "completeness" => %{"issues" => ["no verdict returned"]}
+       }),
+       do: true
+
+  defp validator_produced_no_verdict?(%{
+         "topic_relevance_reason" => "Assistant did not return a verdict for this question"
+       }),
+       do: true
+
+  defp validator_produced_no_verdict?(_), do: false
+
+  defp mark_pending_retry(question, verdict) do
     question
-    |> Question.changeset(attrs)
+    |> Question.changeset(%{
+      validation_status: :pending,
+      validation_score: nil,
+      validation_report: verdict,
+      # validated_at deliberately NOT touched — the sweeper uses it
+      # and nil means "never validated".
+      validation_attempts: (question.validation_attempts || 0) + 1
+    })
     |> Repo.update()
   end
 
