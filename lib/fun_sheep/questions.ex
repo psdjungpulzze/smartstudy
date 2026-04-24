@@ -453,7 +453,11 @@ defmodule FunSheep.Questions do
 
   defp maybe_filter_question_type(query, %{question_types: types})
        when is_list(types) and types != [] do
-    where(query, [q], q.question_type in ^types)
+    # question_type is a native PostgreSQL ENUM. Postgrex cannot implicitly cast
+    # text[] to question_type[] in a parameterized ANY(...) comparison, so we
+    # must pass atoms — Ecto.Enum handles them via the correct ENUM OID.
+    atom_types = Enum.map(types, &to_question_type_atom/1)
+    where(query, [q], q.question_type in ^atom_types)
   end
 
   defp maybe_filter_question_type(query, _), do: query
@@ -461,8 +465,12 @@ defmodule FunSheep.Questions do
   defp maybe_filter_question_types_list(query, []), do: query
 
   defp maybe_filter_question_types_list(query, types) when is_list(types) do
-    where(query, [q], q.question_type in ^types)
+    atom_types = Enum.map(types, &to_question_type_atom/1)
+    where(query, [q], q.question_type in ^atom_types)
   end
+
+  defp to_question_type_atom(t) when is_atom(t), do: t
+  defp to_question_type_atom(t) when is_binary(t), do: String.to_existing_atom(t)
 
   def list_questions_by_chapter(chapter_id) do
     from(q in Question,
