@@ -15,6 +15,7 @@ defmodule FunSheep.Content.UploadedMaterial do
     :textbook,
     :supplementary_book,
     :sample_questions,
+    :answer_key,
     :lecture_notes,
     :syllabus,
     :other

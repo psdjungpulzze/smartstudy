@@ -116,8 +116,19 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
   # (practice tests, past exams, Q&A banks) and noisy on textbook prose.
   # Prefer sample_questions materials; only fall back to textbook-like
   # materials when the user hasn't supplied any question sources.
+  #
+  # `:answer_key` is deliberately excluded from both lists — answer keys
+  # look like numbered lists ("1. B, 2. A, …") and were previously ingested
+  # as questions, producing hundreds of bogus rows per upload. Classified
+  # answer keys should yield zero questions, not hallucinated ones.
   @question_kinds [:sample_questions]
   @textbook_fallback_kinds [:textbook, :supplementary_book]
+
+  @doc false
+  def question_kinds, do: @question_kinds
+
+  @doc false
+  def textbook_fallback_kinds, do: @textbook_fallback_kinds
 
   defp collect_ocr_pages(course_id) do
     materials = Content.list_materials_by_course(course_id)
