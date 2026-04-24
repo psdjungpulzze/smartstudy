@@ -250,6 +250,20 @@ if config_env() == :prod do
     interactor_client_id: interactor_client_id,
     interactor_client_secret: interactor_client_secret
 
+  # Direct LLM API keys — used by FunSheep.AI.Anthropic / FunSheep.AI.OpenAI
+  # for single-turn structured extraction workers (classification, grading, etc.)
+  anthropic_api_key =
+    System.get_env("ANTHROPIC_API_KEY") ||
+      raise "environment variable ANTHROPIC_API_KEY is missing."
+
+  openai_api_key =
+    System.get_env("OPENAI_API_KEY") ||
+      raise "environment variable OPENAI_API_KEY is missing."
+
+  config :fun_sheep,
+    anthropic_api_key: anthropic_api_key,
+    openai_api_key: openai_api_key
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

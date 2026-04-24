@@ -3,16 +3,10 @@ defmodule FunSheep.Content.MaterialClassifierTest do
 
   import Mox
 
+  alias FunSheep.AI.ClientMock
   alias FunSheep.Content.MaterialClassifier
-  alias FunSheep.Interactor.AgentsMock
 
   setup :verify_on_exit!
-
-  setup do
-    Application.put_env(:fun_sheep, :interactor_agents_impl, AgentsMock)
-    on_exit(fn -> Application.delete_env(:fun_sheep, :interactor_agents_impl) end)
-    :ok
-  end
 
   # Text patterns drawn from the mid-April prod audit of course d44628ca.
   # The answer_key_sample mirrors the exact content OCR'd from
@@ -61,8 +55,7 @@ defmodule FunSheep.Content.MaterialClassifierTest do
 
   describe "classify/2" do
     test "tags an answer-key page as :answer_key" do
-      AgentsMock
-      |> expect(:chat, fn "material_content_classifier", _prompt, _meta ->
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "material_classifier"} ->
         {:ok,
          ~s({"kind": "answer_key", "confidence": 0.95, "notes": "No question stems; letters only."})}
       end)
@@ -72,8 +65,7 @@ defmodule FunSheep.Content.MaterialClassifierTest do
     end
 
     test "tags textbook prose as :knowledge_content" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          ~s({"kind": "knowledge_content", "confidence": 0.92, "notes": "Expository prose, no numbered questions."})}
       end)
@@ -83,8 +75,7 @@ defmodule FunSheep.Content.MaterialClassifierTest do
     end
 
     test "tags a numbered multiple-choice set as :question_bank" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          ~s({"kind": "question_bank", "confidence": 0.96, "notes": "Numbered stems with 4 options each."})}
       end)
@@ -94,8 +85,7 @@ defmodule FunSheep.Content.MaterialClassifierTest do
     end
 
     test "downgrades low-confidence verdicts to :uncertain" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok, ~s({"kind": "question_bank", "confidence": 0.4, "notes": "Sparse signal."})}
       end)
 
@@ -104,26 +94,26 @@ defmodule FunSheep.Content.MaterialClassifierTest do
                MaterialClassifier.classify(@question_bank_sample)
     end
 
-    test "short text short-circuits to :unusable without calling the agent" do
-      # No AgentsMock expectation → test fails if the classifier calls out.
+    test "short text short-circuits to :unusable without calling the LLM" do
+      # No ClientMock expectation → test fails if the classifier calls out.
       assert {:ok, %{kind: :unusable}} = MaterialClassifier.classify("blank page")
     end
 
-    test "returns {:error, :unparseable_response} on malformed agent output" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, "not json at all"} end)
+    test "returns {:error, :unparseable_response} on malformed LLM output" do
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
+        {:ok, "not json at all"}
+      end)
 
       assert {:error, :unparseable_response} =
                MaterialClassifier.classify(@textbook_sample)
     end
 
-    test "propagates transport errors from the agent" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ ->
-        {:error, %RuntimeError{message: "connection_refused"}}
+    test "propagates transport errors from the LLM client" do
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
+        {:error, :connection_refused}
       end)
 
-      assert {:error, %RuntimeError{}} = MaterialClassifier.classify(@textbook_sample)
+      assert {:error, :connection_refused} = MaterialClassifier.classify(@textbook_sample)
     end
   end
 end

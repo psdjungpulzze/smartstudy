@@ -23,8 +23,9 @@ defmodule FunSheep.Application do
         FunSheep.Assessments.StateCache,
         # ETS-backed cache for cohort percentile bands (spec §6.3)
         FunSheep.Assessments.CohortCache,
-        # Dedicated Finch HTTP pool for Interactor API calls (LLM round-trips
-        # via FunSheep.Interactor.Client). Req's default Finch pool is
+        # Dedicated Finch HTTP pool for all LLM API calls (Anthropic + OpenAI
+        # direct calls via FunSheep.AI.Anthropic / FunSheep.AI.OpenAI, plus
+        # remaining Interactor calls for the tutor). Req's default Finch pool is
         # size=50 / count=1, which gets exhausted under worker load
         # (5 concurrent classification jobs × 50 LLM calls each = 250
         # simultaneous requests → "Finch was unable to provide a connection

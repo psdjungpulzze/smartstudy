@@ -2,8 +2,12 @@ defmodule FunSheep.Questions.QuestionStats do
   @moduledoc """
   Aggregate statistics for a question across all students.
 
-  Tracks total attempts, correct attempts, and a computed difficulty score.
-  difficulty_score ranges from 0.0 (everyone gets it right) to 1.0 (everyone gets it wrong).
+  Tracks attempt difficulty and community flags. Positive quality signals
+  (attempts, completions) are handled by the engagement scoring layer.
+  quality_score here is a penalty-only value: 0.0 is clean, negative means
+  students have flagged problems with this question.
+
+  Formula: quality_score = -(flag_count × 5.0)
   """
 
   use Ecto.Schema
@@ -12,11 +16,16 @@ defmodule FunSheep.Questions.QuestionStats do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
+  @flag_weight 5.0
+
   schema "question_stats" do
     field :total_attempts, :integer, default: 0
     field :correct_attempts, :integer, default: 0
     field :difficulty_score, :float, default: 0.5
     field :avg_time_seconds, :float, default: 0.0
+
+    field :flag_count, :integer, default: 0
+    field :quality_score, :float, default: 0.0
 
     belongs_to :question, FunSheep.Questions.Question
 
@@ -31,6 +40,8 @@ defmodule FunSheep.Questions.QuestionStats do
       :correct_attempts,
       :difficulty_score,
       :avg_time_seconds,
+      :flag_count,
+      :quality_score,
       :question_id
     ])
     |> validate_required([:question_id])
@@ -40,6 +51,7 @@ defmodule FunSheep.Questions.QuestionStats do
       greater_than_or_equal_to: 0.0,
       less_than_or_equal_to: 1.0
     )
+    |> validate_number(:flag_count, greater_than_or_equal_to: 0)
     |> unique_constraint(:question_id)
   end
 
@@ -49,11 +61,19 @@ defmodule FunSheep.Questions.QuestionStats do
   With Bayesian smoothing: assume 2 virtual attempts at 50% to avoid extremes on low data.
   """
   def compute_difficulty(correct, total) when total > 0 do
-    # Bayesian smoothing: add 1 virtual correct and 1 virtual wrong
     smoothed_correct = correct + 1
     smoothed_total = total + 2
     Float.round(1.0 - smoothed_correct / smoothed_total, 4)
   end
 
   def compute_difficulty(_correct, _total), do: 0.5
+
+  @doc """
+  Computes quality_score from flag count. Returns 0.0 or negative — the
+  positive ranking dimension is handled by engagement metrics (attempts,
+  completions), not community votes.
+  """
+  def compute_quality(flags) do
+    Float.round(-flags * @flag_weight, 2)
+  end
 end

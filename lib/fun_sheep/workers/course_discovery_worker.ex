@@ -14,9 +14,17 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Courses.{Chapter, Section}
-  alias FunSheep.Interactor.Agents
 
   require Logger
+
+  @system_prompt "You are an educational curriculum expert. Given a subject, grade level, and optional textbook or web context, identify the complete chapter and section structure. Return ONLY a JSON array of chapters (each with \"name\" and optional \"sections\" array). Include ALL chapters — do NOT truncate. A typical textbook has 20–50 chapters."
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 4_000,
+    temperature: 0.2,
+    source: "course_discovery_worker"
+  }
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"course_id" => course_id} = args}) do
@@ -83,10 +91,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
     broadcast(course.id, %{sub_step: "Asking AI to identify chapters and sections..."})
 
-    case Agents.chat("course_discovery", prompt, %{
-           source: "course_discovery_worker",
-           metadata: %{course_id: course.id, subject: subject, grade: grade}
-         }) do
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
       {:ok, response} ->
         case parse_chapters_json(response) do
           {:ok, chapters} ->
@@ -255,4 +260,6 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
   defp broadcast(course_id, data) do
     Phoenix.PubSub.broadcast(FunSheep.PubSub, "course:#{course_id}", {:processing_update, data})
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

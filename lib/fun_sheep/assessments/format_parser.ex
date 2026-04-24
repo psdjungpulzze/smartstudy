@@ -7,14 +7,12 @@ defmodule FunSheep.Assessments.FormatParser do
   or:
     "Chapter 2~42, except 30 — 40 multiple choices"
 
-  The parser sends the raw text to an AI assistant and returns a list of
+  The parser sends the raw text to the LLM and returns a list of
   sections compatible with `TestFormatTemplate.structure["sections"]`, plus
   an optional overall time limit.
   """
 
   @behaviour FunSheep.Interactor.AssistantSpec
-
-  alias FunSheep.Interactor.Agents
 
   require Logger
 
@@ -60,6 +58,13 @@ defmodule FunSheep.Assessments.FormatParser do
   If nothing can be extracted, return {"sections": [], "time_limit_minutes": null}.
   """
 
+  @llm_opts %{
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
+    temperature: 0.0,
+    source: "format_parser"
+  }
+
   @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
     %{
@@ -84,22 +89,22 @@ defmodule FunSheep.Assessments.FormatParser do
           {:ok, %{sections: [map()], time_limit_minutes: integer() | nil}}
           | {:error, term()}
   def parse(format_text) when is_binary(format_text) and format_text != "" do
-    with {:ok, _} <- ensure_assistant(),
-         {:ok, response} <- Agents.chat(@assistant_name, format_text, %{source: "format_parser"}),
-         {:ok, parsed} <- decode_response(response) do
-      {:ok, parsed}
-    else
+    case ai_client().call(@system_prompt, format_text, @llm_opts) do
+      {:ok, response} ->
+        case decode_response(response) do
+          {:ok, parsed} -> {:ok, parsed}
+          {:error, reason} ->
+            Logger.error("[FormatParser] Failed to decode response: #{inspect(reason)}")
+            {:error, reason}
+        end
+
       {:error, reason} ->
-        Logger.error("[FormatParser] Failed to parse format: #{inspect(reason)}")
+        Logger.error("[FormatParser] LLM call failed: #{inspect(reason)}")
         {:error, reason}
     end
   end
 
   def parse(_), do: {:error, :empty_input}
-
-  defp ensure_assistant do
-    Agents.resolve_or_create_assistant(assistant_attrs())
-  end
 
   defp decode_response(text) do
     cleaned = text |> String.trim() |> strip_markdown_fences()
@@ -158,4 +163,6 @@ defmodule FunSheep.Assessments.FormatParser do
   end
 
   defp coerce_int(_, default), do: default
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

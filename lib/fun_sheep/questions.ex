@@ -8,7 +8,13 @@ defmodule FunSheep.Questions do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Questions.{Question, QuestionAttempt, QuestionFigure, QuestionStats}
+  alias FunSheep.Questions.{
+    Question,
+    QuestionAttempt,
+    QuestionFlag,
+    QuestionFigure,
+    QuestionStats
+  }
 
   ## Questions
 
@@ -1232,5 +1238,81 @@ defmodule FunSheep.Questions do
 
   def with_figures(questions) when is_list(questions) do
     Repo.preload(questions, :figures)
+  end
+
+  ## Community Flags
+
+  @doc """
+  Flags a question as problematic. One flag per user per question.
+
+  `reason` is optional — flagging without a reason still counts against
+  quality score. Calling again updates the reason on an existing flag.
+  """
+  def flag_question(user_role_id, question_id, reason \\ nil) do
+    Repo.transaction(fn ->
+      result =
+        case Repo.get_by(QuestionFlag, user_role_id: user_role_id, question_id: question_id) do
+          nil ->
+            %QuestionFlag{}
+            |> QuestionFlag.changeset(%{
+              user_role_id: user_role_id,
+              question_id: question_id,
+              reason: reason
+            })
+            |> Repo.insert()
+
+          existing ->
+            existing
+            |> QuestionFlag.changeset(%{reason: reason})
+            |> Repo.update()
+        end
+
+      case result do
+        {:ok, _} ->
+          recompute_quality_score(question_id)
+          :ok
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  @doc "Returns the user's flag for a question, or nil."
+  def get_question_flag(user_role_id, question_id) do
+    Repo.get_by(QuestionFlag, user_role_id: user_role_id, question_id: question_id)
+  end
+
+  @doc """
+  Recomputes flag_count and quality_score for a question from the current
+  flag records and writes to question_stats.
+  """
+  def recompute_quality_score(question_id) do
+    flag_count =
+      from(f in QuestionFlag, where: f.question_id == ^question_id, select: count(f.id))
+      |> Repo.one()
+
+    quality = QuestionStats.compute_quality(flag_count)
+
+    stats = get_or_init_stats(question_id)
+
+    stats
+    |> QuestionStats.changeset(%{flag_count: flag_count, quality_score: quality})
+    |> Repo.update()
+  end
+
+  defp get_or_init_stats(question_id) do
+    case Repo.get_by(QuestionStats, question_id: question_id) do
+      nil ->
+        {:ok, stats} =
+          %QuestionStats{}
+          |> QuestionStats.changeset(%{question_id: question_id})
+          |> Repo.insert()
+
+        stats
+
+      stats ->
+        stats
+    end
   end
 end

@@ -2,7 +2,7 @@
 # =============================================================================
 # FunSheep — Push to Production
 # =============================================================================
-# Reads .env.prod, upserts INTERACTOR_CLIENT_SECRET into Secret Manager,
+# Reads .env.prod, upserts INTERACTOR_CLIENT_SECRET, ANTHROPIC_API_KEY, and OPENAI_API_KEY into Secret Manager,
 # and deploys the Cloud Run service with all required env vars + secrets.
 #
 # Guardrails:
@@ -217,6 +217,8 @@ upsert_secret() {
 upsert_secret interactor-client-secret "$INTERACTOR_CLIENT_SECRET"
 upsert_secret google-vision-api-key "$GOOGLE_VISION_API_KEY"
 upsert_secret smtp-password "$SMTP_PASSWORD"
+upsert_secret anthropic-api-key "$ANTHROPIC_API_KEY"
+upsert_secret openai-api-key "$OPENAI_API_KEY"
 
 for required_secret in database-url secret-key-base; do
   gcloud secrets describe "$required_secret" >/dev/null 2>&1 \
@@ -275,7 +277,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --service-account="$GCS_SERVICE_ACCOUNT" \
   --add-cloudsql-instances="$CONNECTION_NAME" \
   --env-vars-file="$ENV_VARS_FILE" \
-  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest"
+  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest"
 
 NEW_REVISION=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.latestReadyRevisionName)')
 SERVICE_URL=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.url)')
@@ -348,7 +350,7 @@ if gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" >/dev/n
     --min-instances=2 \
     --max-instances=5 \
     --update-env-vars="POOL_SIZE=50,RUN_OBAN_WORKERS=true,SMTP_HOST=$SMTP_HOST,SMTP_PORT=$SMTP_PORT,SMTP_USERNAME=$SMTP_USERNAME,MAILER_FROM=$MAILER_FROM" \
-    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest" \
+    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest" \
     --quiet >/dev/null
 
   WORKER_REVISION=$(gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" \

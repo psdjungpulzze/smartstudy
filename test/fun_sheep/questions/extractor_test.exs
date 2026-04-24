@@ -3,16 +3,10 @@ defmodule FunSheep.Questions.ExtractorTest do
 
   import Mox
 
-  alias FunSheep.Interactor.AgentsMock
+  alias FunSheep.AI.ClientMock
   alias FunSheep.Questions.Extractor
 
   setup :verify_on_exit!
-
-  setup do
-    Application.put_env(:fun_sheep, :interactor_agents_impl, AgentsMock)
-    on_exit(fn -> Application.delete_env(:fun_sheep, :interactor_agents_impl) end)
-    :ok
-  end
 
   @question_bank_text """
   Practice Set — Chapter 10: Meiosis
@@ -51,8 +45,9 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn "question_extract", _prompt, _meta -> {:ok, response} end)
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "questions_extractor"} ->
+        {:ok, response}
+      end)
 
       [q] = Extractor.extract(@question_bank_text, source: :material)
 
@@ -79,9 +74,7 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, response} end)
-
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, response} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
 
@@ -98,9 +91,7 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, response} end)
-
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, response} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
 
@@ -117,9 +108,7 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, response} end)
-
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, response} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
 
@@ -135,9 +124,7 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, response} end)
-
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, response} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
 
@@ -153,9 +140,7 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, response} end)
-
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, response} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
 
@@ -172,8 +157,7 @@ defmodule FunSheep.Questions.ExtractorTest do
           }
         ])
 
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, response} end)
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, response} end)
 
       assert [%{question_type: :free_response}] =
                Extractor.extract(@question_bank_text, source: :material)
@@ -181,21 +165,17 @@ defmodule FunSheep.Questions.ExtractorTest do
   end
 
   describe "extract/2 — short-circuits and errors" do
-    test "returns [] on text below the length floor without calling the agent" do
+    test "returns [] on text below the length floor without calling the LLM" do
       assert [] = Extractor.extract("too short", source: :material)
     end
 
-    test "returns [] on unparseable agent response" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:ok, "not json"} end)
-
+    test "returns [] on unparseable LLM response" do
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:ok, "not json"} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
 
-    test "returns [] on agent transport error" do
-      AgentsMock
-      |> expect(:chat, fn _, _, _ -> {:error, :connection_refused} end)
-
+    test "returns [] on LLM transport error" do
+      expect(ClientMock, :call, fn _sys, _usr, _opts -> {:error, :connection_refused} end)
       assert [] = Extractor.extract(@question_bank_text, source: :material)
     end
   end

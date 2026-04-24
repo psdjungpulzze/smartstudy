@@ -1,9 +1,13 @@
 defmodule FunSheep.Workers.TextbookCompletenessWorkerTest do
   use FunSheep.DataCase, async: true
+  import Mox
 
+  alias FunSheep.AI.ClientMock
   alias FunSheep.Content
   alias FunSheep.ContentFixtures
   alias FunSheep.Workers.TextbookCompletenessWorker
+
+  setup :verify_on_exit!
 
   describe "parse_response/1" do
     test "parses well-formed JSON" do
@@ -90,37 +94,74 @@ defmodule FunSheep.Workers.TextbookCompletenessWorkerTest do
       assert reloaded.completeness_checked_at != nil
     end
 
-    test "records a failure when assistant is not configured (mock mode)" do
-      material =
-        ContentFixtures.create_uploaded_material(%{
-          material_kind: :textbook,
-          ocr_status: :completed
-        })
+    test "persists score when LLM call succeeds" do
+      material = create_textbook_with_ocr()
 
-      # Attach some OCR text so the worker actually tries to call the AI
-      for i <- 1..3 do
-        %FunSheep.Content.OcrPage{}
-        |> FunSheep.Content.OcrPage.changeset(%{
-          page_number: i,
-          extracted_text: "Sample textbook text on page #{i}",
-          material_id: material.id
-        })
-        |> Repo.insert!()
-      end
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "textbook_completeness_worker"} ->
+        {:ok,
+         ~S({"toc_detected":true,"chapters":["Ch1","Ch2"],"coverage_score":0.9,"notes":"Looks complete"})}
+      end)
 
-      # In test env interactor_mock is on and list_assistants returns [], so
-      # `resolve_assistant("textbook_completeness")` returns
-      # `{:error, {:assistant_not_found, _}}` — exactly the "fail honestly" path.
-      assert {:error, _} = perform_job(material.id)
+      assert :ok = perform_job(material.id)
+
+      reloaded = Content.get_uploaded_material!(material.id)
+      assert reloaded.completeness_score == 0.9
+      assert reloaded.toc_detected == true
+      assert reloaded.completeness_notes =~ "Looks complete"
+      assert reloaded.completeness_checked_at != nil
+    end
+
+    test "fails honestly when LLM call returns an error" do
+      material = create_textbook_with_ocr()
+
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
+        {:error, :rate_limited}
+      end)
+
+      assert {:error, :rate_limited} = perform_job(material.id)
 
       reloaded = Content.get_uploaded_material!(material.id)
       assert reloaded.completeness_score == nil
       assert reloaded.completeness_notes =~ "Completeness check could not run"
       assert reloaded.completeness_checked_at != nil
     end
+
+    test "fails honestly when LLM returns unparseable JSON" do
+      material = create_textbook_with_ocr()
+
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
+        {:ok, "I am sorry, I cannot complete this request."}
+      end)
+
+      assert {:error, :invalid_json} = perform_job(material.id)
+
+      reloaded = Content.get_uploaded_material!(material.id)
+      assert reloaded.completeness_score == nil
+      assert reloaded.completeness_notes =~ "unreadable response"
+    end
   end
 
   defp perform_job(material_id) do
     TextbookCompletenessWorker.perform(%Oban.Job{args: %{"material_id" => material_id}})
+  end
+
+  defp create_textbook_with_ocr do
+    material =
+      ContentFixtures.create_uploaded_material(%{
+        material_kind: :textbook,
+        ocr_status: :completed
+      })
+
+    for i <- 1..3 do
+      %FunSheep.Content.OcrPage{}
+      |> FunSheep.Content.OcrPage.changeset(%{
+        page_number: i,
+        extracted_text: "Sample textbook text on page #{i}",
+        material_id: material.id
+      })
+      |> Repo.insert!()
+    end
+
+    material
   end
 end

@@ -38,10 +38,18 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.{Question, Validation}
-  alias FunSheep.Interactor.Agents
 
   import Ecto.Query
   require Logger
+
+  @correction_system_prompt "You are an expert question editor. Fix validation issues in educational questions while preserving the topic and difficulty. Return ONLY a single JSON object (no array, no markdown)."
+
+  @correction_llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 1_000,
+    temperature: 0.2,
+    source: "question_validation_worker"
+  }
 
   # How many questions each Interactor round-trip validates. Dropped from 10
   # to 5 on 2026-04-22 because 10-question verdicts (with reasons + suggested
@@ -375,11 +383,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   defp attempt_correction(%Question{} = q, verdict) do
     prompt = correction_prompt(q, verdict)
 
-    with {:ok, text} <-
-           Agents.chat("question_gen", prompt, %{
-             source: "question_validation_worker",
-             metadata: %{question_id: q.id, kind: "correction"}
-           }),
+    with {:ok, text} <- ai_client().call(@correction_system_prompt, prompt, @correction_llm_opts),
          {:ok, parsed} <- parse_correction(text) do
       {:ok,
        %{
@@ -473,4 +477,6 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       :ok
     end
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

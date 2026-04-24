@@ -30,31 +30,18 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
       `:failed` with a `validator_unparseable_response` report.
   """
 
-  # Not async: shared `:interactor_agents_impl` Application env races with
-  # other validator-touching tests; `:persistent_term` assistant cache is
-  # also process-global.
+  # Not async: shared `:ai_client_impl` Application env could race with
+  # other validator-touching tests.
   use FunSheep.DataCase, async: false
   import Mox
   import Ecto.Query
 
   alias FunSheep.{Courses, Questions}
-  alias FunSheep.Interactor.AgentsMock
+  alias FunSheep.AI.ClientMock
   alias FunSheep.Questions.Question
   alias FunSheep.Workers.QuestionValidationWorker
 
   setup :verify_on_exit!
-
-  setup do
-    Application.put_env(
-      :fun_sheep,
-      :interactor_agents_impl,
-      FunSheep.Interactor.AgentsMock
-    )
-
-    on_exit(fn -> Application.delete_env(:fun_sheep, :interactor_agents_impl) end)
-    :persistent_term.erase({FunSheep.Questions.Validation, :assistant_id})
-    :ok
-  end
 
   # Worker batch size is 5, so 10 questions = 2 sub-batches.
   defp make_questions(n) do
@@ -105,19 +92,17 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
       {course, questions} = make_questions(10)
       [first_batch, second_batch] = Enum.chunk_every(questions, 5)
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      AgentsMock
+      ClientMock
       # First batch: success
-      |> expect(:chat, fn _name, _prompt, _opts ->
+      |> expect(:call, fn _sys, _usr, _opts ->
         {:ok, approve_verdict_json(first_batch)}
       end)
       # Second batch: failure (triggers immediate re-enqueue)
-      |> expect(:chat, fn _name, _prompt, _opts ->
+      |> expect(:call, fn _sys, _usr, _opts ->
         {:error, :timeout}
       end)
       # Immediate retry of second batch (Oban inline executes it synchronously)
-      |> expect(:chat, fn _name, _prompt, _opts ->
+      |> expect(:call, fn _sys, _usr, _opts ->
         {:ok, approve_verdict_json(second_batch)}
       end)
 
@@ -129,12 +114,10 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
                  }
                })
 
-      # First batch: validated immediately
       for q <- first_batch do
         assert Repo.get!(Question, q.id).validation_status == :passed
       end
 
-      # Second batch: retry succeeded — also :passed
       for q <- second_batch do
         assert Repo.get!(Question, q.id).validation_status == :passed
       end
@@ -145,8 +128,7 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
     test "raises when every sub-batch errors so Oban retries the job" do
       {course, questions} = make_questions(10)
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-      expect(AgentsMock, :chat, 2, fn _name, _prompt, _opts -> {:error, :timeout} end)
+      expect(ClientMock, :call, 2, fn _sys, _usr, _opts -> {:error, :timeout} end)
 
       assert_raise RuntimeError, ~r/all 2 sub-batches errored/, fn ->
         QuestionValidationWorker.perform(%Oban.Job{
@@ -157,8 +139,6 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
         })
       end
 
-      # All questions still :pending — nothing was committed, but attempts
-      # were bumped (single attempt — under cap).
       for q <- questions do
         reloaded = Repo.get!(Question, q.id)
         assert reloaded.validation_status == :pending
@@ -171,7 +151,6 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
     test "questions hitting @max_validation_attempts get marked :failed honestly" do
       {course, [q1, q2, q3, q4, q5]} = make_questions(5)
 
-      # Pre-bump 3 of them so the next parse_failed pushes them to the cap.
       Repo.update_all(
         from(q in Question,
           where: q.id in ^[q1.id, q2.id, q3.id]
@@ -179,9 +158,7 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
         set: [validation_attempts: 2]
       )
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok, "["}
       end)
 
@@ -217,9 +194,7 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
         set: [validation_attempts: 2]
       )
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok, "[ truncated"}
       end)
 
@@ -244,9 +219,7 @@ defmodule FunSheep.Workers.QuestionValidationWorkerTest do
     test "full success commits verdicts and returns :ok" do
       {course, questions} = make_questions(5)
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok, approve_verdict_json(questions)}
       end)
 

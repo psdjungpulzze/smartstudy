@@ -10,18 +10,24 @@ defmodule FunSheep.Questions.Validation do
 
   A question is only shown to students when `validation_status == :passed`.
 
-  This module builds the prompt, calls the `question_quality_reviewer` Interactor
-  assistant, parses the structured response, and applies the verdict.
+  This module builds the prompt, calls the direct LLM client, parses the
+  structured response, and applies the verdict.
   """
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.Question
-  alias FunSheep.Interactor.Agents
 
   require Logger
 
   @passed_threshold 95.0
   @review_threshold 70.0
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 8_000,
+    temperature: 0.1,
+    source: "questions_validation_context"
+  }
 
   # Interactor only applies `assistant_attrs` on first provision, so the only
   # safe way to push a config change (model, prompt, token cap) is to register
@@ -76,21 +82,14 @@ defmodule FunSheep.Questions.Validation do
 
   def validate_batch(questions) when is_list(questions) do
     course = load_course(hd(questions).course_id)
-    prompt = build_batch_prompt(course, questions)
+    user_prompt = build_batch_user_prompt(course, questions)
 
-    # Provisioning failures must short-circuit — otherwise Agents.chat/3 hits
-    # Interactor with an unknown assistant name and returns :assistant_not_found
-    # for every call until the operator intervenes.
-    with {:ok, _id} <- ensure_assistant(),
-         {:ok, response} <-
-           agents_impl().chat(@assistant_name, prompt, %{
-             source: "questions_validation_context",
-             metadata: %{course_id: course.id, kind: "question_validation"}
-           }) do
-      parse_batch_response(response, questions)
-    else
+    case ai_client().call(@assistant_system_prompt, user_prompt, @llm_opts) do
+      {:ok, response} ->
+        parse_batch_response(response, questions)
+
       {:error, reason} = err ->
-        Logger.error("[Validation] Assistant unavailable: #{inspect(reason)}")
+        Logger.error("[Validation] LLM call failed: #{inspect(reason)}")
         err
     end
   end
@@ -180,6 +179,8 @@ defmodule FunSheep.Questions.Validation do
   """
   def thresholds, do: %{passed: @passed_threshold, review: @review_threshold}
 
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
+
   @behaviour FunSheep.Interactor.AssistantSpec
 
   @doc """
@@ -204,51 +205,13 @@ defmodule FunSheep.Questions.Validation do
     }
   end
 
-  @doc """
-  Ensures the `question_quality_reviewer` assistant exists on Interactor. Caches the
-  resolved id in `persistent_term`. Safe to call repeatedly — subsequent
-  calls are a single `persistent_term` lookup.
-
-  Returns `{:ok, id}` on success, `{:error, reason}` otherwise.
-  """
-  def ensure_assistant do
-    case :persistent_term.get({__MODULE__, :assistant_id}, nil) do
-      nil ->
-        provision_assistant()
-
-      id ->
-        {:ok, id}
-    end
-  end
-
-  defp provision_assistant do
-    # Race-safe: if two workers hit this simultaneously, one wins the
-    # create; the loser's 422 is converted to a re-resolve inside
-    # Agents.resolve_or_create_assistant/1.
-    case agents_impl().resolve_or_create_assistant(assistant_attrs()) do
-      {:ok, id} ->
-        :persistent_term.put({__MODULE__, :assistant_id}, id)
-        {:ok, id}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # Routes Agents calls through a configurable impl so tests can stub the
-  # Interactor round-trip with Mox. Default is the real
-  # `FunSheep.Interactor.Agents`; tests set this to a Mox-backed stub.
-  defp agents_impl do
-    Application.get_env(:fun_sheep, :interactor_agents_impl, Agents)
-  end
-
   # --- Prompt building ---
 
   defp load_course(course_id) do
     Courses.get_course_with_chapters!(course_id)
   end
 
-  defp build_batch_prompt(course, questions) do
+  defp build_batch_user_prompt(course, questions) do
     chapters_block =
       course.chapters
       |> Enum.map_join("\n", fn ch ->
@@ -261,60 +224,14 @@ defmodule FunSheep.Questions.Validation do
       |> Enum.map_join("\n\n", fn {q, idx} -> format_question(idx, q) end)
 
     """
-    You are a strict #{course.subject} curriculum validator for grade #{course.grade}.
-    Your job is to decide whether each question below is ready to be shown to a
-    student who must be fully prepared for the end-of-chapter test.
-
     COURSE: #{course.name} (#{course.subject}, grade #{course.grade})
 
     AVAILABLE CHAPTERS:
     #{chapters_block}
 
-    For EACH question below, evaluate ALL FIVE dimensions:
-
-    1. topic_relevance_score (0-100): How on-topic is this question for its
-       assigned chapter and for grade #{course.grade} #{course.subject} test
-       preparation? 95+ means fully on-topic and test-worthy. <95 means
-       off-topic, trivial, too advanced, or unrelated to the chapter.
-    2. completeness: Does the question contain every piece of information the
-       student needs to answer? Multiple choice must have options. Questions
-       referencing visuals must actually attach them. Short answer must be
-       unambiguous. List any missing pieces.
-    3. categorization: Given the chapter list above, which chapter id best
-       fits this question? If the current chapter is correct, return its id.
-       If it should move, return the better chapter id. Set confidence 0-100.
-    4. answer_correct: Is the recorded answer actually correct? If not,
-       provide the correct answer in "corrected_answer".
-    5. explanation: Is the recorded explanation accurate and pedagogically
-       useful? If missing or weak, provide a better one in
-       "suggested_explanation" (2-4 sentences, grade-#{course.grade} level).
-
-    VERDICT RULES:
-    - "approve" — topic_relevance_score >= 95, completeness.passed == true,
-      answer_correct.correct == true, explanation.valid == true.
-    - "needs_fix" — fixable issue: wrong chapter mapping, wrong answer, weak
-      explanation, minor completeness gap. topic_relevance_score >= 70.
-    - "reject" — off-topic (<70), unfixable, or fundamentally broken.
-
     QUESTIONS TO VALIDATE:
 
     #{questions_block}
-
-    Return ONLY a JSON array. Each element must have the question's "id" plus
-    all validation fields. Shape:
-
-    [
-      {
-        "id": "<question_id>",
-        "topic_relevance_score": 0-100,
-        "topic_relevance_reason": "...",
-        "completeness": {"passed": true|false, "issues": []},
-        "categorization": {"suggested_chapter_id": "<uuid or null>", "confidence": 0-100},
-        "answer_correct": {"correct": true|false, "corrected_answer": "... or null"},
-        "explanation": {"valid": true|false, "suggested_explanation": "... or null"},
-        "verdict": "approve" | "needs_fix" | "reject"
-      }
-    ]
 
     Return ONLY the JSON array. No prose, no markdown fences.
     """

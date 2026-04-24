@@ -26,9 +26,17 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   alias FunSheep.{Content, Courses, Repo}
   alias FunSheep.Questions.Question
-  alias FunSheep.Interactor.Agents
 
   require Logger
+
+  @system_prompt "You are a question extractor for an educational platform. Extract practice questions from the educational web content provided. Return ONLY a JSON array. If no extractable questions are found, return []. Do not invent questions."
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 4_000,
+    temperature: 0.1,
+    source: "web_question_scraper_worker"
+  }
 
   @max_sources_per_run 500
   @max_page_size 100_000
@@ -484,10 +492,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     Return ONLY the JSON array.
     """
 
-    case Agents.chat("question_extract", prompt, %{
-           source: "web_question_scraper_worker",
-           metadata: %{course_id: course.id, source_url: source.url, chunk: idx}
-         }) do
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
       {:ok, response} ->
         parse_ai_questions(response, source)
 
@@ -662,4 +667,6 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       {:processing_update, data}
     )
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

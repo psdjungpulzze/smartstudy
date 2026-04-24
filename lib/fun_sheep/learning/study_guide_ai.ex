@@ -3,15 +3,22 @@ defmodule FunSheep.Learning.StudyGuideAI do
   On-demand AI content generation for study guides.
 
   Generates explanations for wrong questions and chapter concept summaries
-  via the Interactor AI agents platform. Returns mock content in mock mode.
+  via the direct Anthropic API.
 
   This is the "lazy" part of the hybrid approach — content is generated
   when the student clicks to expand, not at guide creation time.
   """
 
-  alias FunSheep.Interactor.Agents
-
   require Logger
+
+  @system_prompt "You are a patient, encouraging educational tutor. Explain concepts clearly and concisely using simple language and concrete examples. Keep explanations conversational and motivating. Return plain text only."
+
+  @llm_opts %{
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1_024,
+    temperature: 0.7,
+    source: "study_guide_ai"
+  }
 
   defp mock_mode?, do: Application.get_env(:fun_sheep, :interactor_mock, false)
 
@@ -43,15 +50,9 @@ defmodule FunSheep.Learning.StudyGuideAI do
       Keep it conversational and encouraging. Use simple language. Do not repeat the question.
       """
 
-      case Agents.send_message("study_guide", prompt, %{}) do
-        {:ok, %{"data" => data}} when is_binary(data) ->
-          {:ok, data}
-
-        {:ok, %{"data" => %{"content" => content}}} when is_binary(content) ->
-          {:ok, content}
-
-        {:ok, response} when is_map(response) ->
-          {:ok, mock_explanation(question_content, correct_answer, chapter)}
+      case ai_client().call(@system_prompt, prompt, @llm_opts) do
+        {:ok, text} when is_binary(text) ->
+          {:ok, String.trim(text)}
 
         {:error, reason} ->
           Logger.warning("[StudyGuideAI] Failed to generate explanation: #{inspect(reason)}")
@@ -92,15 +93,9 @@ defmodule FunSheep.Learning.StudyGuideAI do
       Do NOT list the questions back. Focus on teaching the concepts.
       """
 
-      case Agents.send_message("study_guide", prompt, %{}) do
-        {:ok, %{"data" => data}} when is_binary(data) ->
-          {:ok, data}
-
-        {:ok, %{"data" => %{"content" => content}}} when is_binary(content) ->
-          {:ok, content}
-
-        {:ok, _response} ->
-          {:ok, mock_chapter_summary(chapter_name, wrong_questions)}
+      case ai_client().call(@system_prompt, prompt, @llm_opts) do
+        {:ok, text} when is_binary(text) ->
+          {:ok, String.trim(text)}
 
         {:error, reason} ->
           Logger.warning("[StudyGuideAI] Failed to generate chapter summary: #{inspect(reason)}")
@@ -125,6 +120,8 @@ defmodule FunSheep.Learning.StudyGuideAI do
     Review the relevant section in your materials and try explaining it in your own words.
     """
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 
   defp mock_chapter_summary(chapter_name, wrong_questions) do
     question_count = length(wrong_questions)
