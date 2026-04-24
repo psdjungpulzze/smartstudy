@@ -5,11 +5,8 @@ defmodule FunSheepWeb.AdminUsersLive do
   """
   use FunSheepWeb, :live_view
 
-  import Ecto.Query, only: [from: 2]
-
-  alias FunSheep.{Accounts, Admin, Billing, Repo}
+  alias FunSheep.{Accounts, Admin, Billing}
   alias FunSheep.Accounts.UserRole
-  alias FunSheep.Billing.Subscription
 
   @page_size 25
 
@@ -21,7 +18,7 @@ defmodule FunSheepWeb.AdminUsersLive do
      |> assign(:search, "")
      |> assign(:role_filter, nil)
      |> assign(:page, 0)
-     |> assign(:editing_bonus, nil)
+     |> assign(:editing_subscription, nil)
      |> load_users()}
   end
 
@@ -121,7 +118,7 @@ defmodule FunSheepWeb.AdminUsersLive do
     end
   end
 
-  def handle_event("open_bonus", %{"id" => id}, socket) do
+  def handle_event("open_subscription", %{"id" => id}, socket) do
     target = Accounts.get_user_role!(id)
     {:ok, sub} = Billing.get_or_create_subscription(target.id)
     stats = Billing.usage_stats(target.id)
@@ -129,38 +126,89 @@ defmodule FunSheepWeb.AdminUsersLive do
     editing = %{
       user_id: target.id,
       email: target.email,
+      current_plan: sub.plan,
       bonus: sub.bonus_free_tests || 0,
       used: stats.total_tests,
       limit: stats.initial_limit
     }
 
-    {:noreply, assign(socket, :editing_bonus, editing)}
+    {:noreply, assign(socket, :editing_subscription, editing)}
   end
 
-  def handle_event("close_bonus", _, socket) do
-    {:noreply, assign(socket, :editing_bonus, nil)}
+  def handle_event("close_subscription", _, socket) do
+    {:noreply, assign(socket, :editing_subscription, nil)}
   end
 
-  def handle_event("save_bonus", %{"bonus" => raw}, socket) do
-    case parse_bonus(raw) do
-      {:ok, bonus} ->
-        target = Accounts.get_user_role!(socket.assigns.editing_bonus.user_id)
+  def handle_event("preview_subscription", %{"plan" => plan}, socket) do
+    if plan in ["free", "monthly", "annual"] do
+      updated = %{socket.assigns.editing_subscription | current_plan: plan}
+      {:noreply, assign(socket, :editing_subscription, updated)}
+    else
+      {:noreply, socket}
+    end
+  end
 
-        case Admin.set_bonus_free_tests(target, bonus, socket.assigns.current_user) do
-          {:ok, _} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Free lessons updated for #{target.email}.")
-             |> assign(:editing_bonus, nil)
-             |> load_users()}
+  def handle_event("preview_subscription", _params, socket), do: {:noreply, socket}
 
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to update free lessons.")}
-        end
+  def handle_event("save_subscription", params, socket) do
+    editing = socket.assigns.editing_subscription
+    target = Accounts.get_user_role!(editing.user_id)
+    actor = socket.assigns.current_user
+    plan = Map.get(params, "plan", editing.current_plan)
+    raw_bonus = Map.get(params, "bonus", "#{editing.bonus}")
 
+    with {:ok, bonus} <- parse_bonus(raw_bonus),
+         {:ok, _} <- maybe_override_plan(target, plan, editing.current_plan, actor),
+         {:ok, _} <- maybe_update_bonus(target, bonus, editing.bonus, actor) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Subscription updated for #{target.email}.")
+       |> assign(:editing_subscription, nil)
+       |> load_users()}
+    else
       :error ->
         {:noreply, put_flash(socket, :error, "Bonus must be a non-negative whole number.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update subscription.")}
     end
+  end
+
+  def handle_event("reset_usage", _, socket) do
+    editing = socket.assigns.editing_subscription
+    target = Accounts.get_user_role!(editing.user_id)
+
+    case Admin.reset_test_usage(target, socket.assigns.current_user) do
+      {:ok, count} ->
+        stats = Billing.usage_stats(target.id)
+        {:ok, sub} = Billing.get_or_create_subscription(target.id)
+
+        updated = %{editing | used: stats.total_tests, limit: stats.initial_limit, bonus: sub.bonus_free_tests || 0}
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Reset #{count} test records for #{target.email}.")
+         |> assign(:editing_subscription, updated)
+         |> load_users()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to reset usage.")}
+    end
+  end
+
+  defp maybe_override_plan(_target, plan, plan, _actor), do: {:ok, :unchanged}
+
+  defp maybe_override_plan(target, plan, _old_plan, actor)
+       when plan in ["free", "monthly", "annual"] do
+    Admin.override_subscription_plan(target, plan, actor)
+  end
+
+  defp maybe_override_plan(_target, _plan, _old_plan, _actor), do: {:error, :invalid_plan}
+
+  defp maybe_update_bonus(_target, bonus, bonus, _actor), do: {:ok, :unchanged}
+
+  defp maybe_update_bonus(target, bonus, _old_bonus, actor) do
+    Admin.set_bonus_free_tests(target, bonus, actor)
   end
 
   defp parse_bonus(raw) when is_binary(raw) do
@@ -182,43 +230,12 @@ defmodule FunSheepWeb.AdminUsersLive do
 
     users = Accounts.list_users_for_admin(opts)
     total = Accounts.count_users_for_admin(Keyword.take(opts, [:search, :role]))
-    subs_by_user = subscriptions_for(users)
 
     socket
     |> assign(:users, users)
-    |> assign(:subs_by_user, subs_by_user)
     |> assign(:total, total)
     |> assign(:page_size, @page_size)
   end
-
-  defp subscriptions_for([]), do: %{}
-
-  defp subscriptions_for(users) do
-    student_ids =
-      users
-      |> Enum.filter(&(&1.role == :student))
-      |> Enum.map(& &1.id)
-
-    case student_ids do
-      [] ->
-        %{}
-
-      ids ->
-        from(s in Subscription, where: s.user_role_id in ^ids)
-        |> Repo.all()
-        |> Map.new(&{&1.user_role_id, &1})
-    end
-  end
-
-  defp on_free_plan?(%UserRole{role: :student} = u, subs_by_user) do
-    case Map.get(subs_by_user, u.id) do
-      nil -> true
-      %Subscription{plan: "free"} -> true
-      _ -> false
-    end
-  end
-
-  defp on_free_plan?(_user, _subs), do: false
 
   @impl true
   def render(assigns) do
@@ -262,8 +279,8 @@ defmodule FunSheepWeb.AdminUsersLive do
         </div>
       </div>
 
-      <div class="bg-white rounded-2xl shadow-md overflow-hidden">
-        <table class="w-full text-sm">
+      <div class="bg-white rounded-2xl shadow-md overflow-x-auto">
+        <table class="w-full text-sm min-w-[700px]">
           <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
             <tr>
               <th class="text-left px-4 py-3">Email</th>
@@ -319,14 +336,14 @@ defmodule FunSheepWeb.AdminUsersLive do
                     Reinstate
                   </button>
                   <button
-                    :if={on_free_plan?(u, @subs_by_user)}
+                    :if={u.role == :student}
                     type="button"
-                    phx-click="open_bonus"
+                    phx-click="open_subscription"
                     phx-value-id={u.id}
-                    title="Grant or reset bonus free lessons"
+                    title="Edit subscription plan and free lessons"
                     class="px-3 py-1 rounded-full text-xs font-medium text-[#1C1C1E] border border-[#4CD964]/40 hover:bg-[#E8F8EB]"
                   >
-                    Free lessons
+                    Subscription
                   </button>
                   <button
                     :if={u.role != :admin}
@@ -373,7 +390,7 @@ defmodule FunSheepWeb.AdminUsersLive do
         </table>
       </div>
 
-      <.bonus_modal :if={@editing_bonus} editing={@editing_bonus} />
+      <.subscription_modal :if={@editing_subscription} editing={@editing_subscription} />
 
       <div class="mt-4 flex items-center justify-between text-sm text-[#8E8E93]">
         <div>
@@ -414,27 +431,27 @@ defmodule FunSheepWeb.AdminUsersLive do
 
   attr :editing, :map, required: true
 
-  defp bonus_modal(assigns) do
+  defp subscription_modal(assigns) do
     ~H"""
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      phx-click="close_bonus"
+      phx-click="close_subscription"
     >
       <div
         class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4"
-        phx-click-away="close_bonus"
-        phx-window-keydown="close_bonus"
+        phx-click-away="close_subscription"
+        phx-window-keydown="close_subscription"
         phx-key="escape"
         onclick="event.stopPropagation()"
       >
         <div class="flex items-start justify-between mb-4">
           <div>
-            <h2 class="text-lg font-bold text-[#1C1C1E]">Free lessons</h2>
+            <h2 class="text-lg font-bold text-[#1C1C1E]">Edit Subscription</h2>
             <p class="text-xs text-[#8E8E93] mt-0.5">{@editing.email}</p>
           </div>
           <button
             type="button"
-            phx-click="close_bonus"
+            phx-click="close_subscription"
             aria-label="Close"
             class="text-[#8E8E93] hover:text-[#1C1C1E] text-xl leading-none"
           >
@@ -446,13 +463,39 @@ defmodule FunSheepWeb.AdminUsersLive do
           Used <span class="font-semibold">{@editing.used}</span>
           of <span class="font-semibold">{@editing.limit}</span>
           lifetime free lessons
-          <span class="text-[#8E8E93]">
-            (50 base + {@editing.bonus} bonus)
-          </span>
+          <span class="text-[#8E8E93]">(50 base + {@editing.bonus} bonus)</span>
         </div>
 
-        <.form for={%{}} phx-submit="save_bonus" class="space-y-4">
+        <.form for={%{}} phx-submit="save_subscription" phx-change="preview_subscription" class="space-y-4">
           <div>
+            <label class="block text-sm font-medium text-[#1C1C1E] mb-2">Plan</label>
+            <div class="flex gap-2">
+              <label
+                :for={plan <- [{"Free", "free"}, {"Monthly", "monthly"}, {"Annual", "annual"}]}
+                class={[
+                  "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium border cursor-pointer transition-colors",
+                  if(elem(plan, 1) == @editing.current_plan,
+                    do: "bg-[#4CD964] text-white border-[#4CD964]",
+                    else: "bg-white text-[#1C1C1E] border-[#E5E5EA] hover:border-[#4CD964]/40"
+                  )
+                ]}
+              >
+                <input
+                  type="radio"
+                  name="plan"
+                  value={elem(plan, 1)}
+                  checked={elem(plan, 1) == @editing.current_plan}
+                  class="sr-only"
+                />
+                {elem(plan, 0)}
+              </label>
+            </div>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Monthly/Annual marks the student as paid — no Stripe billing attached.
+            </p>
+          </div>
+
+          <div :if={@editing.current_plan == "free"}>
             <label for="bonus" class="block text-sm font-medium text-[#1C1C1E] mb-1">
               Bonus free lessons
             </label>
@@ -464,17 +507,30 @@ defmodule FunSheepWeb.AdminUsersLive do
               step="1"
               value={@editing.bonus}
               class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-lg outline-none transition-colors"
-              autofocus
             />
             <p class="text-xs text-[#8E8E93] mt-1">
               Granted on top of the 50-lesson base. Set to 0 to revoke.
             </p>
           </div>
 
+          <div :if={@editing.current_plan == "free"} class="border-t border-[#E5E5EA] pt-4">
+            <p class="text-xs text-[#8E8E93] mb-2">
+              Reset usage gives this student a fresh start (deletes all test records).
+            </p>
+            <button
+              type="button"
+              phx-click="reset_usage"
+              data-confirm={"Reset all test usage for #{@editing.email}? This deletes #{@editing.used} test records and cannot be undone."}
+              class="w-full px-4 py-2 rounded-full text-sm font-medium text-[#FF3B30] border border-[#FF3B30]/30 hover:bg-[#FFE5E3] transition-colors"
+            >
+              Reset usage ({@editing.used} tests)
+            </button>
+          </div>
+
           <div class="flex items-center justify-end gap-2">
             <button
               type="button"
-              phx-click="close_bonus"
+              phx-click="close_subscription"
               class="px-4 py-2 rounded-full text-sm font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7]"
             >
               Cancel

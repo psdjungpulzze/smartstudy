@@ -177,6 +177,61 @@ defmodule FunSheep.Admin do
 
   def set_bonus_free_tests(%UserRole{}, _bonus, _actor), do: {:error, :invalid_bonus}
 
+  @doc """
+  Overrides a user's subscription plan without going through Stripe.
+  Used by admins to manually upgrade/downgrade users for support purposes.
+
+  Valid plans: "free", "monthly", "annual".
+  """
+  def override_subscription_plan(%UserRole{} = target, plan, actor)
+      when plan in ["free", "monthly", "annual"] do
+    {:ok, sub} = Billing.get_or_create_subscription(target.id)
+    previous_plan = sub.plan
+
+    attrs =
+      if plan == "free" do
+        %{plan: "free", status: "active", billing_subscription_id: nil}
+      else
+        %{plan: plan, status: "active"}
+      end
+
+    case Billing.update_subscription(sub, attrs) do
+      {:ok, %Subscription{} = updated} ->
+        record_actor_event(actor, "user.override_plan", target, %{
+          "email" => target.email,
+          "previous_plan" => previous_plan,
+          "new_plan" => plan
+        })
+
+        {:ok, updated}
+
+      err ->
+        err
+    end
+  end
+
+  def override_subscription_plan(%UserRole{}, _plan, _actor), do: {:error, :invalid_plan}
+
+  @doc """
+  Resets a student's test usage by deleting all TestUsage records.
+  Used by admins to give a student a fresh start on their free tier.
+  Audit-logged.
+  """
+  def reset_test_usage(%UserRole{} = target, actor) do
+    alias FunSheep.Billing.TestUsage
+
+    {deleted_count, _} =
+      from(t in TestUsage, where: t.user_role_id == ^target.id)
+      |> Repo.delete_all()
+
+    record_actor_event(actor, "user.reset_test_usage", target, %{
+      "email" => target.email,
+      "deleted_records" => deleted_count
+    })
+
+    {:ok, deleted_count}
+  end
+
   @doc "Deletes a course and every dependent record. Irreversible."
   def delete_course(%Course{} = course, actor) do
     with {:ok, deleted} <- Courses.delete_course(course) do
