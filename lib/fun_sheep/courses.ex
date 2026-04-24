@@ -435,6 +435,14 @@ defmodule FunSheep.Courses do
   def enrich_course(course_id) do
     course = get_course!(course_id)
 
+    # Set processing status immediately so the UI shows the progress component
+    # before the Oban worker picks up the job (which can take a few seconds).
+    {:ok, course} =
+      update_course(course, %{
+        processing_status: "processing",
+        processing_step: "Preparing..."
+      })
+
     %{course_id: course_id}
     |> FunSheep.Workers.EnrichCourseWorker.new()
     |> Oban.insert()

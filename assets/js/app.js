@@ -25,11 +25,66 @@ const IGNORED_PATTERN = /^(\._|\.DS_Store|Thumbs\.db|desktop\.ini|\.gitkeep)$/i
 // Global upload state shared across all uploader instances
 const uploadState = { completed: 0, failed: 0, total: 0, inFlight: 0 }
 
+// Per-file queue for the in-progress file list UI
+const fileQueue = []  // [{id, name, status: 'queued'|'uploading'|'done'|'failed'}]
+let fileIdCounter = 0
+
 function resetUploadState() {
   uploadState.completed = 0
   uploadState.failed = 0
   uploadState.total = 0
   uploadState.inFlight = 0
+  fileQueue.length = 0
+  renderFileQueue()
+}
+
+// Renders per-file upload rows into the phx-update="ignore" container.
+// Uses textContent (not innerHTML) for file names to prevent XSS.
+function renderFileQueue() {
+  const el = document.getElementById("upload-file-queue")
+  if (!el) return
+  el.innerHTML = ""
+  if (fileQueue.length === 0) return
+
+  const list = document.createElement("div")
+  list.className = "max-h-48 overflow-y-auto space-y-1.5 mb-4"
+
+  for (const f of fileQueue) {
+    const row = document.createElement("div")
+    row.className = "flex items-center justify-between gap-2 px-3 py-2 bg-[#F5F5F7] rounded-xl"
+
+    const name = document.createElement("span")
+    name.className = "text-sm text-[#1C1C1E] truncate min-w-0 flex-1"
+    name.textContent = f.name
+
+    const badge = document.createElement("span")
+    badge.className = "text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap " + fileStatusClass(f.status)
+    badge.textContent = fileStatusLabel(f.status)
+
+    row.appendChild(name)
+    row.appendChild(badge)
+    list.appendChild(row)
+  }
+
+  el.appendChild(list)
+}
+
+function fileStatusClass(status) {
+  switch (status) {
+    case 'uploading': return 'bg-[#E8F0FE] text-[#007AFF]'
+    case 'done':      return 'bg-[#E8F8EB] text-[#34C759]'
+    case 'failed':    return 'bg-[#FFE5E3] text-[#FF3B30]'
+    default:          return 'bg-[#F5F5F7] text-[#8E8E93]'  // queued
+  }
+}
+
+function fileStatusLabel(status) {
+  switch (status) {
+    case 'uploading': return '↑ Uploading'
+    case 'done':      return '✓ Done'
+    case 'failed':    return '✗ Failed'
+    default:          return 'Queued'
+  }
 }
 
 function readMaterialKind(container) {
@@ -142,11 +197,19 @@ async function finalizeUpload(objectKey, file, folderName, batchId, userRoleId, 
 function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfToken, materialKind) {
   uploadState.total += files.length
   uploadState.inFlight += files.length
-  let queue = [...files]
+
+  // Register each file in the per-file queue immediately (before any uploads start)
+  const queueItems = files.map(f => ({ id: ++fileIdCounter, name: f.name, status: 'queued' }))
+  fileQueue.push(...queueItems)
+  renderFileQueue()
+
+  let queue = files.map((f, i) => [f, queueItems[i]])
   let active = 0
   let cancelled = false
 
-  async function uploadOne(file) {
+  async function uploadOne(file, queueItem) {
+    queueItem.status = 'uploading'
+    renderFileQueue()
     try {
       const folderName = folderMap[file.name] || ""
       const { upload_url, object_key } =
@@ -156,8 +219,7 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
 
       try {
         await putFileInChunks(upload_url, file, () => {
-          // Per-chunk tick: no-op for now; aggregate progress is per-file.
-          // Finer-grained progress could pushEvent here if needed later.
+          // Per-chunk tick: no-op; aggregate progress is per-file.
         })
       } catch (putErr) {
         // GCS returns CORS headers on the OPTIONS preflight but not on the
@@ -173,21 +235,30 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
       await finalizeUpload(object_key, file, folderName, batchId, userRoleId, materialKind, csrfToken)
 
       uploadState.completed++
+      queueItem.status = 'done'
     } catch (err) {
       uploadState.failed++
+      queueItem.status = 'failed'
       console.error(`Upload failed: ${file.name}`, err)
     } finally {
       uploadState.inFlight--
+      renderFileQueue()
       pushUploadState(hook)
+
+      // Once all uploads finish, briefly show the final Done/Failed states then
+      // clear the queue — the server will refresh the materials list at this point.
+      if (uploadState.inFlight === 0 && uploadState.total > 0) {
+        setTimeout(() => { fileQueue.length = 0; renderFileQueue() }, 2000)
+      }
     }
   }
 
   function pump() {
     if (cancelled) return
     while (active < CONCURRENT_UPLOADS && queue.length > 0) {
-      const file = queue.shift()
+      const [file, queueItem] = queue.shift()
       active++
-      uploadOne(file).finally(() => {
+      uploadOne(file, queueItem).finally(() => {
         active--
         pump()
       })
@@ -199,8 +270,10 @@ function createDirectUploader(hook, files, folderMap, batchId, userRoleId, csrfT
   return {
     cancel: () => {
       cancelled = true
+      queue.forEach(([_, qi]) => { qi.status = 'failed' })
       uploadState.inFlight -= queue.length
       queue = []
+      renderFileQueue()
     },
   }
 }
@@ -572,6 +645,7 @@ const Hooks = {
 
     destroyed() {
       this.uploaders.forEach(u => u.cancel())
+      fileQueue.length = 0
     },
   },
 

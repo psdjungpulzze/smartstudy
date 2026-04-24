@@ -433,14 +433,12 @@ defmodule FunSheepWeb.CourseDetailLive do
     course = Courses.get_course_with_chapters!(course.id)
 
     {:noreply,
-     socket
-     |> assign(
+     assign(socket,
        course: course,
        show_upload: false,
        upload_batch_id: Ecto.UUID.generate(),
        upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0}
-     )
-     |> put_flash(:info, "Processing uploaded materials...")}
+     )}
   end
 
   def handle_event("delete_material", %{"id" => material_id}, socket) do
@@ -1269,6 +1267,9 @@ defmodule FunSheepWeb.CourseDetailLive do
           <span class="text-sm font-medium">Select Folder</span>
         </button>
       </div>
+
+      <%!-- Per-file upload queue (managed by DirectUploader JS hook) --%>
+      <div id="upload-file-queue" phx-update="ignore"></div>
 
       <%!-- Upload progress --%>
       <div :if={@progress.total > 0} class="mb-4">
