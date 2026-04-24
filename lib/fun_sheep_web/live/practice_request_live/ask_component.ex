@@ -60,7 +60,11 @@ defmodule FunSheepWeb.PracticeRequestLive.AskComponent do
     weekly = Billing.weekly_usage(student_id)
     guardians = Accounts.list_active_guardian_roles_for_student(student_id, only: :parent)
     pending = fetch_pending(student_id)
-    paid_stats = if state == :paid, do: Billing.paid_weekly_stats(student_id), else: %{questions: 0, correct: 0}
+
+    paid_stats =
+      if state == :paid,
+        do: Billing.paid_weekly_stats(student_id),
+        else: %{questions: 0, correct: 0}
 
     socket
     |> assign(

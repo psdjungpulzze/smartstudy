@@ -106,6 +106,7 @@ defmodule FunSheepWeb.Router do
       live "/courses/:course_id/tests/:schedule_id/format", TestFormatLive, :show
       live "/courses/:course_id/tests/:schedule_id/format-test", FormatTestLive, :show
 
+      live "/courses/:course_id/memory-span", MemorySpanLive, :index
       live "/courses/:course_id/study-guides", StudyGuidesListLive, :index
       live "/courses/:course_id/study-guides/:id", StudyGuideLive, :show
     end
