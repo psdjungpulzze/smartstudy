@@ -92,7 +92,7 @@ Keep a global `/assess` that runs without a test, as an optional "see what I kno
 
 Reset skill mastery per test. Rejected — penalizes students for overlapping tests and fights the core claim that skills are the unit of learning, not tests.
 
-## Implementation Status (as of 2026-04-23)
+## Implementation Status (as of 2026-04-24)
 
 | Piece | Status |
 |---|---|
@@ -101,15 +101,20 @@ Reset skill mastery per test. Rejected — penalizes students for overlapping te
 | Skill mastery global (per `sections` / skill tag) | ✅ Present |
 | `/assess` requires test context (no global route) | ✅ Present |
 | No global Assess nav entry | ✅ Confirmed absent |
-| No source-level filtering in `/assess` | ✅ Fixed in this PR (removed `:setup` phase and source picker) |
-| Primary-test selection (nearest-deadline default + pin override) | ⏳ Planned — see CR-001 Task 7 |
-| Empty-test home state | ⏳ Existing behavior unverified — audit as part of Task 7 |
+| No source-level filtering in `/assess` | ✅ Shipped in PR #100 (removed `:setup` phase and source picker) |
+| Primary-test selection (nearest-deadline default + pin override) | ✅ Shipped in PR #100 (`user_roles.pinned_test_schedule_id`, star pin on dashboard, visible Focus badge) |
+| Empty-test home state | ✅ Shipped in PR #100 (options-first: "Connect School LMS" primary CTA + manual course/test creation secondary) + PR #102 (LMS prompt elevated into `/profile/setup` onboarding as step 3) |
 
 ## Open Questions
 
-1. **Primary-test override mechanism.** Star icon on a test card? A "Focus here" button on the readiness dashboard? A settings pane? Deciding this is product work — open to product input before implementing.
-2. **Teacher/parent rollups.** FR-013, FR-022 — does a parent see readiness per test, or a rolled-up "how ready is my child across everything coming up"? Probably the latter as a primary view with per-test drill-down. Decide during teacher/parent UX passes.
-3. **Empty-test home state.** Today's home screen behavior when a student has no tests is not audited. Before shipping primary-test selection, confirm what the new empty state should be (CTA to create a test? browse mode for chapters without assessment?).
+1. **Primary-test override mechanism.** ✅ Resolved in PR #100 — star icon on test cards (filled = pinned, outlined = nearest-deadline fallback), click toggles. Stale pins (pinned test passed / deleted) silently fall back to nearest-deadline.
+2. **Teacher/parent rollups.** FR-013, FR-022 — does a parent see readiness per test, or a rolled-up "how ready is my child across everything coming up"? Probably the latter as a primary view with per-test drill-down. Decide during teacher/parent UX passes. **Still open.**
+3. **Empty-test home state.** ✅ Resolved across PR #100 and PR #102. Dashboard empty state promotes LMS integration (GC/Canvas — audited GREEN) as the primary path, with manual course/test creation as a secondary fallback. Onboarding's new step 3 offers the same choice proactively on first run, before the student ever sees the empty state.
+
+**Further product work still open** (not gating this ADR):
+
+4. **Teacher creates test for linked students (CR-001 7c).** New primitive — students have a `TestSchedule` per student today; no "classroom" / cross-student-test concept. Needs its own ADR before implementation.
+5. **Parent/teacher create-test-on-behalf-of-student (CR-001 7d).** Extension of the student create flow, gated by guardian access.
 
 ## References
 

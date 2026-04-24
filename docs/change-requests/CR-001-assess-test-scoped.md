@@ -156,12 +156,20 @@ Replace the file-source picker with a chapter picker but keep global `/assess`.
 
 ### Tasks (revised post-exploration)
 
-- [ ] **Remove source-picker setup phase from `AssessmentLive`** — delete `:setup` phase, launch engine directly on `test_schedule.scope`
-- [ ] **Add primary-test selection** with nearest-deadline default + manual pin override
-- [ ] **Fix OCR answer-key ingestion bug** (separate PR) — add `material_type` to `UploadedMaterial`; filter at extraction
-- [ ] Clarify FR-007 wording in `docs/discovery/requirements.md` to explicitly require FR-006 scope linkage (minor; mostly already aligned)
-- [ ] ADR documenting the test-scoped pattern + primary-test rule (small — codifying what exists)
-- [ ] Update LiveView tests for new direct-launch flow; remove source-picker tests
+- [x] **Remove source-picker setup phase from `AssessmentLive`** — delete `:setup` phase, launch engine directly on `test_schedule.scope` *(PR #100, `dc093bd`)*
+- [x] **Add primary-test selection** with nearest-deadline default + manual pin override *(PR #100, `41442f5`)*
+- [x] **Fix OCR answer-key ingestion bug** — added `:answer_key` to `UploadedMaterial` enum + filename heuristic in `UploadController.normalize_kind/2` *(PR #100, `199caf6`; bundled rather than split into a separate PR)*
+- [x] Clarify FR-007 wording in `docs/discovery/requirements.md` to explicitly require FR-006 scope linkage *(PR #100, `8b38f71`)*
+- [x] ADR documenting the test-scoped pattern + primary-test rule *(PR #100, ADR-005)*
+- [x] Update LiveView tests for new direct-launch flow; remove source-picker tests *(PR #100)*
+
+### Follow-up tasks (post-PR #100)
+
+- [x] **7a — Primary-test selection UI** (pin star on dashboard, Focus badge, options-first empty state) *(PR #100, `41442f5` + `029de29`)*
+- [x] **7b — Promote LMS in `/profile/setup` onboarding** *(PR #102, `432e3e7`)*
+- [x] **Material-classification backfill runbook** *(PR #102, `fee95c5`)*
+- [ ] **7c — Teacher creates test for linked students** (new primitive, separate ADR)
+- [ ] **7d — Parent/teacher create-test-on-behalf-of-student** (extension of student flow)
 
 ### Deferred / already complete
 
@@ -197,3 +205,4 @@ If the new flow regresses, feature-flag the route: `/assess` falls back to the p
 |------|--------|--------|
 | 2026-04-23 | Peter Jung + Claude | Initial request, drafted from screenshot review of `funsheep.com/.../finals/assess` |
 | 2026-04-23 | Peter Jung + Claude | Post-exploration scope revision — most test-scoping already implemented; remaining work is source-picker removal + primary-test + OCR bug |
+| 2026-04-24 | Peter Jung + Claude | PR #100 merged: source-picker removed, ADR-005 + requirements aligned, primary-test pin shipped, answer-key filename heuristic shipped. Follow-up PR #102: onboarding LMS step (7b) + material-classification runbook. 7c/7d still open for future work. |
