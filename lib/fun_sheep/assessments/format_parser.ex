@@ -12,8 +12,6 @@ defmodule FunSheep.Assessments.FormatParser do
   an optional overall time limit.
   """
 
-  @behaviour FunSheep.Interactor.AssistantSpec
-
   require Logger
 
   @assistant_name "funsheep_format_parser"
@@ -64,20 +62,6 @@ defmodule FunSheep.Assessments.FormatParser do
     temperature: 0.0,
     source: "format_parser"
   }
-
-  @impl FunSheep.Interactor.AssistantSpec
-  def assistant_attrs do
-    %{
-      name: @assistant_name,
-      description:
-        "Parses free-form test format descriptions into structured section definitions",
-      system_prompt: @system_prompt,
-      llm_provider: "anthropic",
-      llm_model: "claude-haiku-4-5-20251001",
-      llm_config: %{temperature: 0.0, max_tokens: 512},
-      metadata: %{app: "funsheep", role: "format_parser"}
-    }
-  end
 
   @doc """
   Parses a free-form format string into structured sections.

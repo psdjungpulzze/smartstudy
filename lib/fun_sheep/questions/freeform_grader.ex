@@ -8,8 +8,6 @@ defmodule FunSheep.Questions.FreeformGrader do
   fails, so a grading result is always returned.
   """
 
-  @behaviour FunSheep.Interactor.AssistantSpec
-
   alias FunSheep.Questions.Grading
 
   require Logger
@@ -30,19 +28,6 @@ defmodule FunSheep.Questions.FreeformGrader do
     temperature: 0.1,
     source: "freeform_grader"
   }
-
-  @impl FunSheep.Interactor.AssistantSpec
-  def assistant_attrs do
-    %{
-      name: @assistant_name,
-      description: "Grades short-answer and free-response questions semantically",
-      system_prompt: @system_prompt,
-      llm_provider: "anthropic",
-      llm_model: "claude-haiku-4-5-20251001",
-      llm_config: %{temperature: 0.1, max_tokens: 256},
-      metadata: %{app: "funsheep", role: "grader"}
-    }
-  end
 
   @doc """
   Grades a freeform student answer using AI semantic comparison.
