@@ -260,12 +260,64 @@ defmodule FunSheep.Admin do
   alias FunSheep.Content.UploadedMaterial
   alias FunSheep.Workers.OCRMaterialWorker
 
+  @doc """
+  Hard-deletes a UserRole row. Cascades to FunSheep-local data (attempts,
+  schedules, etc.) via DB foreign keys. Does NOT touch the Interactor account —
+  the user can still log in but will be treated as a new user on next visit.
+  """
+  def delete_user(%UserRole{} = target, actor) do
+    with {:ok, deleted} <- Accounts.delete_user_role(target) do
+      record_actor_event(actor, "user.delete", target, %{
+        "email" => target.email,
+        "role" => Atom.to_string(target.role)
+      })
+
+      {:ok, deleted}
+    end
+  end
+
+  @editable_profile_fields [:display_name, :email, :grade, :timezone]
+
+  @doc """
+  Updates a user's editable profile fields. Only touches `display_name`,
+  `email`, `grade`, and `timezone`. Audit-logged with before/after snapshot.
+  """
+  def edit_user_profile(%UserRole{} = target, attrs, actor) do
+    allowed = Map.take(attrs, @editable_profile_fields)
+    before_vals = Map.take(Map.from_struct(target), @editable_profile_fields)
+
+    with {:ok, updated} <- Accounts.update_user_role(target, allowed) do
+      record_actor_event(actor, "user.edit_profile", target, %{
+        "email" => target.email,
+        "before" => before_vals,
+        "after" => Map.take(Map.from_struct(updated), @editable_profile_fields)
+      })
+
+      {:ok, updated}
+    end
+  end
+
   @doc "Deletes an uploaded material and its OCR artifacts. Audit-logged."
   def delete_material(%UploadedMaterial{} = material, actor) do
     with {:ok, deleted} <- Content.delete_uploaded_material(material) do
       record_actor_event(actor, "material.delete", material, %{
         "file_name" => material.file_name,
         "course_id" => material.course_id
+      })
+
+      {:ok, deleted}
+    end
+  end
+
+  alias FunSheep.Questions
+  alias FunSheep.Questions.Question
+
+  @doc "Hard-deletes a question. Irreversible. Audit-logged."
+  def admin_delete_question(%Question{} = question, actor) do
+    with {:ok, deleted} <- Questions.delete_question(question) do
+      record_actor_event(actor, "question.delete", question, %{
+        "course_id" => question.course_id,
+        "content_preview" => String.slice(question.content || "", 0, 100)
       })
 
       {:ok, deleted}
@@ -394,6 +446,7 @@ defmodule FunSheep.Admin do
   defp target_type(%UserRole{}), do: "user_role"
   defp target_type(%Course{}), do: "course"
   defp target_type(%UploadedMaterial{}), do: "uploaded_material"
+  defp target_type(%Question{}), do: "question"
   defp target_type(%{__struct__: mod}), do: mod |> Module.split() |> List.last()
   defp target_type(_), do: nil
 

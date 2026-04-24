@@ -535,6 +535,30 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  Admin list of all questions, optionally filtered by validation_status atom.
+  Pass `nil` to fetch all regardless of status.
+  """
+  def list_all_questions_for_admin(status \\ nil) do
+    Question
+    |> then(fn q ->
+      if status, do: where(q, [q], q.validation_status == ^status), else: q
+    end)
+    |> order_by([q], desc: q.inserted_at)
+    |> preload([:chapter, :section, :course])
+    |> Repo.all()
+  end
+
+  @doc "Returns a map of validation_status => count across all questions."
+  def count_questions_by_status do
+    from(q in Question,
+      group_by: q.validation_status,
+      select: {q.validation_status, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Counts questions needing review across all courses.
   """
   def count_questions_needing_review do
