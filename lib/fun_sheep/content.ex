@@ -8,7 +8,14 @@ defmodule FunSheep.Content do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Content.{UploadedMaterial, OcrPage, DiscoveredSource, SourceFigure}
+
+  alias FunSheep.Content.{
+    UploadedMaterial,
+    OcrPage,
+    DiscoveredSource,
+    SourceFigure,
+    SectionOverview
+  }
 
   ## Uploaded Materials
 
@@ -510,5 +517,38 @@ defmodule FunSheep.Content do
   def delete_figures_for_page(ocr_page_id) do
     from(f in SourceFigure, where: f.ocr_page_id == ^ocr_page_id)
     |> Repo.delete_all()
+  end
+
+  ## Section Overviews
+
+  @doc """
+  Gets the cached AI overview for a section/user pair, or nil if not yet generated.
+  """
+  def get_section_overview(section_id, user_role_id) do
+    Repo.get_by(SectionOverview, section_id: section_id, user_role_id: user_role_id)
+  end
+
+  @doc """
+  Inserts or updates a section overview for the given section/user pair.
+  """
+  def upsert_section_overview(section_id, user_role_id, body) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    case get_section_overview(section_id, user_role_id) do
+      nil ->
+        %SectionOverview{}
+        |> SectionOverview.changeset(%{
+          section_id: section_id,
+          user_role_id: user_role_id,
+          body: body,
+          generated_at: now
+        })
+        |> Repo.insert()
+
+      existing ->
+        existing
+        |> SectionOverview.changeset(%{body: body, generated_at: now})
+        |> Repo.update()
+    end
   end
 end
