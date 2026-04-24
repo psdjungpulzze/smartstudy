@@ -172,20 +172,24 @@ if config_env() == :prod do
   # per-instance. Total global OCR concurrency = min_instances * 8, and
   # Cloud Run scales the worker horizontally (up to max_instances) under
   # sustained queue depth.
-  # ai=5 covers question generation + content discovery without saturating
-  # the OpenAI rate limit on the Interactor agent endpoint.
+  # ai=2: generation jobs hold a DB connection for the full duration of the
+  # OpenAI API call (10-30s). At concurrency 5, five concurrent jobs exhaust
+  # the pool and starve classifier/validator jobs (repro: AP Biology bulk
+  # coverage audit 2026-04-24 — 540 generation jobs enqueued at once, all
+  # in from_material mode loading large OCR text while waiting for API).
+  # Reducing to 2 prevents pool starvation while still making steady progress.
   # ai_validation=3 is its own dedicated queue (2026-04-22 incident: generation
   # was saturating :ai with thousands of jobs, starving the validator on the
   # shared queue and freezing the UI).
   # POOL_SIZE on the worker container must be >= sum of these queues
-  # (default=10 + ocr=8 + ai=5 + ai_validation=3 + pdf_ocr=3 + ingest=1 = 30)
+  # (default=10 + ocr=8 + ai=2 + ai_validation=3 + pdf_ocr=3 + ingest=1 = 27)
   # plus headroom for Lifeline/Pruner plugins and Oban's internal Peer/Notifier.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
       [
         default: 10,
         ocr: 8,
-        ai: 5,
+        ai: 2,
         ai_validation: 3,
         pdf_ocr: 3,
         ingest: 1,
