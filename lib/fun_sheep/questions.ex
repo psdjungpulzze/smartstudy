@@ -144,6 +144,27 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  Returns `%{{section_id, difficulty} => count}` of student-visible,
+  adaptive-eligible questions for a course, grouped at concept (section)
+  granularity. Used by `CoverageAuditWorker` to detect which
+  `{section, difficulty}` tuples are below target — a chapter with 50
+  questions in one section and 0 in five others passes the chapter-level
+  audit but would fail here, triggering targeted generation per concept.
+  """
+  def coverage_by_section(course_id) do
+    from(q in Question,
+      where: q.course_id == ^course_id,
+      where: q.validation_status in ^@student_visible,
+      where: not is_nil(q.section_id),
+      where: q.classification_status in ^@adaptive_classifications,
+      group_by: [q.section_id, q.difficulty],
+      select: {q.section_id, q.difficulty, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {section_id, difficulty, count} -> {{section_id, difficulty}, count} end)
+  end
+
+  @doc """
   Counts unattempted, adaptive-eligible questions for a specific student
   in a (course, chapter, difficulty) tuple. Used by Phase 6's within-session
   demand-driven generation: when the supply for a tuple drops below a

@@ -1,30 +1,28 @@
 defmodule FunSheep.Workers.CoverageAuditWorker do
   @moduledoc """
-  Background auditor that keeps every (course, chapter, difficulty)
+  Background auditor that keeps every (course, section, difficulty)
   tuple above a target supply of adaptive-eligible questions. When a
-  tuple drops below target, enqueues
-  `AIQuestionGenerationWorker` with `difficulty: :easy | :medium |
-  :hard` so new questions land at the right level.
+  tuple drops below target, enqueues `AIQuestionGenerationWorker` with
+  `section_id` and `difficulty` so new questions are targeted at the
+  specific concept that is depleted.
+
+  Auditing at section (concept) granularity is critical: a chapter
+  can have 100 questions all covering one section and 0 covering five
+  others. Chapter-level counting masks those concept-level gaps.
 
   The product goal from the FunSheep North Star is "again-and-again
   until 100% ready" — that only works if the bank can keep serving
-  fresh questions at each student's current difficulty level. Without
-  this worker, `ScopeReadiness.@min_questions_per_chapter = 3` (the
-  readiness gate) is the only backstop, and it doesn't consider
-  difficulty at all. A student who exhausts the :hard pool for a
-  chapter before reaching mastery gets zero fresh hard questions.
+  fresh questions at each student's current difficulty level for every
+  concept they need to master.
 
   Runs:
-    * nightly via `Oban.Plugins.Cron` (catches slow-drain chapters)
+    * nightly via `Oban.Plugins.Cron` (catches slow-drain sections)
     * on-demand when `Assessments.ensure_generation_queued/1` or
-      `PracticeEngine` detect a low-supply tuple (faster reaction to
-      a single student's exhaustion than waiting for cron)
+      `PracticeEngine` detect a low-supply tuple
 
   Tuning knobs (module attributes):
-    * @target_per_tuple = 100 — initial target per the product spec.
-      Tuple = (course_id, chapter_id, difficulty).
-    * @regen_batch = 20 — how many questions to ask for per enqueue.
-      Keeps AI cost bounded and lets the loop spread generation.
+    * @target_per_tuple = 100 — target per (section_id, difficulty).
+    * @regen_batch = 20 — questions per enqueue (cost-bounded).
   """
 
   use Oban.Worker,
@@ -81,29 +79,28 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
   defp audit_course(course_id) do
     course = Courses.get_course_with_chapters!(course_id)
 
-    if course.chapters == [] do
+    all_sections =
+      Enum.flat_map(course.chapters, fn ch ->
+        Enum.map(ch.sections, fn s -> {ch, s} end)
+      end)
+
+    if all_sections == [] do
       :ok
     else
-      # Use the Phase 1 Questions helper: returns %{{chapter_id,
-      # difficulty} => count} of student-visible + adaptive-eligible
-      # questions. Tuples not in the map implicitly have 0.
-      actuals = Questions.coverage_by_chapter(course_id)
+      # Section-level coverage: %{{section_id, difficulty} => count}.
+      # A chapter with 50 questions in one section and 0 in five others
+      # passes any chapter-level gate — only section-level auditing
+      # catches those concept gaps.
+      actuals = Questions.coverage_by_section(course_id)
 
       gaps =
-        for ch <- course.chapters, d <- @difficulties do
-          current = Map.get(actuals, {ch.id, d}, 0)
+        for {ch, s} <- all_sections, d <- @difficulties do
+          current = Map.get(actuals, {s.id, d}, 0)
           deficit = @target_per_tuple - current
-
-          {ch, d, current, deficit}
+          {ch, s, d, current, deficit}
         end
-        |> Enum.filter(fn {_ch, _d, _current, deficit} -> deficit > 0 end)
+        |> Enum.filter(fn {_ch, _s, _d, _current, deficit} -> deficit > 0 end)
 
-      # Determine generation mode once per course (priority order):
-      # 1. "from_material" — OCR-completed uploaded textbook grounding exists
-      # 2. "from_web_context" — scraped web sources exist (discovered_sources.scraped_text)
-      # 3. "from_curriculum" — no external context; AI uses its training knowledge
-      # This prevents chapters without any uploaded or discovered content from
-      # silently generating 0 questions every audit cycle.
       generation_mode =
         cond do
           course_has_grounding_material?(course_id) -> "from_material"
@@ -111,20 +108,19 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
           true -> "from_curriculum"
         end
 
-      Enum.each(gaps, fn {ch, d, current, deficit} ->
-        # Cap at @regen_batch so a chapter with 100-question deficit
-        # doesn't fire 100 generation jobs at once. Subsequent audit
-        # runs pick up where this one left off — the system converges
-        # over a few nightly cycles.
+      Enum.each(gaps, fn {ch, s, d, current, deficit} ->
         batch = min(deficit, @regen_batch)
 
         Logger.info(
-          "[CoverageAudit] course=#{course_id} chapter=#{ch.name} difficulty=#{d}" <>
+          "[CoverageAudit] course=#{course_id} chapter=#{ch.name}" <>
+            " section=\"#{s.name}\" difficulty=#{d}" <>
             " current=#{current} target=#{@target_per_tuple} enqueuing=#{batch} mode=#{generation_mode}"
         )
 
         FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
           chapter_id: ch.id,
+          section_id: s.id,
+          section_name: s.name,
           count: batch,
           mode: generation_mode,
           difficulty: d
