@@ -10,9 +10,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
   """
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Courses, Questions, Tutor, Tutorials}
+  alias FunSheep.{Assessments, Billing, Content, Courses, Questions, Tutor, Tutorials}
   alias FunSheep.Assessments.QuickTestEngine
   alias FunSheep.Gamification
+  alias FunSheep.Questions.{FreeformGrader, ScoredFreeformGrader}
 
   @batch_size 30
   @tutorial_key "quick_practice"
@@ -48,12 +49,20 @@ defmodule FunSheepWeb.QuickPracticeLive do
         streak: streak_info.streak,
         session_streak: 0,
         show_tutorial: show_tutorial,
+        pending_is_correct: nil,
+        pending_answer: nil,
         # Tutor state
         tutor_open: false,
         tutor_session_id: nil,
         tutor_messages: [],
         tutor_loading: false,
-        tutor_input: ""
+        tutor_input: "",
+        # Async grading state
+        grading: false,
+        grading_task: nil,
+        pending_grade_result: nil,
+        # Study references
+        current_question_videos: []
       )
 
     {:ok, socket}
@@ -126,11 +135,11 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   @impl true
   def handle_event("swipe", %{"direction" => "right"}, socket) do
-    handle_event("mark_known", %{}, socket)
+    handle_event("mark_i_know", %{}, socket)
   end
 
   def handle_event("swipe", %{"direction" => "left"}, socket) do
-    handle_event("mark_unknown", %{}, socket)
+    handle_event("mark_dont_know", %{}, socket)
   end
 
   def handle_event("swipe", %{"direction" => "up"}, socket) do
@@ -139,13 +148,15 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   # ── Button events (accessibility fallbacks) ──
 
-  def handle_event("mark_known", _params, socket) do
+  # ── Confidence-based flashcard handlers (I-17) ──
+  # These replace mark_known / mark_unknown with a 3-way confidence signal.
+
+  def handle_event("mark_i_know", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "known", true)
+      record_attempt(socket, question, "known", true, confidence: :i_know)
       new_state = QuickTestEngine.mark_known(state, question.id)
-      new_streak = socket.assigns.session_streak + 1
 
       socket =
         socket
@@ -156,7 +167,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
           feedback: nil,
           selected_answer: nil,
           show_answer: false,
-          session_streak: new_streak
+          session_streak: socket.assigns.session_streak + 1
         )
         |> reset_tutor()
         |> advance_to_next_card()
@@ -167,20 +178,46 @@ defmodule FunSheepWeb.QuickPracticeLive do
     end
   end
 
-  def handle_event("mark_unknown", _params, socket) do
+  def handle_event("mark_not_sure", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "unknown", false)
+      record_attempt(socket, question, "not_sure", false, confidence: :not_sure)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
+      videos = Content.list_videos_for_section(question.section_id)
 
       {:noreply,
        assign(socket,
          engine_state: new_state,
          card_phase: :reveal,
          show_answer: true,
+         feedback: nil,
          stats: %{stats | incorrect: stats.incorrect + 1},
-         session_streak: 0
+         session_streak: 0,
+         current_question_videos: videos
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("mark_dont_know", _params, socket) do
+    %{current_question: question, engine_state: state, stats: stats} = socket.assigns
+
+    if question do
+      record_attempt(socket, question, "dont_know", false, confidence: :dont_know)
+      new_state = QuickTestEngine.mark_unknown(state, question.id)
+      videos = Content.list_videos_for_section(question.section_id)
+
+      {:noreply,
+       assign(socket,
+         engine_state: new_state,
+         card_phase: :reveal,
+         show_answer: true,
+         feedback: nil,
+         stats: %{stats | incorrect: stats.incorrect + 1},
+         session_streak: 0,
+         current_question_videos: videos
        )}
     else
       {:noreply, socket}
@@ -231,29 +268,78 @@ defmodule FunSheepWeb.QuickPracticeLive do
     if answer == nil or question == nil do
       {:noreply, socket}
     else
-      is_correct = check_answer(question, answer)
-      record_attempt(socket, question, answer, is_correct)
-      new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
+      freeform? = question.question_type in [:short_answer, :free_response]
 
-      new_stats =
-        if is_correct,
-          do: %{stats | correct: stats.correct + 1},
-          else: %{stats | incorrect: stats.incorrect + 1}
+      if freeform? do
+        user_role_id = socket.assigns.current_user["user_role_id"]
 
-      new_streak =
-        if is_correct,
-          do: socket.assigns.session_streak + 1,
-          else: 0
+        grader =
+          if Billing.subscription_has_scored_grading?(user_role_id),
+            do: ScoredFreeformGrader,
+            else: FreeformGrader
 
-      {:noreply,
-       assign(socket,
-         engine_state: new_state,
-         stats: new_stats,
-         feedback: %{is_correct: is_correct, correct_answer: question.answer},
-         card_phase: :feedback,
-         session_streak: new_streak
-       )}
+        task = Task.async(fn -> grader.grade(question, answer) end)
+
+        {:noreply,
+         assign(socket,
+           grading: true,
+           grading_task: task.ref,
+           pending_grade_result: nil
+         )}
+      else
+        is_correct = check_answer(question, answer)
+        new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
+
+        new_stats =
+          if is_correct,
+            do: %{stats | correct: stats.correct + 1},
+            else: %{stats | incorrect: stats.incorrect + 1}
+
+        new_streak =
+          if is_correct,
+            do: socket.assigns.session_streak + 1,
+            else: 0
+
+        # Defer DB insert until confidence is selected (Phase 2 — collect confidence first)
+        {:noreply,
+         assign(socket,
+           engine_state: new_state,
+           stats: new_stats,
+           feedback: %{is_correct: is_correct, correct_answer: question.answer, grade_result: nil},
+           pending_is_correct: is_correct,
+           pending_answer: answer,
+           card_phase: :feedback,
+           session_streak: new_streak
+         )}
+      end
     end
+  end
+
+  def handle_event("confidence_selected", %{"confidence" => confidence_str}, socket) do
+    %{current_question: question, pending_is_correct: is_correct, pending_answer: answer} =
+      socket.assigns
+
+    confidence = String.to_existing_atom(confidence_str)
+
+    if question && not is_nil(is_correct) do
+      record_attempt(socket, question, answer || "unknown", is_correct, confidence: confidence)
+    end
+
+    socket =
+      socket
+      |> assign(
+        card_phase: :question,
+        feedback: nil,
+        selected_answer: nil,
+        show_answer: false,
+        pending_is_correct: nil,
+        pending_answer: nil,
+        current_question_videos: []
+      )
+      |> reset_tutor()
+      |> advance_to_next_card()
+
+    {:noreply, socket}
   end
 
   def handle_event("next_card", _params, socket) do
@@ -263,7 +349,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
         card_phase: :question,
         feedback: nil,
         selected_answer: nil,
-        show_answer: false
+        show_answer: false,
+        current_question_videos: []
       )
       |> reset_tutor()
       |> advance_to_next_card()
@@ -319,10 +406,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
         {:noreply, socket}
 
       phase == :question and key == "ArrowRight" ->
-        handle_event("mark_known", %{}, socket)
+        handle_event("mark_i_know", %{}, socket)
 
       phase == :question and key == "ArrowLeft" ->
-        handle_event("mark_unknown", %{}, socket)
+        handle_event("mark_dont_know", %{}, socket)
 
       phase == :question and key == "ArrowUp" ->
         handle_event("skip", %{}, socket)
@@ -330,7 +417,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
       phase == :question and key in [" ", "Enter"] ->
         handle_event("show_answer_input", %{}, socket)
 
-      phase in [:feedback, :reveal] and key in [" ", "Enter", "ArrowRight"] ->
+      phase == :reveal and key in [" ", "Enter", "ArrowRight"] ->
         handle_event("next_card", %{}, socket)
 
       phase == :answering and key == "Escape" ->
@@ -393,7 +480,36 @@ defmodule FunSheepWeb.QuickPracticeLive do
     {:noreply, assign(socket, tutor_input: value)}
   end
 
+  # ── Freeform grading task results ──
+
   @impl true
+  def handle_info({ref, {:ok, %{score: _score, is_correct: is_correct} = grade_result}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+    apply_freeform_grading_result(socket, is_correct, grade_result)
+  end
+
+  def handle_info({ref, {:ok, %{correct: is_correct, feedback: _ai_feedback}}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+    apply_freeform_grading_result(socket, is_correct, nil)
+  end
+
+  def handle_info({ref, {:error, _reason}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+    %{current_question: question, selected_answer: answer} = socket.assigns
+    is_correct = check_answer(question, answer)
+    apply_freeform_grading_result(socket, is_correct, nil)
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, socket)
+      when socket.assigns.grading_task == ref do
+    %{current_question: question, selected_answer: answer} = socket.assigns
+    is_correct = check_answer(question, answer)
+    apply_freeform_grading_result(socket, is_correct, nil)
+  end
+
   def handle_info({:tutor_quick_action, action, question}, socket) do
     session_id = socket.assigns.tutor_session_id
 
@@ -470,18 +586,70 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
-  defp record_attempt(socket, question, answer_given, is_correct) do
+  defp record_attempt(socket, question, answer_given, is_correct, opts \\ []) do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
-      Questions.record_attempt_with_stats(%{
+      confidence = Keyword.get(opts, :confidence)
+      grade_result = Keyword.get(opts, :grade_result)
+
+      base_attrs = %{
         user_role_id: user_role_id,
         question_id: question.id,
         answer_given: answer_given,
         is_correct: is_correct,
-        difficulty_at_attempt: to_string(question.difficulty)
-      })
+        difficulty_at_attempt: to_string(question.difficulty),
+        confidence: confidence
+      }
+
+      attrs =
+        if grade_result do
+          Map.merge(base_attrs, %{
+            score: grade_result.score,
+            score_max: grade_result.max_score,
+            score_feedback: grade_result.feedback,
+            grader_path: to_string(grade_result.grader_path)
+          })
+        else
+          base_attrs
+        end
+
+      Questions.record_attempt_with_stats(attrs)
     end
+  end
+
+  defp apply_freeform_grading_result(socket, is_correct, grade_result) do
+    %{current_question: question, selected_answer: answer, engine_state: state, stats: stats} =
+      socket.assigns
+
+    record_attempt(socket, question, answer, is_correct, grade_result: grade_result)
+    new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
+
+    new_stats =
+      if is_correct,
+        do: %{stats | correct: stats.correct + 1},
+        else: %{stats | incorrect: stats.incorrect + 1}
+
+    new_streak =
+      if is_correct,
+        do: socket.assigns.session_streak + 1,
+        else: 0
+
+    {:noreply,
+     assign(socket,
+       grading: false,
+       grading_task: nil,
+       pending_grade_result: grade_result,
+       engine_state: new_state,
+       stats: new_stats,
+       feedback: %{
+         is_correct: is_correct,
+         correct_answer: question.answer,
+         grade_result: grade_result
+       },
+       card_phase: :feedback,
+       session_streak: new_streak
+     )}
   end
 
   defp ensure_tutor_session(socket) do
@@ -802,9 +970,21 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </div>
           </div>
 
+          <%!-- Grading spinner (freeform async grading) --%>
+          <div
+            :if={@current_question && !@session_complete && @grading}
+            class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5 flex flex-col items-center gap-3"
+          >
+            <div class="w-6 h-6 border-2 border-[#4CD964] border-t-transparent rounded-full animate-spin" />
+            <p class="text-sm text-[#8E8E93]">Grading your answer...</p>
+          </div>
+
           <%!-- Feedback phase (after answering or "don't know") --%>
           <div
-            :if={@current_question && !@session_complete && @card_phase in [:feedback, :reveal]}
+            :if={
+              @current_question && !@session_complete && @card_phase in [:feedback, :reveal] &&
+                !@grading
+            }
             class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5"
           >
             <%!-- Result banner --%>
@@ -841,6 +1021,25 @@ defmodule FunSheepWeb.QuickPracticeLive do
             <%!-- Question recap --%>
             <p class="text-sm text-[#8E8E93] mb-3 text-center">{@current_question.content}</p>
 
+            <%!-- Rubric score badge — shown for premium users with scored grading --%>
+            <.practice_score_badge
+              :if={@feedback && @feedback[:grade_result]}
+              grade_result={@feedback.grade_result}
+            />
+
+            <%!-- Free-user upsell for freeform questions --%>
+            <div
+              :if={
+                @feedback && is_nil(@feedback[:grade_result]) &&
+                  @current_question.question_type in [:short_answer, :free_response]
+              }
+              class="text-xs text-[#8E8E93] text-center mb-3"
+            >
+              <.link navigate={~p"/subscription"} class="text-[#4CD964] hover:underline">
+                Upgrade to Premium for rubric scoring →
+              </.link>
+            </div>
+
             <%!-- Correct answer --%>
             <div class="bg-[#F5F5F7] rounded-xl p-4 mb-4 text-center">
               <p class="text-xs text-[#8E8E93] mb-1 uppercase tracking-wide font-medium">Answer</p>
@@ -869,6 +1068,9 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </span>
             </div>
 
+            <%!-- Video lessons (reveal phase only) --%>
+            <.skill_videos :if={@card_phase == :reveal} videos={@current_question_videos} />
+
             <%!-- Tutor quick actions --%>
             <div class="flex items-center justify-center gap-2 flex-wrap mb-4">
               <button
@@ -895,8 +1097,39 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </button>
             </div>
 
-            <%!-- Next button --%>
+            <%!-- Confidence buttons (feedback phase only — how well did you know it?) --%>
+            <div :if={@card_phase == :feedback} class="mt-1">
+              <p class="text-xs text-[#8E8E93] text-center mb-3 font-medium">
+                How well did you know this?
+              </p>
+              <div class="flex gap-2">
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="dont_know"
+                  class="flex-1 py-2.5 bg-gray-100 active:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors touch-target"
+                >
+                  I Don't Know
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="not_sure"
+                  class="flex-1 py-2.5 bg-yellow-50 active:bg-yellow-100 text-yellow-700 text-xs font-semibold rounded-full transition-colors touch-target"
+                >
+                  Not Sure
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="i_know"
+                  class="flex-1 py-2.5 bg-[#4CD964] active:bg-[#3DBF55] text-white text-xs font-bold rounded-full shadow-sm transition-colors touch-target"
+                >
+                  I Know
+                </button>
+              </div>
+            </div>
+
+            <%!-- Next button (reveal phase only — confidence already recorded at mark_not_sure/dont_know) --%>
             <button
+              :if={@card_phase == :reveal}
               phx-click="next_card"
               class="w-full py-3 bg-[#4CD964] active:bg-[#3DBF55] text-white font-bold rounded-full shadow-md touch-target transition-colors"
             >
@@ -955,14 +1188,30 @@ defmodule FunSheepWeb.QuickPracticeLive do
           :if={@current_question && !@session_complete && @card_phase == :question}
           class="px-4 pb-4 pt-2 shrink-0 safe-area-bottom"
         >
-          <div class="flex items-center justify-center gap-4 max-w-sm mx-auto">
-            <%!-- Don't know (left swipe) --%>
+          <%!-- 3-confidence row: Don't Know | Tap to Answer | Not Sure | I Know | Skip --%>
+          <div class="flex items-center justify-center gap-3 max-w-sm mx-auto">
+            <%!-- I Don't Know --%>
             <button
-              phx-click="mark_unknown"
-              class="w-14 h-14 rounded-full bg-red-50 active:bg-red-100 flex items-center justify-center shadow-md transition-colors touch-target"
-              aria-label="Don't know"
+              phx-click="mark_dont_know"
+              class="flex flex-col items-center gap-1 touch-target"
+              aria-label="I don't know"
             >
-              <.icon name="hero-x-mark" class="w-7 h-7 text-[#FF3B30]" />
+              <span class="w-12 h-12 rounded-full bg-red-50 active:bg-red-100 flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-x-mark" class="w-6 h-6 text-[#FF3B30]" />
+              </span>
+              <span class="text-[9px] font-bold text-[#FF3B30] tracking-wide">NO IDEA</span>
+            </button>
+
+            <%!-- Not Sure --%>
+            <button
+              phx-click="mark_not_sure"
+              class="flex flex-col items-center gap-1 touch-target"
+              aria-label="Not sure"
+            >
+              <span class="w-12 h-12 rounded-full bg-yellow-50 active:bg-yellow-100 flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-question-mark-circle" class="w-6 h-6 text-yellow-500" />
+              </span>
+              <span class="text-[9px] font-bold text-yellow-600 tracking-wide">NOT SURE</span>
             </button>
 
             <%!-- Tap to Answer --%>
@@ -974,25 +1223,30 @@ defmodule FunSheepWeb.QuickPracticeLive do
               <span class="w-16 h-16 rounded-full bg-[#007AFF] active:bg-[#0066DD] flex items-center justify-center shadow-lg transition-colors">
                 <.icon name="hero-cursor-arrow-rays" class="w-8 h-8 text-white" />
               </span>
-              <span class="text-[10px] font-bold text-[#007AFF] tracking-wide">TAP TO ANSWER</span>
+              <span class="text-[9px] font-bold text-[#007AFF] tracking-wide">ANSWER</span>
             </button>
 
-            <%!-- Know it (right swipe) --%>
+            <%!-- I Know --%>
             <button
-              phx-click="mark_known"
-              class="w-14 h-14 rounded-full bg-[#E8F8EB] active:bg-[#D0F0D8] flex items-center justify-center shadow-md transition-colors touch-target"
+              phx-click="mark_i_know"
+              class="flex flex-col items-center gap-1 touch-target"
               aria-label="I know this"
             >
-              <.icon name="hero-check" class="w-7 h-7 text-[#4CD964]" />
+              <span class="w-12 h-12 rounded-full bg-[#E8F8EB] active:bg-[#D0F0D8] flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-check" class="w-6 h-6 text-[#4CD964]" />
+              </span>
+              <span class="text-[9px] font-bold text-[#4CD964] tracking-wide">I KNOW</span>
             </button>
 
-            <%!-- Skip (up swipe) --%>
+            <%!-- Skip --%>
             <button
               phx-click="skip"
-              class="w-10 h-10 rounded-full bg-[#F5F5F7] active:bg-gray-200 flex items-center justify-center transition-colors touch-target"
+              class="flex flex-col items-center gap-1 touch-target"
               aria-label="Skip"
             >
-              <.icon name="hero-forward" class="w-5 h-5 text-[#8E8E93]" />
+              <span class="w-10 h-10 rounded-full bg-[#F5F5F7] active:bg-gray-200 flex items-center justify-center transition-colors">
+                <.icon name="hero-forward" class="w-5 h-5 text-[#8E8E93]" />
+              </span>
             </button>
           </div>
         </div>
@@ -1276,9 +1530,21 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </div>
           </div>
 
+          <%!-- Grading spinner (desktop, freeform async grading) --%>
+          <div
+            :if={@current_question && !@session_complete && @grading}
+            class="w-full bg-white rounded-2xl shadow-lg p-8 flex flex-col items-center gap-3"
+          >
+            <div class="w-8 h-8 border-2 border-[#4CD964] border-t-transparent rounded-full animate-spin" />
+            <p class="text-base text-[#8E8E93]">Grading your answer...</p>
+          </div>
+
           <%!-- Feedback phase (desktop) --%>
           <div
-            :if={@current_question && !@session_complete && @card_phase in [:feedback, :reveal]}
+            :if={
+              @current_question && !@session_complete && @card_phase in [:feedback, :reveal] &&
+                !@grading
+            }
             class="w-full bg-white rounded-2xl shadow-lg p-8"
           >
             <div
@@ -1313,12 +1579,34 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
             <p class="text-base text-[#8E8E93] mb-4">{@current_question.content}</p>
 
+            <%!-- Rubric score badge (desktop) --%>
+            <.practice_score_badge
+              :if={@feedback && @feedback[:grade_result]}
+              grade_result={@feedback.grade_result}
+            />
+
+            <%!-- Free-user upsell for freeform questions (desktop) --%>
+            <div
+              :if={
+                @feedback && is_nil(@feedback[:grade_result]) &&
+                  @current_question.question_type in [:short_answer, :free_response]
+              }
+              class="text-sm text-[#8E8E93] mb-4"
+            >
+              <.link navigate={~p"/subscription"} class="text-[#4CD964] hover:underline">
+                Upgrade to Premium for rubric scoring →
+              </.link>
+            </div>
+
             <div class="bg-[#F5F5F7] rounded-xl p-5 mb-4">
               <p class="text-xs text-[#8E8E93] mb-1 uppercase tracking-wide font-medium">Answer</p>
               <p class="text-xl font-bold text-gray-900">
                 {if @feedback, do: @feedback.correct_answer, else: @current_question.answer}
               </p>
             </div>
+
+            <%!-- Video lessons (reveal phase only, desktop) --%>
+            <.skill_videos :if={@card_phase == :reveal} videos={@current_question_videos} />
 
             <div class="flex items-center gap-2 flex-wrap mb-4">
               <button
@@ -1344,7 +1632,39 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </button>
             </div>
 
+            <%!-- Confidence buttons (feedback phase only) --%>
+            <div :if={@card_phase == :feedback} class="mt-1">
+              <p class="text-sm text-[#8E8E93] text-center mb-3 font-medium">
+                How well did you know this?
+              </p>
+              <div class="flex gap-3">
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="dont_know"
+                  class="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-semibold rounded-full transition-colors"
+                >
+                  I Don't Know
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="not_sure"
+                  class="flex-1 py-3 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-sm font-semibold rounded-full transition-colors"
+                >
+                  Not Sure
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="i_know"
+                  class="flex-1 py-3 bg-[#4CD964] hover:bg-[#3DBF55] text-white text-sm font-bold rounded-full shadow-sm transition-colors"
+                >
+                  I Know (→)
+                </button>
+              </div>
+            </div>
+
+            <%!-- Next button (reveal phase only) --%>
             <button
+              :if={@card_phase == :reveal}
               phx-click="next_card"
               class="w-full py-3 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-bold rounded-full shadow-md transition-colors"
             >
@@ -1403,16 +1723,28 @@ defmodule FunSheepWeb.QuickPracticeLive do
           :if={@current_question && !@session_complete && @card_phase == :question}
           class="w-full max-w-2xl mt-6 flex flex-col items-center gap-3"
         >
+          <%!-- 3-confidence row: I Don't Know | Not Sure | Answer | I Know | Skip --%>
           <div class="flex items-center justify-center gap-4">
             <button
-              phx-click="mark_unknown"
+              phx-click="mark_dont_know"
               class="flex flex-col items-center gap-1"
-              aria-label="Don't know"
+              aria-label="I don't know"
             >
               <span class="w-14 h-14 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center shadow-md transition-colors">
                 <.icon name="hero-x-mark" class="w-7 h-7 text-[#FF3B30]" />
               </span>
-              <span class="text-[10px] font-bold text-[#FF3B30] tracking-wide">LEARN (←)</span>
+              <span class="text-[10px] font-bold text-[#FF3B30] tracking-wide">NO IDEA (←)</span>
+            </button>
+
+            <button
+              phx-click="mark_not_sure"
+              class="flex flex-col items-center gap-1"
+              aria-label="Not sure"
+            >
+              <span class="w-12 h-12 rounded-full bg-yellow-50 hover:bg-yellow-100 flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-question-mark-circle" class="w-6 h-6 text-yellow-500" />
+              </span>
+              <span class="text-[10px] font-bold text-yellow-600 tracking-wide">NOT SURE</span>
             </button>
 
             <button
@@ -1427,14 +1759,14 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </button>
 
             <button
-              phx-click="mark_known"
+              phx-click="mark_i_know"
               class="flex flex-col items-center gap-1"
               aria-label="I know this"
             >
               <span class="w-14 h-14 rounded-full bg-[#E8F8EB] hover:bg-[#D0F0D8] flex items-center justify-center shadow-md transition-colors">
                 <.icon name="hero-check" class="w-7 h-7 text-[#4CD964]" />
               </span>
-              <span class="text-[10px] font-bold text-[#4CD964] tracking-wide">KNOW (→)</span>
+              <span class="text-[10px] font-bold text-[#4CD964] tracking-wide">I KNOW (→)</span>
             </button>
 
             <button
@@ -1562,6 +1894,75 @@ defmodule FunSheepWeb.QuickPracticeLive do
           Got it!
         </button>
       </div>
+    </div>
+    """
+  end
+
+  # ── Score badge component ──
+
+  attr :grade_result, :map, required: true
+
+  defp practice_score_badge(assigns) do
+    score = assigns.grade_result.score
+
+    {color, label} =
+      cond do
+        score <= 4 -> {"#FF3B30", practice_score_label(score)}
+        score <= 6 -> {"#FFCC00", practice_score_label(score)}
+        true -> {"#4CD964", practice_score_label(score)}
+      end
+
+    assigns =
+      assign(assigns,
+        score_color: color,
+        score_label: label
+      )
+
+    ~H"""
+    <div class="rounded-2xl border border-[#E5E5EA] p-3 mb-4">
+      <div class="text-xl font-bold" style={"color: #{@score_color};"}>
+        {@grade_result.score} / {@grade_result.max_score} · {@score_label}
+      </div>
+      <p :if={@grade_result.feedback} class="text-sm text-gray-700 mt-1">
+        {@grade_result.feedback}
+      </p>
+      <p :if={@grade_result.improvement_hint} class="text-xs text-[#8E8E93] mt-2">
+        💡 {@grade_result.improvement_hint}
+      </p>
+    </div>
+    """
+  end
+
+  defp practice_score_label(score) when score == 0, do: "No Credit"
+  defp practice_score_label(score) when score in 1..3, do: "Minimal"
+  defp practice_score_label(score) when score in 4..6, do: "Partial Credit"
+  defp practice_score_label(score) when score in 7..8, do: "Mostly Correct"
+  defp practice_score_label(score) when score in 9..10, do: "Full Credit"
+  defp practice_score_label(_), do: "Scored"
+
+  # ── Inline video reference chips ──
+
+  defp skill_videos(%{videos: []} = assigns), do: ~H""
+
+  defp skill_videos(assigns) do
+    ~H"""
+    <div class="mt-3 p-3 rounded-2xl bg-blue-50 border border-blue-100">
+      <p class="text-xs font-bold text-[#007AFF] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <.icon name="hero-video-camera" class="w-4 h-4" /> Watch & Learn
+      </p>
+      <ul class="space-y-1.5">
+        <li :for={video <- @videos}>
+          <.link
+            href={video.url}
+            target="_blank"
+            rel="noopener"
+            class="text-sm text-[#007AFF] hover:underline inline-flex items-center gap-1"
+          >
+            <.icon name="hero-play-circle" class="w-4 h-4 shrink-0" />
+            <span class="truncate">{video.title}</span>
+          </.link>
+        </li>
+      </ul>
     </div>
     """
   end

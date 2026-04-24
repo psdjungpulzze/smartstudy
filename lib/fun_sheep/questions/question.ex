@@ -17,7 +17,7 @@ defmodule FunSheep.Questions.Question do
     field :answer, :string
 
     field :question_type, Ecto.Enum,
-      values: [:multiple_choice, :short_answer, :free_response, :true_false]
+      values: [:multiple_choice, :short_answer, :free_response, :true_false, :essay]
 
     field :options, :map
     field :source_url, :string
@@ -65,6 +65,14 @@ defmodule FunSheep.Questions.Question do
     field :classification_confidence, :float
     field :classified_at, :utc_datetime
 
+    # Essay-specific fields — only set for question_type: :essay
+    field :essay_time_limit_minutes, :integer
+    field :essay_word_target, :integer
+    field :essay_word_limit, :integer
+    # Array of %{"title" => ..., "body" => ...} for DBQ/synthesis prompts
+    field :essay_source_documents, :map
+
+    belongs_to :essay_rubric_template, FunSheep.Essays.EssayRubricTemplate
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :chapter, FunSheep.Courses.Chapter
     belongs_to :section, FunSheep.Courses.Section
@@ -112,12 +120,18 @@ defmodule FunSheep.Questions.Question do
       :chapter_id,
       :section_id,
       :school_id,
-      :source_material_id
+      :source_material_id,
+      :essay_rubric_template_id,
+      :essay_time_limit_minutes,
+      :essay_word_target,
+      :essay_word_limit,
+      :essay_source_documents
     ])
     |> validate_required([:content, :answer, :question_type, :difficulty, :course_id])
     |> foreign_key_constraint(:course_id)
     |> foreign_key_constraint(:chapter_id)
     |> foreign_key_constraint(:section_id)
     |> foreign_key_constraint(:school_id)
+    |> foreign_key_constraint(:essay_rubric_template_id)
   end
 end
