@@ -31,7 +31,8 @@ defmodule FunSheepWeb.CourseNewLive do
         # State
         user_role: user_role,
         editing_course: nil,
-        saving: false
+        saving: false,
+        flow_mode: :default
       )
 
     {:ok, socket}
@@ -56,8 +57,16 @@ defmodule FunSheepWeb.CourseNewLive do
     {:noreply, socket}
   end
 
-  def handle_params(_params, _url, socket) do
-    {:noreply, assign(socket, page_title: "Add New Course")}
+  def handle_params(params, _url, socket) do
+    flow_mode = if params["flow"] == "test", do: :test, else: :default
+
+    page_title =
+      case flow_mode do
+        :test -> "Add a Test"
+        :default -> "Add New Course"
+      end
+
+    {:noreply, assign(socket, page_title: page_title, flow_mode: flow_mode)}
   end
 
   defp prefill_textbook_from_course(socket, course) do
@@ -257,16 +266,21 @@ defmodule FunSheepWeb.CourseNewLive do
         |> FunSheep.Workers.ProcessCourseWorker.new()
         |> Oban.insert()
 
-        flash_msg =
-          if assigns.editing_course do
-            "Course updated!"
-          else
-            "Course created! Searching for content..."
+        {flash_msg, redirect_path} =
+          cond do
+            assigns.editing_course ->
+              {"Course updated!", ~p"/courses/#{course.id}"}
+
+            assigns.flow_mode == :test ->
+              {"Class created! Now let's schedule the test.", ~p"/courses/#{course.id}/tests/new"}
+
+            true ->
+              {"Course created! Searching for content...", ~p"/courses/#{course.id}"}
           end
 
         socket
         |> put_flash(:info, flash_msg)
-        |> push_navigate(to: ~p"/courses/#{course.id}")
+        |> push_navigate(to: redirect_path)
 
       {:error, %Ecto.Changeset{} = changeset} ->
         errors = format_changeset_errors(changeset)
@@ -350,10 +364,20 @@ defmodule FunSheepWeb.CourseNewLive do
           <.icon name="hero-arrow-left" class="w-4 h-4 mr-1" /> Back
         </.link>
         <h1 class="text-2xl font-extrabold text-gray-900 mt-2">
-          {if @editing_course, do: "Edit Course", else: "New Course"}
+          {cond do
+            @editing_course -> "Edit Course"
+            @flow_mode == :test -> "Add a Test"
+            true -> "New Course"
+          end}
         </h1>
         <p class="text-gray-500 text-sm mt-1">
-          Define your course and textbook. We'll find questions and study materials automatically.
+          {cond do
+            @flow_mode == :test ->
+              "Tests live inside a class. Tell us about the class first, and we'll take you to schedule the test next."
+
+            true ->
+              "Define your course and textbook. We'll find questions and study materials automatically."
+          end}
         </p>
       </div>
 
@@ -362,7 +386,9 @@ defmodule FunSheepWeb.CourseNewLive do
           <div class="space-y-4">
             <%!-- Course Name --%>
             <div>
-              <label class="block text-sm font-medium text-gray-900 mb-1">Course Name *</label>
+              <label class="block text-sm font-medium text-gray-900 mb-1">
+                {if @flow_mode == :test, do: "Class Name *", else: "Course Name *"}
+              </label>
               <input
                 type="text"
                 value={@course_name}
@@ -456,7 +482,11 @@ defmodule FunSheepWeb.CourseNewLive do
               <%= if @saving do %>
                 Creating...
               <% else %>
-                {if @editing_course, do: "Save Changes", else: "Create Course"}
+                {cond do
+                  @editing_course -> "Save Changes"
+                  @flow_mode == :test -> "Continue to test"
+                  true -> "Create Course"
+                end}
               <% end %>
             </button>
           </div>

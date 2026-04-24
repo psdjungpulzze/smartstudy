@@ -39,17 +39,21 @@ defmodule FunSheepWeb.DashboardLiveTest do
       assert html =~ "Test Student"
     end
 
-    test "shows welcome onboarding when the user has no courses and no tests", %{conn: conn} do
+    test "shows welcome onboarding with 'Add a test' primary CTA when user has no courses and no tests",
+         %{conn: conn} do
       {conn, _user_role} = user_role_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
       assert html =~ "Welcome to Fun Sheep!"
-      # Options-first empty state: LMS first, manual fallback second.
+      # Test-first CTA: "Add a test" is primary, routes into the flow that
+      # silently provisions a class first.
+      assert html =~ "Add a test"
+      assert html =~ "/courses/new?flow=test"
+      # LMS connect remains as a secondary option.
       assert html =~ "Connect School LMS"
-      assert html =~ "Add a course manually"
     end
 
-    test "shows 'no upcoming tests' empty state when courses exist but no tests are scheduled",
+    test "shows 'no upcoming tests' empty state with 'Add a test' primary CTA when courses exist but no tests are scheduled",
          %{conn: conn} do
       {conn, user_role} = user_role_conn(conn)
 
@@ -64,9 +68,11 @@ defmodule FunSheepWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
       assert html =~ "No upcoming tests"
-      # Options-first: LMS connect stays prominent; fallback switches to "Create a test manually"
+      assert html =~ "Add a test"
+      # With courses already present, the CTA points to the course picker
+      # (not the flow=test course-creation shortcut).
+      refute html =~ "/courses/new?flow=test"
       assert html =~ "Connect School LMS"
-      assert html =~ "Create a test manually"
     end
 
     test "renders focus card and study path when an upcoming test exists", %{conn: conn} do
