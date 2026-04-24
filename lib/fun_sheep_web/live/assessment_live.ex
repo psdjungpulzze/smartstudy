@@ -28,7 +28,17 @@ defmodule FunSheepWeb.AssessmentLive do
     # On reconnect, try ETS cache first, then DB, before treating as fresh start
     case StateCache.get(user_role_id, schedule_id) do
       {:ok, cached} ->
-        {:ok, restore_from_cache(socket, course_id, schedule, cached)}
+        socket = restore_from_cache(socket, course_id, schedule, cached)
+
+        socket =
+          if cached.phase == :testing and is_nil(cached[:engine_state]) do
+            state = Engine.start_assessment(schedule)
+            socket |> assign(engine_state: state) |> advance_to_next_question() |> save_state_to_cache()
+          else
+            socket
+          end
+
+        {:ok, socket}
 
       :miss ->
         case SessionStore.load(user_role_id, schedule_id) do
@@ -37,16 +47,19 @@ defmodule FunSheepWeb.AssessmentLive do
             StateCache.put(user_role_id, schedule_id, persisted)
             socket = restore_from_cache(socket, course_id, schedule, persisted)
 
-            # After a server restart, current_question is nil; advance the engine
-            # so the student sees the next question rather than a blank screen.
+            # After a server restart: re-init engine if state was lost, or advance
+            # if current_question is nil but engine is intact.
             socket =
-              if persisted.phase == :testing and is_nil(persisted[:current_question]) and
-                   not is_nil(persisted[:engine_state]) do
-                socket
-                |> advance_to_next_question()
-                |> save_state_to_cache()
-              else
-                socket
+              cond do
+                persisted.phase == :testing and is_nil(persisted[:engine_state]) ->
+                  state = Engine.start_assessment(schedule)
+                  socket |> assign(engine_state: state) |> advance_to_next_question() |> save_state_to_cache()
+
+                persisted.phase == :testing and is_nil(persisted[:current_question]) ->
+                  socket |> advance_to_next_question() |> save_state_to_cache()
+
+                true ->
+                  socket
               end
 
             {:ok, socket}
@@ -635,6 +648,10 @@ defmodule FunSheepWeb.AssessmentLive do
             </div>
           <% @no_questions_available -> %>
             <.render_no_questions schedule={@schedule} course_id={@course_id} />
+          <% @phase == :testing and is_nil(@engine_state) -> %>
+            <div class="bg-white rounded-2xl shadow-md p-6 mt-4 text-center">
+              <p class="text-sm text-[#8E8E93]">Starting assessment...</p>
+            </div>
           <% @assessment_complete -> %>
             <.render_summary
               summary={@summary}
