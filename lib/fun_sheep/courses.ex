@@ -301,6 +301,12 @@ defmodule FunSheep.Courses do
          questions_failed: failed
        }}
     )
+
+    if status == "ready" do
+      %{course_id: course_id}
+      |> FunSheep.Workers.CourseReadyEmailWorker.new()
+      |> Oban.insert()
+    end
   end
 
   # Called once discovery + OCR are both finished. If the course has any
@@ -578,6 +584,29 @@ defmodule FunSheep.Courses do
       |> Repo.update_all(inc: [ocr_completed_count: 1])
 
     {elem(result, 0), elem(result, 1)}
+  end
+
+  @doc "Returns the IDs of materials that have completed OCR for a course."
+  def list_completed_material_ids(course_id) do
+    alias FunSheep.Content.UploadedMaterial
+
+    from(m in UploadedMaterial,
+      where: m.course_id == ^course_id and m.ocr_status == :completed,
+      select: m.id
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Record when OCR first started. Uses a conditional update so concurrent
+  workers don't overwrite the initial timestamp.
+  """
+  def set_ocr_started_at(course_id) do
+    from(c in Course,
+      where: c.id == ^course_id and is_nil(c.ocr_started_at),
+      update: [set: [ocr_started_at: ^DateTime.utc_now()]]
+    )
+    |> Repo.update_all([])
   end
 
   ## Textbooks
