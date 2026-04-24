@@ -5,7 +5,7 @@ defmodule FunSheepWeb.DashboardLive do
 
   import FunSheepWeb.ShareButton
 
-  alias FunSheep.{Courses, Assessments, Gamification, Integrations}
+  alias FunSheep.{Courses, Assessments, Gamification, Integrations, FixedTests}
   alias FunSheep.Engagement.{SpacedRepetition, StudySessions}
 
   @impl true
@@ -17,7 +17,8 @@ defmodule FunSheepWeb.DashboardLive do
     end
 
     {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations,
-     pinned_id} =
+     pinned_id,
+     custom_assignments} =
       case Ecto.UUID.cast(user_role_id) do
         {:ok, _uuid} ->
           tests = Assessments.list_upcoming_schedules(user_role_id, 90)
@@ -35,11 +36,12 @@ defmodule FunSheepWeb.DashboardLive do
           daily = StudySessions.daily_summary(user_role_id)
           int = Integrations.list_for_user(user_role_id)
           pinned = Assessments.pinned_test_id(user_role_id)
-          {tests_with_readiness, gam, count, review, daily, int, pinned}
+          custom_assignments = FixedTests.list_assignments_for_student(user_role_id)
+          {tests_with_readiness, gam, count, review, daily, int, pinned, custom_assignments}
 
         :error ->
           {[], default_gamification(), 0, default_review_stats(), default_daily_summary(), [],
-           nil}
+           nil, []}
       end
 
     # Primary = pinned test (if still upcoming) or nearest-deadline fallback.
@@ -57,7 +59,8 @@ defmodule FunSheepWeb.DashboardLive do
         course_count: course_count,
         review_stats: review_stats,
         daily_summary: daily_summary,
-        integrations: integrations
+        integrations: integrations,
+        custom_assignments: custom_assignments
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "dashboard",
@@ -245,6 +248,16 @@ defmodule FunSheepWeb.DashboardLive do
         </h2>
         <div class="space-y-2">
           <.test_row :for={t <- @other_tests} test={t} pinned_id={@pinned_test_id} />
+        </div>
+      </div>
+
+      <%!-- ── Custom (fixed) test assignments ── --%>
+      <div :if={@custom_assignments != []} class="animate-slide-up">
+        <h2 class="text-sm font-extrabold text-gray-400 uppercase tracking-wider mb-3">
+          Custom Tests
+        </h2>
+        <div class="space-y-2">
+          <.custom_test_row :for={a <- @custom_assignments} assignment={a} />
         </div>
       </div>
 
@@ -789,6 +802,51 @@ defmodule FunSheepWeb.DashboardLive do
         </div>
       </div>
     </div>
+    """
+  end
+
+  # ── Custom Test Row ──────────────────────────────────────────────────────
+
+  defp custom_test_row(assigns) do
+    bank = assigns.assignment.bank
+    due = assigns.assignment.due_at
+
+    due_label =
+      cond do
+        is_nil(due) -> nil
+        Date.diff(DateTime.to_date(due), Date.utc_today()) < 0 -> "Overdue"
+        Date.diff(DateTime.to_date(due), Date.utc_today()) == 0 -> "Due today"
+        true -> "Due #{Calendar.strftime(due, "%b %d")}"
+      end
+
+    assigns = assign(assigns, bank: bank, due_label: due_label)
+
+    ~H"""
+    <.link
+      navigate={~p"/custom-tests/#{@bank.id}/start"}
+      class="bg-white rounded-2xl border border-gray-100 p-3 sm:p-4 flex items-center gap-3 card-hover block"
+    >
+      <div class="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
+        <span class="text-indigo-600 text-lg">📋</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
+            Custom
+          </span>
+          <p class="font-semibold text-[#1C1C1E] text-sm truncate">{@bank.title}</p>
+        </div>
+        <%= if @due_label do %>
+          <p class={[
+            "text-xs mt-0.5",
+            if(@due_label == "Overdue", do: "text-[#FF3B30]", else: "text-[#8E8E93]")
+          ]}>
+            {@due_label}
+          </p>
+        <% end %>
+      </div>
+      <span class="text-[#8E8E93] text-sm">→</span>
+    </.link>
     """
   end
 
