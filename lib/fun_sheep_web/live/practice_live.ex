@@ -40,6 +40,7 @@ defmodule FunSheepWeb.PracticeLive do
         practice_complete: false,
         summary: nil,
         start_time: System.monotonic_time(:second),
+        question_flagged: false,
         # Tutor state
         tutor_open: false,
         tutor_session_id: nil,
@@ -199,7 +200,7 @@ defmodule FunSheepWeb.PracticeLive do
   def handle_event("next_question", _params, socket) do
     socket =
       socket
-      |> assign(feedback: nil, selected_answer: nil)
+      |> assign(feedback: nil, selected_answer: nil, question_flagged: false)
       |> reset_tutor()
       |> advance_to_next()
 
@@ -230,11 +231,25 @@ defmodule FunSheepWeb.PracticeLive do
         total_questions: total_questions,
         practice_complete: false,
         summary: nil,
-        start_time: System.monotonic_time(:second)
+        start_time: System.monotonic_time(:second),
+        question_flagged: false
       )
       |> maybe_advance_to_next()
 
     {:noreply, socket}
+  end
+
+  def handle_event("flag_question", %{"reason" => reason_str}, socket) do
+    question = socket.assigns.current_question
+    user_role_id = socket.assigns.current_user["user_role_id"]
+
+    if question && user_role_id do
+      reason = if reason_str == "", do: nil, else: String.to_existing_atom(reason_str)
+      Questions.flag_question(user_role_id, question.id, reason)
+      {:noreply, assign(socket, question_flagged: true)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # --- Tutor events ---
@@ -714,6 +729,8 @@ defmodule FunSheepWeb.PracticeLive do
             </p>
           </div>
 
+          <.question_flag_link question_flagged={@question_flagged} />
+
           <div class="flex justify-end mt-4">
             <button
               phx-click="next_question"
@@ -1052,6 +1069,43 @@ defmodule FunSheepWeb.PracticeLive do
           class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-xl outline-none transition-colors resize-none"
         >{@selected_answer}</textarea>
       </form>
+    </div>
+    """
+  end
+
+  attr :question_flagged, :boolean, default: false
+
+  defp question_flag_link(assigns) do
+    ~H"""
+    <div class="flex justify-end mt-3">
+      <div :if={@question_flagged} class="text-xs text-[#8E8E93]">
+        Reported
+      </div>
+
+      <div :if={!@question_flagged} class="flex items-center gap-2">
+        <button
+          type="button"
+          phx-click="flag_question"
+          phx-value-reason=""
+          class="text-xs text-[#C7C7CC] hover:text-[#8E8E93] transition-colors"
+        >
+          Report
+        </button>
+        <%= for {label, reason} <- [
+          {"Wrong answer", "incorrect_answer"},
+          {"Unclear", "unclear"},
+          {"Outdated", "outdated"}
+        ] do %>
+          <button
+            type="button"
+            phx-click="flag_question"
+            phx-value-reason={reason}
+            class="text-xs text-[#C7C7CC] hover:text-[#8E8E93] transition-colors"
+          >
+            {label}
+          </button>
+        <% end %>
+      </div>
     </div>
     """
   end
