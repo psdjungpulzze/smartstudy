@@ -107,7 +107,13 @@ cmd_start() {
   fi
 
   echo "Starting Phoenix server on port $port..." >&2
-  PORT="$port" mix phx.server > "$LOGFILE" 2>&1 &
+  # Use asdf-managed mix if available (ensures correct Elixir/Erlang per .tool-versions)
+  if [ -d "${HOME}/.asdf/shims" ]; then
+    export PATH="${HOME}/.asdf/bin:${HOME}/.asdf/shims:${PATH}"
+  fi
+  MIX_CMD="${HOME}/.asdf/shims/mix"
+  [ -x "$MIX_CMD" ] || MIX_CMD="mix"
+  PORT="$port" "$MIX_CMD" phx.server > "$LOGFILE" 2>&1 &
   local pid=$!
   echo "$pid" > "$PIDFILE"
   echo "$port" > "$PORTFILE"

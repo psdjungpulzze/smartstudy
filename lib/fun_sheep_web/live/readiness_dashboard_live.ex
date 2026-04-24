@@ -368,7 +368,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
             </span>
           </h2>
           <div class="space-y-1">
-            <.topic_row
+            <.concept_row
               :for={topic <- weak_topics}
               topic={topic}
               course_id={@course_id}
@@ -455,7 +455,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
           <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Concepts by Readiness</h2>
           <div class="space-y-1">
-            <.topic_row
+            <.concept_row
               :for={topic <- all_topics}
               topic={topic}
               course_id={@course_id}
@@ -605,9 +605,9 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     """
   end
 
-  # --- Topic row component (shared across States B and C) ---
+  # --- Concept row component (shared across States B and C) ---
 
-  defp topic_row(assigns) do
+  defp concept_row(assigns) do
     ~H"""
     <div class="flex items-center gap-3 py-2.5 border-b border-[#F2F2F7] last:border-0">
       <div class="flex-1 min-w-0">
