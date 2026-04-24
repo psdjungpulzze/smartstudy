@@ -42,6 +42,18 @@ defmodule FunSheep.Courses.Course do
     field :published_by_id, :binary_id
     field :sample_question_count, :integer, default: 10
 
+    # Community quality scoring fields (Phase 1 — community content validation)
+    field :quality_score, :float, default: 0.0
+    field :like_count, :integer, default: 0
+    field :dislike_count, :integer, default: 0
+    field :completion_count, :integer, default: 0
+    field :attempt_count, :integer, default: 0
+    field :unique_user_count, :integer, default: 0
+    field :quality_last_computed_at, :utc_datetime
+    # "boosted", "normal", "reduced", "flagged", "pending_review", "delisted"
+    field :visibility_state, :string, default: "normal"
+    field :dormant_at, :utc_datetime
+
     # A TOC rebase proposal waiting for approval. When non-nil, the course
     # has a candidate DiscoveredTOC that didn't auto-apply (material change
     # with risk to existing attempts). UI surfaces this as a banner to the
@@ -96,7 +108,16 @@ defmodule FunSheep.Courses.Course do
       :catalog_level,
       :published_at,
       :published_by_id,
-      :sample_question_count
+      :sample_question_count,
+      :quality_score,
+      :like_count,
+      :dislike_count,
+      :completion_count,
+      :attempt_count,
+      :unique_user_count,
+      :quality_last_computed_at,
+      :visibility_state,
+      :dormant_at
     ])
     |> validate_required([:name, :subject, :grade])
     |> validate_inclusion(:access_level, @access_levels)

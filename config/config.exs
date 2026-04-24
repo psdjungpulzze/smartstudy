@@ -88,7 +88,10 @@ config :fun_sheep, Oban,
        {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker},
        # Sunday 23:55 UTC — compute weekly shout out winners so they are
        # ready for the Monday leaderboard. Keep in sync with runtime.exs.
-       {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker}
+       {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker},
+       # Nightly at 03:30 UTC — mark courses with 0 attempts and
+       # no quality update in 90+ days as dormant (visibility_state: "reduced").
+       {"30 3 * * *", FunSheep.Workers.MarkDormantContentWorker}
      ]}
   ],
   queues: [
