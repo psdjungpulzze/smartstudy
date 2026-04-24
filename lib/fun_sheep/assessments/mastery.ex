@@ -1,18 +1,47 @@
 defmodule FunSheep.Assessments.Mastery do
   @moduledoc """
-  Per-skill mastery check — North Star I-9.
+  Per-skill mastery check — North Star I-9 + I-17.
 
   A skill is mastered when the student has produced **N correct answers in a
-  row at or above medium difficulty** (default N = 3). A single-session
-  streak at easy difficulty does not count.
+  row at or above medium difficulty** (default N = 3), AND each answer carries
+  an `:i_know` confidence rating (I-17). Legacy attempts without confidence
+  fall back to `is_correct` only (backward-compatible).
 
   Works with DB QuestionAttempt rows (question preloaded) and bare maps
   with `is_correct` + `difficulty` + `inserted_at` — usable from both the
   readiness calculator and the assessment engine.
+
+  ## Confidence scoring matrix (6 outcomes)
+
+  | Correct? | Confidence  | effective_correctness | Mastery streak credit |
+  |----------|-------------|----------------------|-----------------------|
+  | true     | :i_know     | :strong              | Yes                   |
+  | true     | :not_sure   | :partial             | No                    |
+  | true     | :dont_know  | :lucky_guess         | No (treated as weak)  |
+  | false    | :i_know     | :overconfident       | No                    |
+  | false    | :not_sure   | :weak                | No                    |
+  | false    | :dont_know  | :weak                | No                    |
+  | _        | nil         | :binary              | Same as is_correct    |
   """
 
   @default_streak 3
   @medium_or_harder [:medium, :hard, "medium", "hard"]
+
+  @doc """
+  Computes the effective correctness signal from the 2D (is_correct × confidence) matrix.
+  Handles nil confidence for backward compat.
+  """
+  def effective_correctness(is_correct, confidence) do
+    case {is_correct, confidence} do
+      {true, :i_know} -> :strong
+      {true, :not_sure} -> :partial
+      {true, :dont_know} -> :lucky_guess
+      {false, :i_know} -> :overconfident
+      {false, :not_sure} -> :weak
+      {false, :dont_know} -> :weak
+      {_, nil} -> :binary
+    end
+  end
 
   def mastered?(attempts, streak \\ @default_streak) when is_list(attempts) do
     ordered = Enum.sort_by(attempts, &attempt_timestamp/1, {:asc, DateTime})
@@ -29,6 +58,15 @@ defmodule FunSheep.Assessments.Mastery do
       mastered?(attempts, streak) -> :mastered
       correct_ratio(attempts) < weak_threshold -> :weak
       true -> :probing
+    end
+  end
+
+  # I-17: correct + i_know → streak credit; correct + nil (legacy) → streak credit
+  defp qualifying?(%{is_correct: true, confidence: confidence} = a) do
+    case confidence do
+      :i_know -> difficulty_at_medium_plus?(extract_difficulty(a))
+      nil -> difficulty_at_medium_plus?(extract_difficulty(a))
+      _ -> false
     end
   end
 

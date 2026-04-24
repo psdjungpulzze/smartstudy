@@ -41,6 +41,8 @@ defmodule FunSheepWeb.QuickTestLive do
             test_complete: false,
             summary: nil,
             stats: %{correct: 0, incorrect: 0, skipped: 0},
+            pending_is_correct: nil,
+            pending_answer: nil,
             # Remediation videos for current skill (I-14). Populated only on
             # wrong-answer / "I don't know" events.
             current_question_videos: [],
@@ -90,12 +92,13 @@ defmodule FunSheepWeb.QuickTestLive do
   end
 
   @impl true
-  def handle_event("mark_known", _params, socket) do
+  # Confidence-based flashcard handlers (I-17)
+
+  def handle_event("mark_i_know", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      # Record as correct attempt in DB
-      record_attempt(socket, question, "known", true)
+      record_attempt(socket, question, "known", true, :i_know)
       new_state = QuickTestEngine.mark_known(state, question.id)
 
       socket =
@@ -116,12 +119,30 @@ defmodule FunSheepWeb.QuickTestLive do
     end
   end
 
-  def handle_event("mark_unknown", _params, socket) do
+  def handle_event("mark_not_sure", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      # Record as incorrect attempt in DB
-      record_attempt(socket, question, "unknown", false)
+      record_attempt(socket, question, "not_sure", false, :not_sure)
+      new_state = QuickTestEngine.mark_unknown(state, question.id)
+
+      {:noreply,
+       assign(socket,
+         engine_state: new_state,
+         show_explanation: true,
+         stats: %{stats | incorrect: stats.incorrect + 1},
+         current_question_videos: Content.list_videos_for_section(question.section_id)
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("mark_dont_know", _params, socket) do
+    %{current_question: question, engine_state: state, stats: stats} = socket.assigns
+
+    if question do
+      record_attempt(socket, question, "dont_know", false, :dont_know)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
 
       {:noreply,
@@ -175,8 +196,6 @@ defmodule FunSheepWeb.QuickTestLive do
       {:noreply, socket}
     else
       is_correct = check_answer(question, answer)
-
-      record_attempt(socket, question, answer, is_correct)
       new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
 
       new_stats =
@@ -191,14 +210,43 @@ defmodule FunSheepWeb.QuickTestLive do
           do: [],
           else: Content.list_videos_for_section(question.section_id)
 
+      # Defer DB insert until confidence is selected
       {:noreply,
        assign(socket,
          engine_state: new_state,
          stats: new_stats,
          feedback: %{is_correct: is_correct, correct_answer: question.answer},
+         pending_is_correct: is_correct,
+         pending_answer: answer,
          current_question_videos: videos
        )}
     end
+  end
+
+  def handle_event("confidence_selected", %{"confidence" => confidence_str}, socket) do
+    %{current_question: question, pending_is_correct: is_correct, pending_answer: answer} =
+      socket.assigns
+
+    confidence = String.to_existing_atom(confidence_str)
+
+    if question && not is_nil(is_correct) do
+      record_attempt(socket, question, answer || "unknown", is_correct, confidence)
+    end
+
+    socket =
+      socket
+      |> assign(
+        show_answer_input: false,
+        feedback: nil,
+        selected_answer: nil,
+        show_explanation: false,
+        pending_is_correct: nil,
+        pending_answer: nil
+      )
+      |> reset_tutor()
+      |> advance_to_next_card()
+
+    {:noreply, socket}
   end
 
   def handle_event("next_after_answer", _params, socket) do
@@ -462,7 +510,7 @@ defmodule FunSheepWeb.QuickTestLive do
 
   defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
-  defp record_attempt(socket, question, answer_given, is_correct) do
+  defp record_attempt(socket, question, answer_given, is_correct, confidence \\ nil) do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
@@ -471,7 +519,8 @@ defmodule FunSheepWeb.QuickTestLive do
         question_id: question.id,
         answer_given: answer_given,
         is_correct: is_correct,
-        difficulty_at_attempt: to_string(question.difficulty)
+        difficulty_at_attempt: to_string(question.difficulty),
+        confidence: confidence
       })
 
       if is_correct do
@@ -679,12 +728,31 @@ defmodule FunSheepWeb.QuickTestLive do
                     <.icon name="hero-chat-bubble-left-right" class="w-3.5 h-3.5" /> Ask Tutor
                   </button>
                 </div>
-                <div class="flex justify-center">
+                <%!-- Confidence buttons — replace "Next Card" --%>
+                <p class="text-xs text-[#8E8E93] text-center mb-2 font-medium">
+                  How well did you know this?
+                </p>
+                <div class="flex gap-2">
                   <button
-                    phx-click="next_after_answer"
-                    class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+                    phx-click="confidence_selected"
+                    phx-value-confidence="dont_know"
+                    class="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors"
                   >
-                    Next Card
+                    I Don't Know
+                  </button>
+                  <button
+                    phx-click="confidence_selected"
+                    phx-value-confidence="not_sure"
+                    class="flex-1 py-2 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-xs font-semibold rounded-full transition-colors"
+                  >
+                    Not Sure
+                  </button>
+                  <button
+                    phx-click="confidence_selected"
+                    phx-value-confidence="i_know"
+                    class="flex-1 py-2 bg-[#4CD964] hover:bg-[#3DBF55] text-white text-xs font-bold rounded-full shadow-sm transition-colors"
+                  >
+                    I Know
                   </button>
                 </div>
               </div>
@@ -734,16 +802,22 @@ defmodule FunSheepWeb.QuickTestLive do
               </div>
             </div>
 
-            <%!-- Action buttons (hidden during answer/explanation) --%>
+            <%!-- Action buttons: 3-confidence + Answer (hidden during answer/explanation) --%>
             <div
               :if={!@show_answer_input and !@show_explanation}
               class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 mt-auto"
             >
               <button
-                phx-click="mark_known"
-                class="flex-1 bg-[#E8F8EB] hover:bg-[#D0F0D8] text-[#4CD964] font-medium py-3 rounded-full transition-colors text-sm touch-target"
+                phx-click="mark_dont_know"
+                class="flex-1 bg-red-50 hover:bg-red-100 text-[#FF3B30] font-medium py-3 rounded-full transition-colors text-sm touch-target"
               >
-                I Know This
+                I Don't Know
+              </button>
+              <button
+                phx-click="mark_not_sure"
+                class="flex-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 font-medium py-3 rounded-full transition-colors text-sm touch-target"
+              >
+                Not Sure
               </button>
               <button
                 phx-click="show_answer_input"
@@ -752,10 +826,10 @@ defmodule FunSheepWeb.QuickTestLive do
                 Answer
               </button>
               <button
-                phx-click="mark_unknown"
-                class="flex-1 bg-red-50 hover:bg-red-100 text-[#FF3B30] font-medium py-3 rounded-full transition-colors text-sm touch-target"
+                phx-click="mark_i_know"
+                class="flex-1 bg-[#E8F8EB] hover:bg-[#D0F0D8] text-[#4CD964] font-medium py-3 rounded-full transition-colors text-sm touch-target"
               >
-                I Don't Know
+                I Know This
               </button>
             </div>
           </div>
