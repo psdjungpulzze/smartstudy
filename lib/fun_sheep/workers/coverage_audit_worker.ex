@@ -34,7 +34,8 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
       states: [:available, :scheduled, :executing]
     ]
 
-  alias FunSheep.{Content, Courses, Questions}
+  alias FunSheep.{Courses, Questions, Repo}
+  alias FunSheep.Content.UploadedMaterial
 
   import Ecto.Query
   require Logger
@@ -131,15 +132,24 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
     end
   end
 
+  # Avoids loading full UploadedMaterial rows (which include large ocr_operations
+  # maps) — loading all materials for a course with a large PDF caused
+  # DBConnection pool timeouts in production.
   defp course_has_grounding_material?(course_id) do
-    Content.list_materials_by_course(course_id)
-    |> Enum.any?(fn m ->
-      m.ocr_status == :completed and
-        FunSheep.Workers.MaterialClassificationWorker.route(m) in [:ground, :extract_and_ground]
-    end)
+    from(m in UploadedMaterial,
+      where:
+        m.course_id == ^course_id and
+          m.ocr_status == :completed and
+          m.classified_kind in [:knowledge_content, :mixed],
+      select: 1,
+      limit: 1
+    )
+    |> Repo.one()
+    |> is_integer()
   end
 
   defp course_has_web_context?(course_id) do
+    alias FunSheep.Content
     Content.list_sources_with_scraped_text(course_id) != []
   end
 end
