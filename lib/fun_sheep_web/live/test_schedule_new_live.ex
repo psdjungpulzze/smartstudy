@@ -356,8 +356,9 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       <div class="bg-white rounded-2xl shadow-md p-8">
         <form phx-submit="save" phx-change="update_form" class="space-y-6">
           <div>
-            <label class="block text-sm font-medium text-[#1C1C1E] mb-2">Test Name</label>
+            <label for="test-name" class="block text-sm font-medium text-[#1C1C1E] mb-2">Test Name</label>
             <input
+              id="test-name"
               type="text"
               name="name"
               value={@form_name}
@@ -368,15 +369,15 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-[#1C1C1E] mb-2">Test Date</label>
+            <label for="test-date" class="block text-sm font-medium text-[#1C1C1E] mb-2">Test Date</label>
             <input
+              id="test-date"
               type="date"
               name="test_date"
               value={@form_test_date}
               min={Date.to_iso8601(Date.utc_today())}
               required
-              class="w-full px-4 py-3 min-h-[48px] bg-[#F5F5F7] dark:bg-[#2C2C2E] text-base text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-2xl sm:rounded-full outline-none transition-colors appearance-none"
-              style="-webkit-appearance: none; -moz-appearance: none;"
+              class="w-full px-4 py-3 min-h-[48px] bg-[#F5F5F7] dark:bg-[#2C2C2E] text-base text-[#1C1C1E] dark:text-white border border-[#E5E5EA] dark:border-[#3A3A3C] focus:border-[#4CD964] rounded-full outline-none transition-colors"
             />
           </div>
 
