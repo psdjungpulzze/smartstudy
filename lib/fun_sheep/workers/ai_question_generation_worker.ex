@@ -73,8 +73,12 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     count = args["count"] || 10
     mode = args["mode"] || "from_material"
     difficulty = args["difficulty"]
+    section_name = args["section_name"]
 
-    Logger.info("[AIGen] Generating #{count} questions for course #{course_id}, mode=#{mode}")
+    Logger.info(
+      "[AIGen] Generating #{count} questions for course #{course_id}, mode=#{mode}" <>
+        if(section_name, do: ", section=\"#{section_name}\"", else: "")
+    )
 
     course = Courses.get_course_with_chapters!(course_id)
 
@@ -127,7 +131,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
       progress_event = maybe_phase(progress_event, :preparing, "Preparing chapter context", 1)
       context = build_context(course, chapter, args)
-      prompt = build_prompt(mode, course, chapter, context, count, difficulty)
+      prompt = build_prompt(mode, course, chapter, context, count, difficulty, section_name)
 
       progress_event = maybe_phase(progress_event, :generating, "Generating questions with AI", 2)
 
@@ -202,11 +206,14 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       |> maybe_put(:count, opts[:count])
       |> maybe_put(:mode, opts[:mode])
       |> maybe_put(:source_material_id, opts[:source_material_id])
-      # Phase 6: difficulty-targeted generation. When set, the prompt
-      # asks the AI to produce questions at this difficulty ONLY.
-      # Powers the demand-driven supply loop — if a student runs out of
-      # :hard questions in a chapter, we re-fill the hard bucket, not
-      # the whole mix.
+      # Concept-level targeting: when section_id + section_name are set,
+      # the prompt focuses exclusively on that concept so generated questions
+      # are guaranteed to cover it. The classifier will assign section_id
+      # after insertion, but the generation prompt is already scoped.
+      |> maybe_put(:section_id, opts[:section_id])
+      |> maybe_put(:section_name, opts[:section_name])
+      # Difficulty-targeted generation: produces questions at exactly this
+      # level to re-fill a depleted {section, difficulty} bucket.
       |> maybe_put(:difficulty, opts[:difficulty])
 
     args
@@ -219,8 +226,16 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   # Build context from OCR materials and existing questions
   defp build_context(course, chapter, args) do
+    mode = args["mode"] || "from_material"
+
     {material_text, material_ids} =
-      collect_material_text_with_refs(course.id, args["source_material_id"])
+      case mode do
+        "from_web_context" ->
+          collect_web_context_text(course.id)
+
+        _ ->
+          collect_material_text_with_refs(course.id, args["source_material_id"])
+      end
 
     existing_questions =
       if chapter do
@@ -241,11 +256,30 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       chapter_names: Enum.map(course.chapters, & &1.name),
       figures: figures,
       hobbies: hobbies,
-      # Phase 4: material_ids that fed the prompt, persisted per
-      # question as grounding_refs. Empty when generating from
-      # curriculum with no materials.
       grounding_material_ids: material_ids
     }
+  end
+
+  # Collect scraped text from discovered web sources as generation context.
+  # Returns {"combined text", []} — no material_ids since these are URLs, not
+  # uploaded materials. The web source URLs are stored in grounding_refs by
+  # the caller on each inserted question.
+  defp collect_web_context_text(course_id) do
+    sources = Content.list_sources_with_scraped_text(course_id)
+
+    if sources == [] do
+      {"", []}
+    else
+      text =
+        sources
+        |> Enum.map(fn s ->
+          header = "--- #{s.source_type}: #{s.title} ---"
+          "#{header}\n#{s.scraped_text}"
+        end)
+        |> Enum.join("\n\n")
+
+      {text, []}
+    end
   end
 
   defp student_hobbies_for_course(course, explicit_user_role_id) do
@@ -314,14 +348,32 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     end
   end
 
-  defp build_prompt(mode, course, chapter, context, count, difficulty) do
+  defp build_prompt(mode, course, chapter, context, count, difficulty, section_name \\ nil) do
     subject = course.subject || course.name
     grade = course.grade
     chapter_name = if chapter, do: chapter.name, else: "all chapters"
 
+    # When a section (concept) is specified, scope the prompt to that concept.
+    # This ensures generated questions test the specific skill/topic rather than
+    # spreading across the entire chapter.
+    concept_focus =
+      if section_name do
+        """
+        CONCEPT FOCUS — CRITICAL: Every question in this batch MUST test the following
+        specific concept only: "#{section_name}"
+        Do NOT generate questions about other sections or topics in this chapter.
+        The student needs to demonstrate mastery of THIS concept specifically.
+
+        """
+      else
+        ""
+      end
+
+    topic_label = section_name || chapter_name
+
     base = """
     You are a #{subject} teacher creating questions for grade #{grade} students.
-    Topic: #{chapter_name}
+    Topic: #{topic_label}
 
     """
 
@@ -400,6 +452,23 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
           Make questions specific and educational — not vague or trivial.
           """
+
+        "from_web_context" ->
+          if context.material_text != "" do
+            """
+            Generate #{count} NEW questions based on the web resources above.
+            These resources were discovered for this #{subject} course — use their content and terminology.
+            Mix question types: multiple choice and short answer.
+            Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
+            """
+          else
+            """
+            Generate #{count} NEW questions based on your knowledge of #{subject} at grade #{grade} level.
+            Use the chapter/topic list above to guide what concepts to test.
+            Mix question types: multiple choice and short answer.
+            Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
+            """
+          end
 
         _ ->
           if context.material_text != "" do
@@ -485,6 +554,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       end
 
     base <>
+      concept_focus <>
       difficulty_rubric <>
       chapters_section <>
       material_section <>
@@ -780,6 +850,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   defp finalize_course(course_id, new_count) do
     course = Courses.get_course!(course_id)
     total = Questions.count_questions_by_course(course_id)
+    pending = Questions.count_pending_by_course(course_id)
 
     {status, step} =
       cond do
@@ -790,6 +861,22 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
           {"failed",
            "Question generation failed — AI service unavailable. Please try again later."}
+
+        pending == 0 ->
+          # No pending questions (either new_count == 0 or all newly inserted
+          # questions were immediately validated). Don't re-enter "validating"
+          # — that would trap the course forever if validation never fires.
+          # If the course was already "ready", keep it; otherwise flip to "ready"
+          # now that there's nothing left to validate.
+          if course.processing_status == "ready" do
+            {"ready", "#{total} questions ready"}
+          else
+            Logger.info(
+              "[AIGen] Course #{course_id}: 0 pending after generation (#{new_count} new), marking ready"
+            )
+
+            {"ready", "#{total} questions ready"}
+          end
 
         true ->
           # Don't flip to ready yet — validation worker will do that once every

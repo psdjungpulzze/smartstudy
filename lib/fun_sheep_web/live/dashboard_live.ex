@@ -12,6 +12,10 @@ defmodule FunSheepWeb.DashboardLive do
   def mount(_params, _session, socket) do
     user_role_id = socket.assigns.current_user["id"]
 
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(FunSheep.PubSub, "student_progress:#{user_role_id}")
+    end
+
     {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations,
      pinned_id} =
       case Ecto.UUID.cast(user_role_id) do
@@ -142,6 +146,25 @@ defmodule FunSheepWeb.DashboardLive do
     end
   end
 
+  @impl true
+  def handle_info(:readiness_updated, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+
+    updated_tests =
+      (List.wrap(socket.assigns.primary_test) ++ socket.assigns.other_tests)
+      |> Enum.map(fn entry ->
+        readiness = Assessments.latest_readiness(user_role_id, entry.test.id)
+        %{entry | readiness: readiness}
+      end)
+
+    pinned_id = socket.assigns.pinned_test_id
+    {primary, other} = split_primary_and_other(updated_tests, pinned_id)
+    {:noreply, assign(socket, primary_test: primary, other_tests: other)}
+  end
+
+  # Ignore other PubSub messages we're not interested in.
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   defp refresh_primary(socket) do
     upcoming = socket.assigns.other_tests ++ List.wrap(socket.assigns.primary_test)
     pinned_id = Assessments.pinned_test_id(socket.assigns.current_user["id"])
@@ -260,7 +283,15 @@ defmodule FunSheepWeb.DashboardLive do
     readiness =
       if readiness_score, do: round(readiness_score.aggregate_score), else: 0
 
-    urgency = urgency_level(days_left, readiness)
+    coverage_pct = if readiness_score, do: readiness_score.coverage_pct, else: 100.0
+
+    full_test_readiness =
+      if readiness_score, do: round(readiness_score.full_test_readiness), else: 0
+
+    empty_count = if readiness_score, do: length(readiness_score.empty_section_ids), else: 0
+    has_coverage_gap? = coverage_pct < 100.0
+
+    urgency = urgency_level(days_left, full_test_readiness)
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id
     attempts_count = Map.get(assigns.test, :attempts_count, 0)
@@ -319,6 +350,10 @@ defmodule FunSheepWeb.DashboardLive do
       |> assign(:next_idx, next_idx)
       |> assign(:format_step, format_step)
       |> assign(:all_mastered?, all_mastered?)
+      |> assign(:coverage_pct, coverage_pct)
+      |> assign(:full_test_readiness, full_test_readiness)
+      |> assign(:empty_count, empty_count)
+      |> assign(:has_coverage_gap?, has_coverage_gap?)
 
     ~H"""
     <div class={[
@@ -360,7 +395,9 @@ defmodule FunSheepWeb.DashboardLive do
         <%!-- Readiness bar --%>
         <div class="mt-3 sm:mt-4">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-xs sm:text-sm font-bold text-white/90">Readiness</span>
+            <span class="text-xs sm:text-sm font-bold text-white/90">
+              {if @has_coverage_gap?, do: "Readiness (available topics)", else: "Readiness"}
+            </span>
             <span class="text-xs sm:text-sm font-extrabold text-white">{@readiness}%</span>
           </div>
           <div class="w-full bg-white/20 rounded-full h-2.5 sm:h-3">
@@ -375,8 +412,27 @@ defmodule FunSheepWeb.DashboardLive do
           </div>
           <div class="flex justify-between mt-1">
             <span class="text-[10px] text-white/50">0%</span>
-            <span class="text-[10px] text-white/50">Golden Fleece 100%</span>
+            <span class="text-[10px] text-white/50">100%</span>
           </div>
+
+          <%!-- Coverage gap warning — shown when some topics have no questions yet --%>
+          <div
+            :if={@has_coverage_gap?}
+            class="mt-2 flex items-start gap-1.5 bg-white/15 border border-white/30 rounded-xl px-3 py-2"
+          >
+            <span class="text-sm shrink-0 mt-0.5">⚠️</span>
+            <div>
+              <p class="text-[11px] sm:text-xs font-semibold text-white leading-snug">
+                {@empty_count} {if @empty_count == 1, do: "topic has", else: "topics have"} no questions yet
+              </p>
+              <p class="text-[10px] text-white/70 mt-0.5 leading-snug">
+                Estimated test readiness:
+                <span class="font-bold text-white">{@full_test_readiness}%</span>
+                &nbsp;·&nbsp; Questions for missing topics are being added.
+              </p>
+            </div>
+          </div>
+
           <p class="text-[11px] sm:text-xs font-medium text-white/80 mt-1.5">
             {@attempts_count} {if @attempts_count == 1,
               do: "question answered",

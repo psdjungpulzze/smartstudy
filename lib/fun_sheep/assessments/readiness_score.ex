@@ -19,6 +19,15 @@ defmodule FunSheep.Assessments.ReadinessScore do
     field :aggregate_score, :float
     field :calculated_at, :utc_datetime
 
+    # Virtual fields — computed live, never persisted.
+    # coverage_pct: % of in-scope sections that have ≥1 student-visible question.
+    # empty_section_ids: section IDs with 0 questions (student cannot practice these).
+    # full_test_readiness: aggregate_score × (coverage_pct / 100), a conservative
+    #   estimate of true preparedness when some topics lack questions.
+    field :coverage_pct, :float, virtual: true, default: 100.0
+    field :empty_section_ids, {:array, :string}, virtual: true, default: []
+    field :full_test_readiness, :float, virtual: true, default: 0.0
+
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :test_schedule, FunSheep.Assessments.TestSchedule
 

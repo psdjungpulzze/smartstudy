@@ -164,9 +164,11 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         questions = extract_questions_from_text(text, course, source)
 
         # Insert questions
+        grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
+
         {inserted, inserted_ids} =
           Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
-            case insert_question(q, course) do
+            case insert_question(q, course, grounding_ref) do
               {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
               {:error, _} -> {count, ids}
             end
@@ -175,6 +177,8 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
           course_id: course.id
         )
+
+        FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
 
         Content.update_discovered_source(source, %{
           status: "processed",
@@ -575,9 +579,11 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   # --- Question Insertion ---
 
-  defp insert_question(q_data, course) do
-    # Try to match the question to a chapter based on content
+  defp insert_question(q_data, course, grounding_ref) do
     chapter_id = match_to_chapter(q_data.content, course.chapters)
+
+    grounding_refs =
+      if grounding_ref, do: %{"refs" => [grounding_ref]}, else: %{}
 
     attrs = %{
       content: q_data.content,
@@ -586,6 +592,9 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       options: q_data.options,
       difficulty: q_data.difficulty,
       is_generated: false,
+      source_type: :web_scraped,
+      generation_mode: "from_web_context",
+      grounding_refs: grounding_refs,
       course_id: course.id,
       chapter_id: chapter_id,
       source_url: q_data[:source_url],
