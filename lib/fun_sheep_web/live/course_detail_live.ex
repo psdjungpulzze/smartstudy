@@ -1273,6 +1273,25 @@ defmodule FunSheepWeb.CourseDetailLive do
 
       <%!-- Upload progress --%>
       <div :if={@progress.total > 0} class="mb-4">
+        <%!-- Prominent type selector shown alongside progress so users can't miss it --%>
+        <div class="mb-3 flex items-center gap-3 px-4 py-3 bg-[#E8F8EB] border border-[#4CD964] rounded-2xl">
+          <.icon name="hero-tag" class="w-5 h-5 text-[#4CD964] shrink-0" />
+          <span class="text-sm font-semibold text-[#1C1C1E] shrink-0">Uploading as:</span>
+          <form phx-change="set_default_kind" class="flex-1">
+            <select
+              name="kind"
+              class="w-full px-4 py-1.5 bg-white border border-[#4CD964] focus:border-[#3DBF55] rounded-full text-sm font-medium text-[#1C1C1E] outline-none transition-colors"
+            >
+              <option
+                :for={{label, value} <- material_kind_options()}
+                value={value}
+                selected={value == Atom.to_string(@default_kind)}
+              >
+                {label}
+              </option>
+            </select>
+          </form>
+        </div>
         <div class="flex items-center justify-between text-sm mb-1.5">
           <span class="text-[#8E8E93]">
             <%= if @uploading do %>
