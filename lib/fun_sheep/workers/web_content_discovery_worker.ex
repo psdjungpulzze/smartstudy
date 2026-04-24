@@ -19,9 +19,17 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
   use Oban.Worker, queue: :ai, max_attempts: 2
 
   alias FunSheep.{Content, Courses}
-  alias FunSheep.Interactor.Agents
 
   require Logger
+
+  @system_prompt "You are a web search assistant for educational content. Given a search query, return structured information about the most relevant results. Return ONLY a JSON array, no other text."
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 2_000,
+    temperature: 0.1,
+    source: "web_content_discovery_worker"
+  }
 
   @search_sites [
     "quizlet.com",
@@ -319,10 +327,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     Return ONLY the JSON array.
     """
 
-    case Agents.chat("web_search", prompt, %{
-           source: "web_content_discovery_worker",
-           metadata: %{search_query: query}
-         }) do
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
       {:ok, response} ->
         parse_search_response_text(response, query)
 
@@ -493,4 +498,6 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
       {:processing_update, data}
     )
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

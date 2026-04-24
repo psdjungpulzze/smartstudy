@@ -1,10 +1,26 @@
 defmodule FunSheepWeb.CourseNewLiveTest do
-  use FunSheepWeb.ConnCase, async: true
+  # async: false because Oban inline mode runs workers in the LiveView process
+  # (not the test process), so with_testing_mode(:manual) doesn't stop them.
+  # Shared ClientMock global state requires serialized access.
+  use FunSheepWeb.ConnCase, async: false
   use Oban.Testing, repo: FunSheep.Repo
 
+  import Mox
   import Phoenix.LiveViewTest
 
+  alias FunSheep.AI.ClientMock
   alias FunSheep.Accounts
+
+  # Catch-all stub: workers' AI calls fail gracefully instead of crashing with
+  # Mox.UnexpectedCallError, matching prior behaviour where Agents calls returned
+  # {:error, :assistant_not_found}.
+  setup :set_mox_global
+  setup :verify_on_exit!
+
+  setup do
+    stub(ClientMock, :call, fn _sys, _usr, _opts -> {:error, :not_configured_in_test} end)
+    :ok
+  end
 
   defp user_role_conn(conn, attrs \\ %{}) do
     defaults = %{

@@ -37,12 +37,20 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   alias FunSheep.Progress.Event, as: ProgressEvent
   alias FunSheep.Questions
   alias FunSheep.Questions.Question
-  alias FunSheep.Interactor.Agents
 
   # Phases we broadcast for a single-chapter regeneration job. See
   # `.claude/rules/i/progress-feedback.md` — users must always be able to tell
   # which step is running and how many remain.
   @regeneration_phase_total 3
+
+  @system_prompt "You are an expert educational question writer. Generate practice questions based on the subject, grade, and instructions provided. Always return ONLY a valid JSON array of question objects — no prose, no markdown fences."
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 4_000,
+    temperature: 0.7,
+    source: "ai_question_generation_worker"
+  }
 
   import Ecto.Query
   require Logger
@@ -599,11 +607,8 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     """
   end
 
-  defp send_to_ai(prompt, course, _chapter) do
-    case Agents.chat("question_gen", prompt, %{
-           source: "ai_question_generation_worker",
-           metadata: %{course_id: course.id, subject: course.subject}
-         }) do
+  defp send_to_ai(prompt, _course, _chapter) do
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
       {:ok, response} ->
         parse_ai_response(response)
 
@@ -901,4 +906,6 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
        }}
     )
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

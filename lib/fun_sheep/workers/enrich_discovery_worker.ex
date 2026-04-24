@@ -22,9 +22,17 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
 
   alias FunSheep.{Content, Courses}
   alias FunSheep.Courses.TOCRebase
-  alias FunSheep.Interactor.Agents
 
   require Logger
+
+  @system_prompt "You are an educational curriculum expert analyzing uploaded textbook materials. Extract the COMPLETE, ACTUAL chapter and section structure. Use REAL names from the text — do NOT invent generic ones. Include EVERY chapter (typically 20–50). Preserve original numbering and capitalization. Return ONLY a JSON array of chapters (each with \"name\" and optional \"sections\" array), no other text."
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 4_000,
+    temperature: 0.1,
+    source: "enrich_discovery_worker"
+  }
 
   # Only textbook-like materials define course structure. Defined here so
   # both the source-label helper and the OCR-text collector can see it —
@@ -583,15 +591,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     Return ONLY the JSON array, no other text.
     """
 
-    case Agents.chat("course_discovery", prompt, %{
-           source: "enrich_discovery_worker",
-           metadata: %{
-             course_id: course.id,
-             subject: subject,
-             grade: grade,
-             origin: "textbook_ocr"
-           }
-         }) do
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
       {:ok, response} ->
         case parse_chapters_json(response) do
           {:ok, chapters} ->
@@ -687,4 +687,6 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
   defp broadcast(course_id, data) do
     Phoenix.PubSub.broadcast(FunSheep.PubSub, "course:#{course_id}", {:processing_update, data})
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end
