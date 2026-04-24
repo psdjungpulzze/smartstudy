@@ -62,6 +62,15 @@ defmodule FunSheep.Assessments do
     |> Repo.all()
   end
 
+  def list_test_schedules_for_course_with_format(user_role_id, course_id) do
+    from(ts in TestSchedule,
+      where: ts.user_role_id == ^user_role_id and ts.course_id == ^course_id,
+      order_by: [asc: ts.test_date],
+      preload: [:format_template]
+    )
+    |> Repo.all()
+  end
+
   @doc """
   Lists upcoming test schedules (test_date >= today) within `days_ahead` days,
   ordered by test date ascending.

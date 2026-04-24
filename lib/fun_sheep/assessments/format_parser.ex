@@ -64,7 +64,8 @@ defmodule FunSheep.Assessments.FormatParser do
   def assistant_attrs do
     %{
       name: @assistant_name,
-      description: "Parses free-form test format descriptions into structured section definitions",
+      description:
+        "Parses free-form test format descriptions into structured section definitions",
       system_prompt: @system_prompt,
       llm_provider: "anthropic",
       llm_model: "claude-haiku-4-5-20251001",

@@ -109,12 +109,24 @@ defmodule FunSheepWeb.TestFormatLive do
     updated =
       List.update_at(socket.assigns.sections, index, fn section ->
         case field do
-          "count" -> Map.put(section, "count", parse_int(val, section["count"]))
+          "count" ->
+            Map.put(section, "count", parse_int(val, section["count"]))
+
           "points_per_question" ->
-            Map.put(section, "points_per_question", parse_int(val, section["points_per_question"]))
-          "name" -> Map.put(section, "name", val)
-          "question_type" -> Map.put(section, "question_type", val)
-          _ -> section
+            Map.put(
+              section,
+              "points_per_question",
+              parse_int(val, section["points_per_question"])
+            )
+
+          "name" ->
+            Map.put(section, "name", val)
+
+          "question_type" ->
+            Map.put(section, "question_type", val)
+
+          _ ->
+            section
         end
       end)
 
@@ -239,7 +251,7 @@ defmodule FunSheepWeb.TestFormatLive do
             <textarea
               name="format_description"
               rows="12"
-              placeholder={"e.g.\n20 MC (30 min)\nFRQ: 1 long - 7pts\n3 - 3pt questions (35 min)"}
+              placeholder="e.g.\n20 MC (30 min)\nFRQ: 1 long - 7pts\n3 - 3pt questions (35 min)"
               class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-2xl outline-none transition-colors text-sm font-mono resize-none"
             >{@format_description}</textarea>
           </form>
