@@ -131,22 +131,31 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
     if total > 0, do: Float.round(correct / total * 100, 1), else: 0.0
   end
 
+  # Number of difficulty levels a section must have questions at to count
+  # as "fully covered". 3 = easy + medium + hard.
+  @difficulty_levels 3
+
   # Returns {skill_scores, empty_section_ids, coverage_pct}.
   # skill_scores only covers practicable sections (≥1 passed question).
   # empty_section_ids lists sections the student cannot practice yet.
+  # coverage_pct is weighted by per-section difficulty supply:
+  #   - 3 levels present → contributes 1.0 (full coverage)
+  #   - 2 levels → 0.67
+  #   - 1 level  → 0.33
+  #   - 0 levels → 0.0 (empty)
+  # This ensures a section with only easy questions cannot claim full
+  # coverage — a student needing medium/hard content would get stuck.
   defp calculate_skill_scores(_user_role_id, []), do: {%{}, [], 100.0}
 
   defp calculate_skill_scores(user_role_id, chapter_ids) do
     all_sections = Courses.list_sections_by_chapters(chapter_ids)
     total_count = length(all_sections)
 
-    with_questions =
-      all_sections
-      |> Enum.map(& &1.id)
-      |> Questions.sections_with_questions()
+    section_ids = Enum.map(all_sections, & &1.id)
+    difficulty_coverage = Questions.section_difficulty_counts(section_ids)
 
     {practicable, empty} =
-      Enum.split_with(all_sections, &MapSet.member?(with_questions, &1.id))
+      Enum.split_with(all_sections, &Map.has_key?(difficulty_coverage, &1.id))
 
     skill_scores =
       Enum.into(practicable, %{}, fn section ->
@@ -169,9 +178,21 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
     empty_section_ids = Enum.map(empty, & &1.id)
 
     coverage_pct =
-      if total_count == 0,
-        do: 100.0,
-        else: length(practicable) / total_count * 100.0
+      if total_count == 0 do
+        100.0
+      else
+        # Weight each section by how many difficulty levels it has supply for.
+        # A section with only easy questions is 1/3 covered, not fully covered.
+        weighted_sum =
+          Enum.sum(
+            Enum.map(all_sections, fn s ->
+              levels = Map.get(difficulty_coverage, s.id, MapSet.new()) |> MapSet.size()
+              levels / @difficulty_levels
+            end)
+          )
+
+        weighted_sum / total_count * 100.0
+      end
 
     {skill_scores, empty_section_ids, coverage_pct}
   end

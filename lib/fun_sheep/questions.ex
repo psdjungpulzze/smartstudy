@@ -984,6 +984,59 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  For each section, returns the set of difficulty levels that have at least one
+  student-visible, adaptive-eligible question.
+
+  Returns `%{section_id => MapSet.t(difficulty_atom)}`. Sections with no
+  qualifying questions are absent from the map.
+
+  Used by `ReadinessCalculator` to compute per-section difficulty coverage so
+  that a section with only easy questions cannot masquerade as "fully covered"
+  for students who need medium or hard content to reach mastery.
+  """
+  def section_difficulty_counts([]), do: %{}
+
+  def section_difficulty_counts(section_ids) when is_list(section_ids) do
+    from(q in Question,
+      where:
+        q.section_id in ^section_ids and
+          q.validation_status in ^@student_visible and
+          not is_nil(q.section_id),
+      group_by: [q.section_id, q.difficulty],
+      select: {q.section_id, q.difficulty}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {section_id, difficulty}, acc ->
+      Map.update(acc, section_id, MapSet.new([difficulty]), &MapSet.put(&1, difficulty))
+    end)
+  end
+
+  @doc """
+  Counts questions per `{chapter_id, difficulty}` tuple for a course, filtered
+  to student-visible, adaptive-eligible questions. Used by `ScopeReadiness` to
+  detect which difficulty buckets are undersupplied within a chapter.
+
+  Returns `%{{chapter_id, difficulty} => count}`.
+  """
+  def counts_by_chapter_and_difficulty(_course_id, []), do: %{}
+
+  def counts_by_chapter_and_difficulty(course_id, chapter_ids)
+      when is_list(chapter_ids) do
+    from(q in Question,
+      where:
+        q.course_id == ^course_id and
+          q.chapter_id in ^chapter_ids and
+          q.validation_status in ^@student_visible and
+          not is_nil(q.section_id) and
+          q.classification_status in ^@adaptive_classifications,
+      group_by: [q.chapter_id, q.difficulty],
+      select: {q.chapter_id, q.difficulty, count(q.id)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {ch_id, diff, cnt} -> {{ch_id, diff}, cnt} end)
+  end
+
+  @doc """
   Counts attempts for a user across multiple chapters in a single query.
   """
   def count_attempts_in_chapters(_user_role_id, []), do: 0

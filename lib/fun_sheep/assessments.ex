@@ -250,6 +250,9 @@ defmodule FunSheep.Assessments do
   """
   @spec ensure_generation_queued(TestSchedule.t()) :: [binary()]
   def ensure_generation_queued(%TestSchedule{} = schedule) do
+    chapter_ids = ScopeReadiness.scope_chapter_ids(schedule)
+
+    # (a) chapters below minimum total questions — generate without difficulty lock
     missing = ScopeReadiness.chapters_needing_generation(schedule)
 
     Enum.each(missing, fn chapter_id ->
@@ -257,6 +260,23 @@ defmodule FunSheep.Assessments do
         chapter_id: chapter_id,
         count: 10,
         mode: "from_material"
+      )
+    end)
+
+    # (b) chapters that pass the total gate but are depleted at a specific
+    # difficulty level — generate with a difficulty lock so the targeted
+    # bucket is filled, not just any questions
+    missing_set = MapSet.new(missing)
+
+    schedule.course_id
+    |> ScopeReadiness.chapters_missing_difficulty(chapter_ids)
+    |> Enum.reject(fn {ch_id, _diff} -> MapSet.member?(missing_set, ch_id) end)
+    |> Enum.each(fn {chapter_id, difficulty} ->
+      AIQuestionGenerationWorker.enqueue(schedule.course_id,
+        chapter_id: chapter_id,
+        count: 10,
+        mode: "from_material",
+        difficulty: difficulty
       )
     end)
 

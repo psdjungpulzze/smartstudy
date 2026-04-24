@@ -37,11 +37,17 @@ defmodule FunSheep.Assessments.ScopeReadiness do
 
   import Ecto.Query
 
-  alias FunSheep.{Courses, Repo}
+  alias FunSheep.{Courses, Questions, Repo}
   alias FunSheep.Assessments.TestSchedule
   alias FunSheep.Questions.Question
 
   @min_questions_per_chapter 3
+  # Minimum questions per chapter per difficulty level before that bucket is
+  # considered adequately supplied. Below this, `chapters_missing_difficulty/2`
+  # will flag it for targeted generation.
+  @min_questions_per_difficulty 3
+
+  @all_difficulties [:easy, :medium, :hard]
 
   @adaptive_classifications [:ai_classified, :admin_reviewed]
   @student_visible [:passed]
@@ -116,6 +122,28 @@ defmodule FunSheep.Assessments.ScopeReadiness do
           Map.get(counts, id, 0) < @min_questions_per_chapter
         end)
     end
+  end
+
+  @doc """
+  Returns `[{chapter_id, difficulty}]` pairs for which the chapter has fewer
+  than `@min_questions_per_difficulty` student-visible, adaptive-eligible
+  questions at that difficulty level.
+
+  Used by `Assessments.ensure_generation_queued/1` to fire targeted per-difficulty
+  generation so every chapter builds adequate supply at all three levels (easy,
+  medium, hard) — not just in total.
+  """
+  @spec chapters_missing_difficulty(binary(), [binary()]) :: [{binary(), atom()}]
+  def chapters_missing_difficulty(_course_id, []), do: []
+
+  def chapters_missing_difficulty(course_id, chapter_ids) do
+    counts = Questions.counts_by_chapter_and_difficulty(course_id, chapter_ids)
+
+    for ch_id <- chapter_ids, diff <- @all_difficulties do
+      {ch_id, diff, Map.get(counts, {ch_id, diff}, 0)}
+    end
+    |> Enum.filter(fn {_ch, _diff, count} -> count < @min_questions_per_difficulty end)
+    |> Enum.map(fn {ch_id, diff, _} -> {ch_id, diff} end)
   end
 
   @doc """
