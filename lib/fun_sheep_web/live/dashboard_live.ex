@@ -188,6 +188,11 @@ defmodule FunSheepWeb.DashboardLive do
         />
       </div>
 
+      <%!-- ── Empty State: No Tests (above the fold) ── --%>
+      <div :if={!@primary_test} class="animate-slide-up">
+        <.empty_state course_count={@course_count} gamification={@gamification} />
+      </div>
+
       <%!-- ── Flow A — usage meter + Ask card + waiting state (§4) ── --%>
       <div class="animate-slide-up">
         <.live_component
@@ -223,11 +228,6 @@ defmodule FunSheepWeb.DashboardLive do
         <div class="space-y-2">
           <.test_row :for={t <- @other_tests} test={t} pinned_id={@pinned_test_id} />
         </div>
-      </div>
-
-      <%!-- ── Empty State: No Tests ── --%>
-      <div :if={!@primary_test} class="animate-slide-up">
-        <.empty_state course_count={@course_count} gamification={@gamification} />
       </div>
 
       <%!-- ── Just This: Quick Review (anxiety reducer) ── --%>
@@ -673,21 +673,25 @@ defmodule FunSheepWeb.DashboardLive do
         {if @course_count == 0, do: "Welcome to Fun Sheep!", else: "No upcoming tests"}
       </h3>
       <p class="text-gray-500 text-sm mt-1 mb-5 max-w-sm mx-auto">
-        Connect your school's LMS — Google Classroom or Canvas — and we'll automatically import your upcoming tests. Or add a test manually if your school isn't connected.
+        Tell us about a test you're studying for and we'll help you get ready. Or connect Google Classroom or Canvas to auto-import upcoming tests.
       </p>
 
       <div class="flex flex-col sm:flex-row gap-2 justify-center items-stretch sm:items-center max-w-md mx-auto">
         <.link
-          navigate={~p"/integrations"}
+          navigate={
+            if @course_count == 0,
+              do: ~p"/courses/new?flow=test",
+              else: ~p"/courses"
+          }
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-bold px-6 py-3 sm:py-2.5 rounded-full shadow-md text-sm transition-colors touch-target inline-flex items-center justify-center gap-2"
         >
-          <.icon name="hero-link" class="w-4 h-4" /> Connect School LMS
+          <.icon name="hero-plus" class="w-4 h-4" /> Add a test
         </.link>
         <.link
-          navigate={~p"/courses"}
-          class="bg-white hover:bg-gray-50 text-gray-700 font-bold px-6 py-3 sm:py-2.5 rounded-full border border-gray-200 text-sm transition-colors touch-target inline-flex items-center justify-center"
+          navigate={~p"/integrations"}
+          class="bg-white hover:bg-gray-50 text-gray-700 font-bold px-6 py-3 sm:py-2.5 rounded-full border border-gray-200 text-sm transition-colors touch-target inline-flex items-center justify-center gap-2"
         >
-          {if @course_count == 0, do: "Add a course manually", else: "Create a test manually"}
+          <.icon name="hero-link" class="w-4 h-4" /> Connect School LMS
         </.link>
       </div>
     </div>
