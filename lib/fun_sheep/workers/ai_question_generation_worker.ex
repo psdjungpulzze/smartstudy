@@ -780,6 +780,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   defp finalize_course(course_id, new_count) do
     course = Courses.get_course!(course_id)
     total = Questions.count_questions_by_course(course_id)
+    pending = Questions.count_pending_by_course(course_id)
 
     {status, step} =
       cond do
@@ -790,6 +791,22 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
           {"failed",
            "Question generation failed — AI service unavailable. Please try again later."}
+
+        pending == 0 ->
+          # No pending questions (either new_count == 0 or all newly inserted
+          # questions were immediately validated). Don't re-enter "validating"
+          # — that would trap the course forever if validation never fires.
+          # If the course was already "ready", keep it; otherwise flip to "ready"
+          # now that there's nothing left to validate.
+          if course.processing_status == "ready" do
+            {"ready", "#{total} questions ready"}
+          else
+            Logger.info(
+              "[AIGen] Course #{course_id}: 0 pending after generation (#{new_count} new), marking ready"
+            )
+
+            {"ready", "#{total} questions ready"}
+          end
 
         true ->
           # Don't flip to ready yet — validation worker will do that once every

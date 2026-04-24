@@ -265,6 +265,15 @@ defmodule FunSheep.Questions do
   `%{course_id => pending_count}` — course_ids with zero pending are
   omitted. Powers the admin "Requeue pending validations" action.
   """
+  def count_pending_by_course(course_id) do
+    from(q in Question,
+      where: q.course_id == ^course_id and q.validation_status == :pending,
+      select: count(q.id)
+    )
+    |> Repo.one()
+    |> Kernel.||(0)
+  end
+
   @spec count_pending_by_courses([String.t()]) :: %{String.t() => non_neg_integer()}
   def count_pending_by_courses([]), do: %{}
 
@@ -958,6 +967,23 @@ defmodule FunSheep.Questions do
   end
 
   @doc """
+  Returns the subset of the given section IDs that have at least one
+  student-visible (passed) question. Used by ReadinessCalculator to
+  distinguish practicable sections from empty ones.
+  """
+  def sections_with_questions([]), do: MapSet.new()
+
+  def sections_with_questions(section_ids) when is_list(section_ids) do
+    from(q in Question,
+      where: q.section_id in ^section_ids and q.validation_status in ^@student_visible,
+      select: q.section_id,
+      distinct: true
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  @doc """
   Counts attempts for a user across multiple chapters in a single query.
   """
   def count_attempts_in_chapters(_user_role_id, []), do: 0
@@ -1028,6 +1054,12 @@ defmodule FunSheep.Questions do
           attempt.question_id,
           attempt.is_correct,
           attempt.time_taken_seconds
+        )
+
+        Phoenix.PubSub.broadcast(
+          FunSheep.PubSub,
+          "student_progress:#{attempt.user_role_id}",
+          :readiness_updated
         )
 
         {:ok, attempt}

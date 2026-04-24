@@ -36,7 +36,7 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
       states: [:available, :scheduled, :executing]
     ]
 
-  alias FunSheep.{Courses, Questions}
+  alias FunSheep.{Content, Courses, Questions}
 
   import Ecto.Query
   require Logger
@@ -66,8 +66,12 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
   end
 
   defp audit_all_courses do
+    # Include both "ready" and "validating" courses. A course stuck in
+    # "validating" with 0 pending questions will never self-recover via
+    # finalize_after_validation — the audit must be able to reach it so
+    # generation can eventually complete and push it back to "ready".
     from(c in FunSheep.Courses.Course,
-      where: c.processing_status == "ready",
+      where: c.processing_status in ["ready", "validating"],
       select: c.id
     )
     |> FunSheep.Repo.all()
@@ -94,6 +98,14 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
         end
         |> Enum.filter(fn {_ch, _d, _current, deficit} -> deficit > 0 end)
 
+      # Determine generation mode once per course:
+      # - "from_material" when OCR-completed textbook material exists
+      # - "from_curriculum" otherwise (knowledge-based, always available)
+      # This prevents chapters without uploaded material from silently
+      # generating 0 questions every audit cycle.
+      generation_mode =
+        if course_has_grounding_material?(course_id), do: "from_material", else: "from_curriculum"
+
       Enum.each(gaps, fn {ch, d, current, deficit} ->
         # Cap at @regen_batch so a chapter with 100-question deficit
         # doesn't fire 100 generation jobs at once. Subsequent audit
@@ -103,18 +115,26 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
 
         Logger.info(
           "[CoverageAudit] course=#{course_id} chapter=#{ch.name} difficulty=#{d}" <>
-            " current=#{current} target=#{@target_per_tuple} enqueuing=#{batch}"
+            " current=#{current} target=#{@target_per_tuple} enqueuing=#{batch} mode=#{generation_mode}"
         )
 
         FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
           chapter_id: ch.id,
           count: batch,
-          mode: "from_material",
+          mode: generation_mode,
           difficulty: d
         )
       end)
 
       :ok
     end
+  end
+
+  defp course_has_grounding_material?(course_id) do
+    Content.list_materials_by_course(course_id)
+    |> Enum.any?(fn m ->
+      m.ocr_status == :completed and
+        FunSheep.Workers.MaterialClassificationWorker.route(m) in [:ground, :extract_and_ground]
+    end)
   end
 end

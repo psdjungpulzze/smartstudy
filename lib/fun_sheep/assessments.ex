@@ -411,7 +411,10 @@ defmodule FunSheep.Assessments do
           aggregate_score: scores.aggregate_score,
           chapter_scores: scores.chapter_scores,
           topic_scores: scores.topic_scores,
-          skill_scores: scores.skill_scores
+          skill_scores: scores.skill_scores,
+          coverage_pct: scores.coverage_pct,
+          empty_section_ids: scores.empty_section_ids,
+          full_test_readiness: scores.full_test_readiness
         }
     end
   end

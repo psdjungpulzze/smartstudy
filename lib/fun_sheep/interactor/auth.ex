@@ -5,6 +5,11 @@ defmodule FunSheep.Interactor.Auth do
   Exchanges client_id/client_secret for an access_token, caches the token
   in GenServer state, and refreshes before expiry.
 
+  Fast path: `get_token/0` reads from ETS first so concurrent callers
+  (e.g. multiple Oban workers on the :ai queue) bypass the GenServer
+  entirely when a valid token is already cached.  Only token refresh — a
+  rare, serialized event — goes through the GenServer.
+
   In mock mode (default for dev/test), returns a static mock token
   without making any HTTP requests.
   """
@@ -13,7 +18,12 @@ defmodule FunSheep.Interactor.Auth do
 
   require Logger
 
+  @table :interactor_auth_cache
   @refresh_buffer_seconds 120
+  # Generous timeout: only hit during token refresh (HTTP round-trip). 5 s
+  # was too tight when Interactor auth is under load; 30 s gives the HTTP
+  # call headroom without hanging callers indefinitely.
+  @call_timeout 30_000
 
   # --- Public API ---
 
@@ -24,6 +34,8 @@ defmodule FunSheep.Interactor.Auth do
   @doc """
   Returns `{:ok, token}` or `{:error, reason}`.
 
+  Reads from ETS first (no GenServer roundtrip when token is fresh).
+  Falls back to GenServer only for refresh.
   In mock mode, always returns `{:ok, "mock_interactor_token"}`.
   """
   @spec get_token() :: {:ok, String.t()} | {:error, term()}
@@ -31,7 +43,10 @@ defmodule FunSheep.Interactor.Auth do
     if mock_mode?() do
       {:ok, "mock_interactor_token"}
     else
-      GenServer.call(__MODULE__, :get_token)
+      case ets_get_valid_token() do
+        {:ok, token} -> {:ok, token}
+        :expired -> GenServer.call(__MODULE__, :get_token, @call_timeout)
+      end
     end
   end
 
@@ -39,34 +54,43 @@ defmodule FunSheep.Interactor.Auth do
 
   @impl true
   def init(_opts) do
-    {:ok, %{token: nil, expires_at: nil}}
+    :ets.new(@table, [:named_table, :public, read_concurrency: true])
+    {:ok, %{}}
   end
 
   @impl true
   def handle_call(:get_token, _from, state) do
-    case state do
-      %{token: token, expires_at: exp} when not is_nil(token) ->
-        if DateTime.compare(exp, DateTime.utc_now()) == :gt do
-          {:reply, {:ok, token}, state}
-        else
-          refresh_and_reply(state)
-        end
+    # Re-check ETS in case another concurrent caller already refreshed.
+    case ets_get_valid_token() do
+      {:ok, token} ->
+        {:reply, {:ok, token}, state}
 
-      _ ->
-        refresh_and_reply(state)
+      :expired ->
+        case fetch_token() do
+          {:ok, token, expires_at} ->
+            :ets.insert(@table, {:token, token, expires_at})
+            {:reply, {:ok, token}, state}
+
+          error ->
+            Logger.error("Failed to fetch Interactor token: #{inspect(error)}")
+            {:reply, error, state}
+        end
     end
   end
 
   # --- Private Helpers ---
 
-  defp refresh_and_reply(state) do
-    case fetch_token() do
-      {:ok, token, expires_at} ->
-        {:reply, {:ok, token}, %{state | token: token, expires_at: expires_at}}
+  defp ets_get_valid_token do
+    case :ets.lookup(@table, :token) do
+      [{:token, token, expires_at}] ->
+        if DateTime.compare(expires_at, DateTime.utc_now()) == :gt do
+          {:ok, token}
+        else
+          :expired
+        end
 
-      error ->
-        Logger.error("Failed to fetch Interactor token: #{inspect(error)}")
-        {:reply, error, state}
+      [] ->
+        :expired
     end
   end
 

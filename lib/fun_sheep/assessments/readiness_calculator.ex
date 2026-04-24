@@ -7,17 +7,26 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
 
     * `chapter_scores` — preserved for backward compatibility (correct/total
       per chapter).
-    * `skill_scores` — per-section `%{correct, total, score, status}` where
-      status ∈ :insufficient_data | :probing | :weak | :mastered.
-    * `aggregate_score` — weakest-N-average of skill scores (lowest 3 by
-      default) when any skill has data; otherwise a chapter-based fallback
-      so legacy callers keep working.
+    * `skill_scores` — per-section `%{correct, total, score, status}` keyed
+      by section ID. Only includes sections that have ≥1 student-visible
+      question (practicable sections). Sections with 0 questions are tracked
+      separately in `empty_section_ids` so they never block 100%.
+    * `aggregate_score` — weakest-N-average of skills with ≥ MIN_SIGNAL
+      attempts. Skills with fewer attempts are "still probing" and do not
+      drag the aggregate down when a student first starts a topic.
+    * `coverage_pct` — (practicable sections / total in-scope sections) × 100.
+    * `full_test_readiness` — aggregate_score × (coverage_pct / 100). A
+      conservative estimate of true preparedness when some topics lack
+      questions.
   """
 
   alias FunSheep.{Courses, Questions}
   alias FunSheep.Assessments.Mastery
 
   @weakest_n 3
+  # Minimum attempts before a skill enters the weakest-N pool. Prevents a
+  # student's aggregate from dropping the moment they start a fresh topic.
+  @min_signal_attempts 3
 
   def calculate(user_role_id, test_schedule) do
     chapter_ids = get_in(test_schedule.scope, ["chapter_ids"]) || []
@@ -27,14 +36,21 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
         {ch_id, calculate_chapter_score(user_role_id, ch_id)}
       end)
 
-    skill_scores = calculate_skill_scores(user_role_id, chapter_ids)
+    {skill_scores, empty_section_ids, coverage_pct} =
+      calculate_skill_scores(user_role_id, chapter_ids)
+
     aggregate = aggregate_score(skill_scores, chapter_scores)
+
+    full_test_readiness = Float.round(aggregate * coverage_pct / 100.0, 1)
 
     %{
       chapter_scores: chapter_scores,
       topic_scores: %{},
       skill_scores: skill_scores,
-      aggregate_score: Float.round(aggregate, 1)
+      empty_section_ids: empty_section_ids,
+      coverage_pct: Float.round(coverage_pct, 1),
+      aggregate_score: Float.round(aggregate, 1),
+      full_test_readiness: full_test_readiness
     }
   end
 
@@ -43,6 +59,8 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
   to honor I-8 (no 80% stopping point).
   """
   def all_skills_mastered?(%{skill_scores: skill_scores}) when is_map(skill_scores) do
+    # skill_scores only contains practicable sections (those with questions),
+    # so this can legitimately reach true when all available content is mastered.
     skill_scores != %{} and
       Enum.all?(skill_scores, fn {_id, data} -> skill_status(data) == :mastered end)
   end
@@ -113,40 +131,76 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
     if total > 0, do: Float.round(correct / total * 100, 1), else: 0.0
   end
 
-  defp calculate_skill_scores(_user_role_id, []), do: %{}
+  # Returns {skill_scores, empty_section_ids, coverage_pct}.
+  # skill_scores only covers practicable sections (≥1 passed question).
+  # empty_section_ids lists sections the student cannot practice yet.
+  defp calculate_skill_scores(_user_role_id, []), do: {%{}, [], 100.0}
 
   defp calculate_skill_scores(user_role_id, chapter_ids) do
-    sections = Courses.list_sections_by_chapters(chapter_ids)
+    all_sections = Courses.list_sections_by_chapters(chapter_ids)
+    total_count = length(all_sections)
 
-    Enum.into(sections, %{}, fn section ->
-      attempts = Questions.list_section_attempts(user_role_id, section.id)
-      correct = Enum.count(attempts, & &1.is_correct)
-      total = length(attempts)
-      score = if total > 0, do: Float.round(correct / total * 100, 1), else: 0.0
-      status = Mastery.status(attempts)
+    with_questions =
+      all_sections
+      |> Enum.map(& &1.id)
+      |> Questions.sections_with_questions()
 
-      {section.id,
-       %{
-         correct: correct,
-         total: total,
-         score: score,
-         status: status,
-         chapter_id: section.chapter_id
-       }}
-    end)
+    {practicable, empty} =
+      Enum.split_with(all_sections, &MapSet.member?(with_questions, &1.id))
+
+    skill_scores =
+      Enum.into(practicable, %{}, fn section ->
+        attempts = Questions.list_section_attempts(user_role_id, section.id)
+        correct = Enum.count(attempts, & &1.is_correct)
+        total = length(attempts)
+        score = if total > 0, do: Float.round(correct / total * 100, 1), else: 0.0
+        status = Mastery.status(attempts)
+
+        {section.id,
+         %{
+           correct: correct,
+           total: total,
+           score: score,
+           status: status,
+           chapter_id: section.chapter_id
+         }}
+      end)
+
+    empty_section_ids = Enum.map(empty, & &1.id)
+
+    coverage_pct =
+      if total_count == 0,
+        do: 100.0,
+        else: length(practicable) / total_count * 100.0
+
+    {skill_scores, empty_section_ids, coverage_pct}
   end
 
+  # Skills with fewer than @min_signal_attempts do not enter the weakest-N
+  # pool — they are still being "probed" and shouldn't crash the aggregate.
   defp aggregate_score(skill_scores, chapter_scores) do
-    scored_skills =
-      skill_scores |> Map.values() |> Enum.filter(&(&1.total > 0))
+    all_attempted = skill_scores |> Map.values() |> Enum.filter(&(&1.total > 0))
+    signal_skills = Enum.filter(all_attempted, &(&1.total >= @min_signal_attempts))
 
     cond do
-      scored_skills != [] ->
-        if Enum.all?(scored_skills, &(&1.status == :mastered)) and
-             map_size(skill_scores) == Enum.count(scored_skills, &(&1.status == :mastered)) do
+      all_attempted != [] ->
+        all_mastered =
+          Enum.all?(skill_scores, fn {_id, data} -> skill_status(data) == :mastered end)
+
+        if all_mastered and map_size(skill_scores) > 0 do
           100.0
         else
-          weakest_n_average(scored_skills)
+          case signal_skills do
+            [] ->
+              # Every attempted skill is still in the probing window; show a
+              # gentle non-zero hint so the bar visibly responds to early work.
+              all_attempted
+              |> Enum.map(& &1.score)
+              |> then(fn scores -> Enum.sum(scores) / length(scores) / 2 end)
+
+            skills ->
+              weakest_n_average(skills)
+          end
         end
 
       chapter_scores == %{} ->

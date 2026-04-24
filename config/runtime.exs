@@ -220,6 +220,10 @@ if config_env() == :prod do
          # Every 30min — recover discovered_sources stuck in scraping /
          # failed / unrun-discovered (Phase 5).
          {"*/30 * * * *", FunSheep.Workers.DiscoveredSourceSweeperWorker},
+         # Every 4 hours — re-enqueue classification for questions stuck at
+         # :uncategorized with no live classification job. Mirrors the
+         # StuckValidationSweeperWorker pattern for classification.
+         {"0 */4 * * *", FunSheep.Workers.StuckClassificationSweeperWorker},
          # Nightly at 03:00 UTC — coverage audit per (course, chapter,
          # difficulty); fires demand-driven generation to hold a
          # target supply of fresh questions at each difficulty.
