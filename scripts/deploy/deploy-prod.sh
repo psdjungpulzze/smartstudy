@@ -96,6 +96,10 @@ fi
 # Canonical check lives in lib/mix/tasks/funsheep.deploy.preflight.ex so CI
 # and local deploy share one source of truth for required variables.
 info "Preflight: validating $ENV_FILE..."
+# Use asdf-managed mix if available (ensures correct Elixir/Erlang per .tool-versions)
+if [ -d "${HOME}/.asdf/shims" ]; then
+  export PATH="${HOME}/.asdf/bin:${HOME}/.asdf/shims:${PATH}"
+fi
 mix funsheep.deploy.preflight --env-file "$ENV_FILE" \
   || fail "Preflight failed — fix the issues above before deploying."
 
