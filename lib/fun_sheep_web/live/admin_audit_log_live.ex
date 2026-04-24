@@ -61,48 +61,50 @@ defmodule FunSheepWeb.AdminAuditLogLive do
       </div>
 
       <div class="bg-white rounded-2xl shadow-md overflow-hidden">
-        <table class="w-full text-sm">
-          <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
-            <tr>
-              <th class="text-left px-4 py-3">When</th>
-              <th class="text-left px-4 py-3">Actor</th>
-              <th class="text-left px-4 py-3">Action</th>
-              <th class="text-left px-4 py-3">Target</th>
-              <th class="text-left px-4 py-3">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={log <- @logs} class="border-t border-[#F5F5F7] align-top">
-              <td class="px-4 py-3 text-[#8E8E93] whitespace-nowrap">
-                {Calendar.strftime(log.inserted_at, "%Y-%m-%d %H:%M:%S")}
-              </td>
-              <td class="px-4 py-3 font-medium text-[#1C1C1E]">
-                {log.actor_label}
-              </td>
-              <td class="px-4 py-3">
-                <code class="px-2 py-0.5 rounded-md bg-[#F5F5F7] text-[#1C1C1E] text-xs">
-                  {log.action}
-                </code>
-              </td>
-              <td class="px-4 py-3 text-[#1C1C1E]">
-                <div :if={log.target_type} class="text-xs text-[#8E8E93]">
-                  {log.target_type}
-                </div>
-                <div :if={log.target_id}>{log.target_id}</div>
-                <div :if={is_nil(log.target_id)} class="text-[#8E8E93]">—</div>
-              </td>
-              <td class="px-4 py-3 text-[#8E8E93] text-xs">
-                <pre :if={log.metadata != %{}} class="whitespace-pre-wrap">{Jason.encode!(log.metadata, pretty: true)}</pre>
-                <span :if={log.metadata == %{}}>—</span>
-              </td>
-            </tr>
-            <tr :if={@logs == []}>
-              <td colspan="5" class="px-4 py-10 text-center text-[#8E8E93]">
-                No entries yet.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm min-w-[680px]">
+            <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
+              <tr>
+                <th class="text-left px-4 py-3">When</th>
+                <th class="text-left px-4 py-3">Actor</th>
+                <th class="text-left px-4 py-3">Action</th>
+                <th class="text-left px-4 py-3">Target</th>
+                <th class="text-left px-4 py-3">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={log <- @logs} class="border-t border-[#F5F5F7] align-top">
+                <td class="px-4 py-3 text-[#8E8E93] whitespace-nowrap">
+                  {Calendar.strftime(log.inserted_at, "%Y-%m-%d %H:%M:%S")}
+                </td>
+                <td class="px-4 py-3 font-medium text-[#1C1C1E]">
+                  {log.actor_label}
+                </td>
+                <td class="px-4 py-3">
+                  <code class="px-2 py-0.5 rounded-md bg-[#F5F5F7] text-[#1C1C1E] text-xs">
+                    {log.action}
+                  </code>
+                </td>
+                <td class="px-4 py-3 text-[#1C1C1E]">
+                  <div :if={log.target_type} class="text-xs text-[#8E8E93]">
+                    {log.target_type}
+                  </div>
+                  <div :if={log.target_id}>{log.target_id}</div>
+                  <div :if={is_nil(log.target_id)} class="text-[#8E8E93]">—</div>
+                </td>
+                <td class="px-4 py-3 text-[#8E8E93] text-xs">
+                  <pre :if={log.metadata != %{}} class="whitespace-pre-wrap">{Jason.encode!(log.metadata, pretty: true)}</pre>
+                  <span :if={log.metadata == %{}}>—</span>
+                </td>
+              </tr>
+              <tr :if={@logs == []}>
+                <td colspan="5" class="px-4 py-10 text-center text-[#8E8E93]">
+                  No entries yet.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="mt-4 flex items-center justify-between text-sm text-[#8E8E93]">

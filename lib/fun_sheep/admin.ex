@@ -232,6 +232,18 @@ defmodule FunSheep.Admin do
     {:ok, deleted_count}
   end
 
+  @doc "Updates editable course fields (name, subject, grade, owner). Audit-logged."
+  def update_course(%Course{} = course, attrs, actor) do
+    with {:ok, updated} <- Courses.update_course(course, attrs) do
+      record_actor_event(actor, "course.update", course, %{
+        "name" => course.name,
+        "attrs" => Map.take(attrs, [:name, :subject, :grade, :created_by_id])
+      })
+
+      {:ok, updated}
+    end
+  end
+
   @doc "Deletes a course and every dependent record. Irreversible."
   def delete_course(%Course{} = course, actor) do
     with {:ok, deleted} <- Courses.delete_course(course) do

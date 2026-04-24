@@ -144,75 +144,77 @@ defmodule FunSheepWeb.AdminMaterialsLive do
       </div>
 
       <div class="bg-white rounded-2xl shadow-md overflow-hidden">
-        <table class="w-full text-sm">
-          <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
-            <tr>
-              <th class="text-left px-4 py-3">File</th>
-              <th class="text-left px-4 py-3">Uploaded by</th>
-              <th class="text-left px-4 py-3">Course</th>
-              <th class="text-left px-4 py-3">OCR</th>
-              <th class="text-left px-4 py-3">Uploaded</th>
-              <th class="text-right px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={m <- @materials} class="border-t border-[#F5F5F7]">
-              <td class="px-4 py-3 font-medium text-[#1C1C1E]">
-                {m.file_name}
-                <div :if={m.ocr_error} class="text-xs text-[#FF3B30] mt-0.5">
-                  {String.slice(m.ocr_error, 0, 120)}
-                </div>
-              </td>
-              <td class="px-4 py-3 text-[#8E8E93]">
-                <%= if m.user_role do %>
-                  {m.user_role.email}
-                <% else %>
-                  —
-                <% end %>
-              </td>
-              <td class="px-4 py-3 text-[#1C1C1E]">
-                <%= if m.course do %>
-                  <.link
-                    navigate={~p"/courses/#{m.course_id}"}
-                    class="text-[#4CD964] hover:text-[#3DBF55]"
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm min-w-[720px]">
+            <thead class="bg-[#F5F5F7] text-[#8E8E93] uppercase text-xs">
+              <tr>
+                <th class="text-left px-4 py-3">File</th>
+                <th class="text-left px-4 py-3">Uploaded by</th>
+                <th class="text-left px-4 py-3">Course</th>
+                <th class="text-left px-4 py-3">OCR</th>
+                <th class="text-left px-4 py-3">Uploaded</th>
+                <th class="text-right px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={m <- @materials} class="border-t border-[#F5F5F7]">
+                <td class="px-4 py-3 font-medium text-[#1C1C1E]">
+                  {m.file_name}
+                  <div :if={m.ocr_error} class="text-xs text-[#FF3B30] mt-0.5">
+                    {String.slice(m.ocr_error, 0, 120)}
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-[#8E8E93]">
+                  <%= if m.user_role do %>
+                    {m.user_role.email}
+                  <% else %>
+                    —
+                  <% end %>
+                </td>
+                <td class="px-4 py-3 text-[#1C1C1E]">
+                  <%= if m.course do %>
+                    <.link
+                      navigate={~p"/courses/#{m.course_id}"}
+                      class="text-[#4CD964] hover:text-[#3DBF55]"
+                    >
+                      {m.course.name}
+                    </.link>
+                  <% else %>
+                    <span class="text-[#8E8E93]">—</span>
+                  <% end %>
+                </td>
+                <td class="px-4 py-3"><.status_badge status={m.ocr_status} /></td>
+                <td class="px-4 py-3 text-[#8E8E93] whitespace-nowrap">
+                  {Calendar.strftime(m.inserted_at, "%Y-%m-%d")}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    phx-click="rerun"
+                    phx-value-id={m.id}
+                    class="px-3 py-1 rounded-full text-xs font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7] mr-2"
                   >
-                    {m.course.name}
-                  </.link>
-                <% else %>
-                  <span class="text-[#8E8E93]">—</span>
-                <% end %>
-              </td>
-              <td class="px-4 py-3"><.status_badge status={m.ocr_status} /></td>
-              <td class="px-4 py-3 text-[#8E8E93] whitespace-nowrap">
-                {Calendar.strftime(m.inserted_at, "%Y-%m-%d")}
-              </td>
-              <td class="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  phx-click="rerun"
-                  phx-value-id={m.id}
-                  class="px-3 py-1 rounded-full text-xs font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7] mr-2"
-                >
-                  Re-run OCR
-                </button>
-                <button
-                  type="button"
-                  phx-click="delete"
-                  phx-value-id={m.id}
-                  data-confirm="Delete this material and its OCR output? Cannot be undone."
-                  class="px-3 py-1 rounded-full text-xs font-medium text-[#FF3B30] border border-[#FF3B30]/30 hover:bg-[#FFE5E3]"
-                >
-                  Delete
-                </button>
-              </td>
-            </tr>
-            <tr :if={@materials == []}>
-              <td colspan="6" class="px-4 py-10 text-center text-[#8E8E93]">
-                No materials match.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                    Re-run OCR
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="delete"
+                    phx-value-id={m.id}
+                    data-confirm="Delete this material and its OCR output? Cannot be undone."
+                    class="px-3 py-1 rounded-full text-xs font-medium text-[#FF3B30] border border-[#FF3B30]/30 hover:bg-[#FFE5E3]"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+              <tr :if={@materials == []}>
+                <td colspan="6" class="px-4 py-10 text-center text-[#8E8E93]">
+                  No materials match.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="mt-4 flex items-center justify-between text-sm text-[#8E8E93]">
