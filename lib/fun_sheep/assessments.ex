@@ -459,6 +459,18 @@ defmodule FunSheep.Assessments do
     end
   end
 
+  @doc """
+  Returns the timestamp of the most recent question attempt by `user_role_id`,
+  or `nil` if the user has never answered a question.
+  """
+  def last_active(user_role_id) do
+    from(qa in QuestionAttempt,
+      where: qa.user_role_id == ^user_role_id,
+      select: max(qa.inserted_at)
+    )
+    |> Repo.one()
+  end
+
   ## ── Target Score (Spec §6.1) ─────────────────────────────────────────────
 
   @doc """

@@ -1,40 +1,36 @@
 defmodule FunSheepWeb.TeacherDashboardLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.Accounts
+  alias FunSheep.{Accounts, Assessments}
 
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_user
 
-    students =
+    {user_role_id, students} =
       case Accounts.get_user_role_by_interactor_id(user["interactor_user_id"]) do
         nil ->
-          []
+          {nil, []}
 
         user_role ->
-          Accounts.list_students_for_guardian(user_role.id)
-          |> Enum.map(fn sg ->
-            student = sg.student
+          students =
+            user_role.id
+            |> Accounts.list_students_for_guardian()
+            |> Enum.map(fn sg -> enrich_student(sg.student) end)
 
-            %{
-              id: student.id,
-              name: student.display_name || student.email,
-              email: student.email,
-              grade: student.grade,
-              readiness_score: nil,
-              last_active: nil
-            }
-          end)
+          {user_role.id, students}
       end
 
     socket =
       socket
       |> assign(
         page_title: "Teacher Dashboard",
+        user_role_id: user_role_id,
         students: students,
         sort_by: :name,
-        sort_dir: :asc
+        sort_dir: :asc,
+        expanded_student_id: nil,
+        expanded_concepts: []
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "teacher_dashboard",
@@ -49,12 +45,12 @@ defmodule FunSheepWeb.TeacherDashboardLive do
           %{
             emoji: "📈",
             title: "Sort + filter",
-            body: "Sort by readiness to find students who need a check-in."
+            body: "Sort by readiness to find students who need attention."
           },
           %{
-            emoji: "✉️",
-            title: "Invite more",
-            body: "Use Guardians to invite more students to your class."
+            emoji: "🔍",
+            title: "Drill down",
+            body: "Click any student row to see their concept-level breakdown."
           }
         ]
       )
@@ -80,42 +76,214 @@ defmodule FunSheepWeb.TeacherDashboardLive do
     {:noreply, assign(socket, students: sorted, sort_by: :readiness, sort_dir: new_dir)}
   end
 
+  def handle_event("toggle_student", %{"id" => student_id}, socket) do
+    if socket.assigns.expanded_student_id == student_id do
+      {:noreply, assign(socket, expanded_student_id: nil, expanded_concepts: [])}
+    else
+      student = Enum.find(socket.assigns.students, &(&1.id == student_id))
+      concepts = if student && student.test_schedule_id, do: load_concepts(student), else: []
+      {:noreply, assign(socket, expanded_student_id: student_id, expanded_concepts: concepts)}
+    end
+  end
+
+  # --- Data loading ----------------------------------------------------------
+
+  defp enrich_student(user_role) do
+    primary_test = Assessments.primary_test(user_role.id)
+    readiness = if primary_test, do: Assessments.latest_readiness(user_role.id, primary_test.id)
+    last_active = Assessments.last_active(user_role.id)
+
+    {readiness_score, weak_count, state, test_name, test_schedule_id} =
+      case readiness do
+        nil ->
+          {nil, 0, :untested, primary_test && primary_test.name, primary_test && primary_test.id}
+
+        r ->
+          score = round(r.aggregate_score)
+          weak = count_weak_concepts(r)
+          st = readiness_state(r)
+          {score, weak, st, primary_test.name, primary_test.id}
+      end
+
+    %{
+      id: user_role.id,
+      name: user_role.display_name || user_role.email,
+      email: user_role.email,
+      grade: user_role.grade,
+      readiness_score: readiness_score,
+      weak_count: weak_count,
+      state: state,
+      test_name: test_name,
+      test_schedule_id: test_schedule_id,
+      last_active: last_active
+    }
+  end
+
+  defp load_concepts(%{id: student_id, test_schedule_id: schedule_id}) do
+    Assessments.topic_mastery_map(student_id, schedule_id)
+    |> Enum.flat_map(fn chapter ->
+      Enum.map(chapter.topics, fn t ->
+        Map.put(t, :chapter_name, chapter.chapter_name)
+      end)
+    end)
+    |> Enum.sort_by(& &1.accuracy)
+  end
+
+  defp count_weak_concepts(nil), do: 0
+
+  defp count_weak_concepts(readiness) do
+    (readiness.skill_scores || %{})
+    |> Map.values()
+    |> Enum.count(fn s -> s[:status] in [:weak, :probing] end)
+  end
+
+  defp readiness_state(nil), do: :untested
+
+  defp readiness_state(readiness) do
+    scores = readiness.skill_scores || %{}
+    tested = Enum.count(scores, fn {_, s} -> s[:status] != :insufficient_data end)
+
+    cond do
+      tested == 0 -> :untested
+      readiness.coverage_pct < 100 -> :in_progress
+      true -> :complete
+    end
+  end
+
+  # --- Helpers ---------------------------------------------------------------
+
   defp toggle_dir(:asc), do: :desc
   defp toggle_dir(:desc), do: :asc
+
+  defp state_label(:untested), do: "Not started"
+  defp state_label(:in_progress), do: "In progress"
+  defp state_label(:complete), do: "Complete"
+
+  defp state_badge(:untested), do: "bg-[#F5F5F7] text-[#8E8E93]"
+  defp state_badge(:in_progress), do: "bg-[#FFF8E1] text-[#FF9500]"
+  defp state_badge(:complete), do: "bg-[#E8F8EB] text-[#4CD964]"
+
+  defp readiness_text_color(score) when score > 70, do: "text-[#4CD964]"
+  defp readiness_text_color(score) when score >= 40, do: "text-[#FF9500]"
+  defp readiness_text_color(_score), do: "text-[#FF3B30]"
+
+  defp concept_status_badge(:mastered), do: {"Ready", "bg-[#E8F8EB] text-[#4CD964]"}
+  defp concept_status_badge(:probing), do: {"Needs Work", "bg-[#FFF8E1] text-[#FF9500]"}
+  defp concept_status_badge(:weak), do: {"Focus Here", "bg-[#FFE5E3] text-[#FF3B30]"}
+  defp concept_status_badge(_), do: {"Not Tested", "bg-[#F5F5F7] text-[#8E8E93]"}
+
+  defp format_last_active(nil), do: "Never"
+
+  defp format_last_active(%DateTime{} = dt) do
+    now = DateTime.utc_now()
+    days = DateTime.diff(now, dt, :day)
+
+    cond do
+      days == 0 -> "Today"
+      days == 1 -> "Yesterday"
+      days < 7 -> "#{days} days ago"
+      days < 30 -> "#{div(days, 7)} weeks ago"
+      true -> "#{div(days, 30)} months ago"
+    end
+  end
+
+  defp format_last_active(%NaiveDateTime{} = ndt) do
+    ndt |> DateTime.from_naive!("Etc/UTC") |> format_last_active()
+  end
+
+  defp class_distribution(students) do
+    Enum.group_by(students, & &1.state)
+    |> Map.new(fn {k, v} -> {k, length(v)} end)
+  end
+
+  defp calculate_avg_readiness(students) do
+    scores = students |> Enum.filter(& &1.readiness_score) |> Enum.map(& &1.readiness_score)
+
+    case scores do
+      [] -> nil
+      scores -> Enum.sum(scores) |> div(length(scores))
+    end
+  end
+
+  defp needs_attention(students) do
+    students
+    |> Enum.filter(fn s ->
+      s.state == :untested or
+        (s.state == :in_progress and s.weak_count > 0) or
+        is_nil(s.last_active) or
+        (s.last_active &&
+           DateTime.diff(DateTime.utc_now(), maybe_utc(s.last_active), :day) > 7)
+    end)
+    |> Enum.sort_by(fn s ->
+      {if(s.state == :untested, do: 0, else: 1), s.weak_count * -1}
+    end)
+    |> Enum.take(5)
+  end
+
+  defp maybe_utc(%DateTime{} = dt), do: dt
+  defp maybe_utc(%NaiveDateTime{} = ndt), do: DateTime.from_naive!(ndt, "Etc/UTC")
+
+  # --- Render ----------------------------------------------------------------
 
   @impl true
   def render(assigns) do
     avg_readiness = calculate_avg_readiness(assigns.students)
-    assigns = assign(assigns, :avg_readiness, avg_readiness)
+    dist = class_distribution(assigns.students)
+    attention = needs_attention(assigns.students)
+    assigns = assign(assigns, avg_readiness: avg_readiness, dist: dist, attention: attention)
 
     ~H"""
     <div>
       <h1 class="text-2xl font-bold text-[#1C1C1E]">Teacher Dashboard</h1>
       <p class="text-[#8E8E93] mt-2">Welcome, {@current_user["display_name"]}</p>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-        <div class="bg-white rounded-2xl shadow-md p-6">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold text-[#1C1C1E]">Total Students</h3>
-            <.icon name="hero-user-group" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
+      <%!-- Class summary cards --%>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+        <div class="bg-white rounded-2xl shadow-md p-5 text-center">
           <p class="text-3xl font-bold text-[#4CD964]">{length(@students)}</p>
+          <p class="text-xs text-[#8E8E93] mt-1">Total Students</p>
         </div>
-
-        <div class="bg-white rounded-2xl shadow-md p-6">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold text-[#1C1C1E]">Average Readiness</h3>
-            <.icon name="hero-chart-bar" class="w-5 h-5 text-[#8E8E93]" />
-          </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 text-center">
           <%= if @avg_readiness do %>
             <p class={"text-3xl font-bold #{readiness_text_color(@avg_readiness)}"}>
               {@avg_readiness}%
             </p>
           <% else %>
-            <p class="text-3xl font-bold text-[#8E8E93]">N/A</p>
+            <p class="text-3xl font-bold text-[#8E8E93]">—</p>
           <% end %>
+          <p class="text-xs text-[#8E8E93] mt-1">Avg Readiness</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 text-center">
+          <p class="text-3xl font-bold text-[#FF9500]">{Map.get(@dist, :in_progress, 0)}</p>
+          <p class="text-xs text-[#8E8E93] mt-1">In Progress</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 text-center">
+          <p class="text-3xl font-bold text-[#FF3B30]">{Map.get(@dist, :untested, 0)}</p>
+          <p class="text-xs text-[#8E8E93] mt-1">Not Started</p>
         </div>
       </div>
+
+      <%!-- Needs attention panel --%>
+      <%= if @attention != [] do %>
+        <div class="bg-[#FFF8E1] border border-[#FFCC00] rounded-2xl p-5 mt-6">
+          <h3 class="text-sm font-semibold text-[#1C1C1E] mb-3 flex items-center gap-2">
+            <.icon name="hero-exclamation-triangle" class="w-4 h-4 text-[#FF9500]" /> Needs Attention
+          </h3>
+          <div class="flex flex-wrap gap-2">
+            <span
+              :for={s <- @attention}
+              class="text-xs bg-white border border-[#E5E5EA] rounded-full px-3 py-1 text-[#1C1C1E]"
+            >
+              {s.name}
+              <%= if s.state == :untested do %>
+                · not started
+              <% else %>
+                · {s.weak_count} weak
+              <% end %>
+            </span>
+          </div>
+        </div>
+      <% end %>
 
       <%= if @students == [] do %>
         <div class="bg-white rounded-2xl shadow-md p-8 mt-8 text-center">
@@ -131,7 +299,7 @@ defmodule FunSheepWeb.TeacherDashboardLive do
           </.link>
         </div>
       <% else %>
-        <div class="flex justify-end mt-6">
+        <div class="flex justify-end mt-6 gap-3">
           <.link
             navigate={~p"/guardians"}
             class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
@@ -140,50 +308,119 @@ defmodule FunSheepWeb.TeacherDashboardLive do
           </.link>
         </div>
 
-        <div class="bg-white rounded-2xl shadow-md mt-6 overflow-hidden">
+        <%!-- Student table --%>
+        <div class="bg-white rounded-2xl shadow-md mt-4 overflow-hidden">
           <table class="w-full">
             <thead>
               <tr class="border-b border-[#E5E5EA]">
-                <th class="text-left px-6 py-4 text-sm font-semibold text-[#1C1C1E]">Name</th>
-                <th class="text-left px-6 py-4 text-sm font-semibold text-[#1C1C1E]">Email</th>
-                <th class="text-left px-6 py-4 text-sm font-semibold text-[#1C1C1E]">Grade</th>
+                <th class="text-left px-6 py-4 text-xs font-semibold text-[#8E8E93] uppercase tracking-wide">
+                  Student
+                </th>
+                <th class="text-left px-6 py-4 text-xs font-semibold text-[#8E8E93] uppercase tracking-wide">
+                  Test
+                </th>
+                <th class="text-left px-6 py-4 text-xs font-semibold text-[#8E8E93] uppercase tracking-wide">
+                  Status
+                </th>
                 <th
-                  class="text-left px-6 py-4 text-sm font-semibold text-[#1C1C1E] cursor-pointer hover:text-[#4CD964]"
+                  class="text-left px-6 py-4 text-xs font-semibold text-[#8E8E93] uppercase tracking-wide cursor-pointer hover:text-[#4CD964]"
                   phx-click="sort"
                   phx-value-field="readiness"
                 >
-                  Readiness Score
+                  Readiness
                   <%= if @sort_by == :readiness do %>
-                    <span class="ml-1">{if @sort_dir == :asc, do: "\u25B2", else: "\u25BC"}</span>
+                    <span class="ml-1">{if @sort_dir == :asc, do: "▲", else: "▼"}</span>
                   <% end %>
                 </th>
-                <th class="text-left px-6 py-4 text-sm font-semibold text-[#1C1C1E]">Last Active</th>
+                <th class="text-left px-6 py-4 text-xs font-semibold text-[#8E8E93] uppercase tracking-wide">
+                  Weak Concepts
+                </th>
+                <th class="text-left px-6 py-4 text-xs font-semibold text-[#8E8E93] uppercase tracking-wide">
+                  Last Active
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr
-                :for={{student, idx} <- Enum.with_index(@students)}
-                class={[
-                  "border-b border-[#E5E5EA] last:border-0",
-                  if(rem(idx, 2) == 1, do: "bg-[#F5F5F7]", else: "bg-white")
-                ]}
-              >
-                <td class="px-6 py-4 text-sm text-[#1C1C1E] font-medium">{student.name}</td>
-                <td class="px-6 py-4 text-sm text-[#8E8E93]">{student.email}</td>
-                <td class="px-6 py-4 text-sm text-[#8E8E93]">{student.grade || "N/A"}</td>
-                <td class="px-6 py-4">
-                  <%= if student.readiness_score do %>
-                    <span class={"text-xs font-medium px-3 py-1 rounded-full #{readiness_badge(student.readiness_score)}"}>
-                      {student.readiness_score}%
+              <tbody :for={student <- @students}>
+                <%!-- Main student row --%>
+                <tr
+                  class="border-b border-[#E5E5EA] hover:bg-[#F5F5F7] cursor-pointer transition-colors"
+                  phx-click="toggle_student"
+                  phx-value-id={student.id}
+                >
+                  <td class="px-6 py-4">
+                    <p class="text-sm font-medium text-[#1C1C1E]">{student.name}</p>
+                    <p class="text-xs text-[#8E8E93]">{student.email}</p>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-[#8E8E93]">
+                    {student.test_name || "—"}
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class={"text-xs font-medium px-3 py-1 rounded-full #{state_badge(student.state)}"}>
+                      {state_label(student.state)}
                     </span>
-                  <% else %>
-                    <span class="text-sm text-[#8E8E93]">N/A</span>
-                  <% end %>
-                </td>
-                <td class="px-6 py-4 text-sm text-[#8E8E93]">
-                  {student.last_active || "Never"}
-                </td>
-              </tr>
+                  </td>
+                  <td class="px-6 py-4">
+                    <%= if student.readiness_score do %>
+                      <span class={"text-sm font-bold #{elem(readiness_badge_colors(student.readiness_score), 0)}"}>
+                        {student.readiness_score}%
+                      </span>
+                    <% else %>
+                      <span class="text-sm text-[#8E8E93]">—</span>
+                    <% end %>
+                  </td>
+                  <td class="px-6 py-4">
+                    <%= if student.weak_count > 0 do %>
+                      <span class="text-sm font-semibold text-[#FF3B30]">{student.weak_count}</span>
+                    <% else %>
+                      <span class="text-sm text-[#8E8E93]">0</span>
+                    <% end %>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-[#8E8E93]">
+                    {format_last_active(student.last_active)}
+                  </td>
+                </tr>
+
+                <%!-- Concept drill-down (expanded) --%>
+                <%= if @expanded_student_id == student.id do %>
+                  <tr class="border-b border-[#E5E5EA]">
+                    <td colspan="6" class="px-6 py-4 bg-[#F5F5F7]">
+                      <%= if @expanded_concepts == [] do %>
+                        <p class="text-sm text-[#8E8E93] py-2">
+                          No concept data yet — student hasn't been assessed.
+                        </p>
+                      <% else %>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-80 overflow-y-auto">
+                          <div
+                            :for={concept <- @expanded_concepts}
+                            class="flex items-center gap-3 bg-white rounded-xl px-4 py-2.5 shadow-sm"
+                          >
+                            <div class="flex-1 min-w-0">
+                              <p class="text-xs font-medium text-[#1C1C1E] truncate">
+                                {concept.section_name}
+                              </p>
+                              <p class="text-xs text-[#8E8E93] truncate">{concept.chapter_name}</p>
+                            </div>
+                            <div class="flex items-center gap-2 shrink-0">
+                              <%= if concept.attempts_count > 0 do %>
+                                <span class="text-xs font-semibold text-[#1C1C1E]">
+                                  {round(concept.accuracy)}%
+                                </span>
+                              <% end %>
+                              <span class={"text-xs font-medium px-2 py-0.5 rounded-full #{elem(concept_status_badge(concept.status), 1)}"}>
+                                {elem(concept_status_badge(concept.status), 0)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <p class="text-xs text-[#8E8E93] mt-3">
+                          {length(@expanded_concepts)} concepts · sorted weakest first
+                        </p>
+                      <% end %>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
             </tbody>
           </table>
         </div>
@@ -192,20 +429,7 @@ defmodule FunSheepWeb.TeacherDashboardLive do
     """
   end
 
-  defp calculate_avg_readiness(students) do
-    scores = Enum.filter(students, & &1.readiness_score) |> Enum.map(& &1.readiness_score)
-
-    case scores do
-      [] -> nil
-      scores -> Enum.sum(scores) |> div(length(scores))
-    end
-  end
-
-  defp readiness_badge(score) when score > 70, do: "bg-[#E8F8EB] text-[#4CD964]"
-  defp readiness_badge(score) when score >= 40, do: "bg-[#FFF8E1] text-[#FFCC00]"
-  defp readiness_badge(_score), do: "bg-[#FFE5E3] text-[#FF3B30]"
-
-  defp readiness_text_color(score) when score > 70, do: "text-[#4CD964]"
-  defp readiness_text_color(score) when score >= 40, do: "text-[#FFCC00]"
-  defp readiness_text_color(_score), do: "text-[#FF3B30]"
+  defp readiness_badge_colors(score) when score > 70, do: {"text-[#4CD964]", "bg-[#E8F8EB]"}
+  defp readiness_badge_colors(score) when score >= 40, do: {"text-[#FF9500]", "bg-[#FFF8E1]"}
+  defp readiness_badge_colors(_), do: {"text-[#FF3B30]", "bg-[#FFE5E3]"}
 end
