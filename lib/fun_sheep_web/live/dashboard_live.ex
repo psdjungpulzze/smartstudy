@@ -465,23 +465,10 @@ defmodule FunSheepWeb.DashboardLive do
             <span class="text-[10px] text-white/50">100%</span>
           </div>
 
-          <%!-- Coverage gap warning — shown when some topics have no questions yet --%>
-          <div
-            :if={@has_coverage_gap?}
-            class="mt-2 flex items-start gap-1.5 bg-white/15 border border-white/30 rounded-xl px-3 py-2"
-          >
-            <span class="text-sm shrink-0 mt-0.5">⚠️</span>
-            <div>
-              <p class="text-[11px] sm:text-xs font-semibold text-white leading-snug">
-                {@empty_count} {if @empty_count == 1, do: "concept has", else: "concepts have"} no questions yet
-              </p>
-              <p class="text-[10px] text-white/70 mt-0.5 leading-snug">
-                Estimated test readiness:
-                <span class="font-bold text-white">{@full_test_readiness}%</span>
-                &nbsp;·&nbsp; Questions for missing concepts are being added.
-              </p>
-            </div>
-          </div>
+          <%!-- Coverage gap warning — informational only, kept subtle --%>
+          <p :if={@has_coverage_gap?} class="mt-1.5 text-[10px] text-white/45 leading-snug">
+            ⚠︎ {@empty_count} {if @empty_count == 1, do: "topic has", else: "topics have"} no questions yet · est. readiness {@full_test_readiness}%
+          </p>
 
           <%!-- State-aware readiness label --%>
           <%= case @card_state do %>
@@ -525,43 +512,63 @@ defmodule FunSheepWeb.DashboardLive do
         <%!-- Assessment + Practice steps --%>
         <div class="mt-3 sm:mt-4 border-t border-white/20 pt-3 space-y-2">
           <div :for={{step, idx} <- Enum.with_index(@steps)}>
-            <.link navigate={step.path} class="flex items-center gap-2.5 group">
+            <.link
+              navigate={step.path}
+              class={[
+                "flex items-center gap-2.5 group",
+                if(idx == @next_idx && !step.done, do: "pointer-events-auto", else: "")
+              ]}
+            >
               <div class={[
-                "w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0",
+                "rounded-full flex items-center justify-center text-sm shrink-0 transition-all",
                 cond do
-                  step.done -> "bg-white/25"
-                  idx == @next_idx -> "bg-white/20 border-2 border-white/60"
-                  true -> "bg-white/10"
+                  step.done -> "w-8 h-8 bg-white/25"
+                  idx == @next_idx -> "w-10 h-10 bg-white shadow-lg"
+                  true -> "w-8 h-8 bg-white/8"
                 end
               ]}>
                 <span :if={step.done} class="text-white text-xs font-bold">✓</span>
-                <span :if={!step.done}>{step.icon}</span>
+                <span :if={!step.done} class={if(idx == @next_idx, do: "text-base", else: "")}>
+                  {step.icon}
+                </span>
               </div>
               <div class={[
-                "flex-1 flex items-center justify-between rounded-xl px-3 py-2 transition-colors",
+                "flex-1 flex items-center justify-between rounded-xl px-3 transition-all",
                 cond do
-                  idx == @next_idx ->
-                    "bg-white/20 border border-white/40 group-hover:bg-white/25"
+                  idx == @next_idx && !step.done ->
+                    "bg-white py-3 shadow-xl group-hover:shadow-2xl group-hover:scale-[1.01]"
 
                   step.done ->
-                    "bg-white/10"
+                    "bg-white/10 py-2"
 
                   true ->
-                    "bg-white/10 opacity-50"
+                    "bg-white/8 py-2 opacity-30"
                 end
               ]}>
                 <div class="min-w-0">
                   <p class={[
-                    "text-sm font-bold leading-tight",
-                    if(step.done || idx == @next_idx, do: "text-white", else: "text-white/60")
+                    "font-bold leading-tight",
+                    cond do
+                      idx == @next_idx && !step.done -> "text-gray-900 text-base"
+                      step.done -> "text-sm text-white/70"
+                      true -> "text-sm text-white/40"
+                    end
                   ]}>
                     {step.label}
                   </p>
-                  <p class="text-xs text-white/50 mt-0.5 hidden sm:block">{step.desc}</p>
+                  <p class={[
+                    "text-xs mt-0.5",
+                    if(idx == @next_idx && !step.done,
+                      do: "text-gray-500 block",
+                      else: "text-white/50 hidden sm:block"
+                    )
+                  ]}>
+                    {step.desc}
+                  </p>
                 </div>
                 <span
                   :if={idx == @next_idx && !step.done}
-                  class="bg-white text-[#4CD964] text-xs font-extrabold px-3 py-1 rounded-full shrink-0 ml-2 shadow-sm"
+                  class="bg-[#4CD964] text-white text-sm font-extrabold px-4 py-1.5 rounded-full shrink-0 ml-3 shadow-md"
                 >
                   START
                 </span>
@@ -569,7 +576,7 @@ defmodule FunSheepWeb.DashboardLive do
                 <.icon
                   :if={!step.done && idx != @next_idx}
                   name="hero-lock-closed"
-                  class="w-3.5 h-3.5 text-white/30 shrink-0 ml-2"
+                  class="w-3.5 h-3.5 text-white/20 shrink-0 ml-2"
                 />
               </div>
             </.link>
