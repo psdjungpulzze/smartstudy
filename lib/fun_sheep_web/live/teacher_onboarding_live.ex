@@ -451,7 +451,7 @@ defmodule FunSheepWeb.TeacherOnboardingLive do
       <div class="text-left bg-[#F5F5F7] dark:bg-[#1C1C1E] rounded-xl p-4 text-sm text-[#1C1C1E] dark:text-white space-y-2">
         <p><strong>What happens next:</strong></p>
         <ul class="space-y-1 list-disc list-inside text-[#8E8E93]">
-          <li>Your students practise on the free tier (20 questions/week).</li>
+          <li>Your students practise on the free tier (50 questions/week).</li>
           <li>
             When a student hits the weekly limit, a <strong>parent</strong>
             gets an invitation to upgrade — <em>not you</em>.

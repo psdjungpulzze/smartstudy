@@ -1038,7 +1038,7 @@ defmodule FunSheepWeb.SubscriptionLive do
           FunSheep is free for educators.
         </p>
         <p class="text-sm text-[#1C1C1E] dark:text-white max-w-md mx-auto mb-6">
-          Your students will practise on the free tier (20 practice questions per week).
+          Your students will practise on the free tier (50 practice questions per week).
           When one of your students is ready for more, their parent will get an invitation
           to upgrade — you won't need to handle payment.
         </p>
