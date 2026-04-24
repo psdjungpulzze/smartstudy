@@ -1,0 +1,94 @@
+name: Claude Settings Integrity
+
+# Guards against PRs that weaken the Claude permission baseline.
+# Junior engineers using Claude Code in dangerous mode rely on the deny list
+# as their last line of defense. This workflow ensures a PR cannot silently
+# remove credential-read denies, destructive-command denies, or the Bash
+# guard hook.
+
+on:
+  pull_request:
+    paths:
+      - '.claude/settings.json'
+      - '.claude/hooks/bash-guard.sh'
+      - '.github/workflows/claude-settings-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: settings.json is valid JSON
+        run: jq empty .claude/settings.json
+
+      - name: Required deny patterns are present
+        run: |
+          set -euo pipefail
+
+          required=(
+            "Read(**/.ssh/**)"
+            "Read(**/.gnupg/**)"
+            "Read(**/.aws/**)"
+            "Read(**/.config/gcloud/**)"
+            "Read(**/.netrc)"
+            "Read(**/id_rsa*)"
+            "Read(**/id_ed25519*)"
+            "Read(**/.bash_history)"
+            "Read(**/.env.credentials)"
+            "Bash(rm -rf /)"
+            "Bash(rm -rf ~)"
+            "Bash(sudo:*)"
+            "Bash(su:*)"
+          )
+
+          missing=()
+          for pat in "${required[@]}"; do
+            if ! jq -e --arg p "$pat" '.permissions.deny | index($p)' \
+                 .claude/settings.json > /dev/null; then
+              missing+=("$pat")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Required deny patterns missing from .claude/settings.json:"
+            printf '  - %s\n' "${missing[@]}"
+            echo
+            echo "These denies protect junior engineers running Claude Code in"
+            echo "dangerous mode. If you have a legitimate reason to remove one,"
+            echo "open a discussion on the PR — do not bypass this check."
+            exit 1
+          fi
+          echo "All required deny patterns present."
+
+      - name: Bash guard hook exists and is executable
+        run: |
+          set -euo pipefail
+          hook=".claude/hooks/bash-guard.sh"
+          if [ ! -f "$hook" ]; then
+            echo "::error::$hook is missing."
+            exit 1
+          fi
+          if [ ! -x "$hook" ]; then
+            echo "::error::$hook is not executable (chmod +x required)."
+            exit 1
+          fi
+          echo "Bash guard hook present and executable."
+
+      - name: Bash guard hook is wired into PreToolUse
+        run: |
+          set -euo pipefail
+          if ! jq -e '
+            .hooks.PreToolUse[]
+            | select(.matcher == "Bash")
+            | .hooks[]
+            | select(.command | contains("bash-guard.sh"))
+          ' .claude/settings.json > /dev/null; then
+            echo "::error::No PreToolUse Bash hook pointing at bash-guard.sh found in .claude/settings.json."
+            exit 1
+          fi
+          echo "Bash guard wired into PreToolUse."
