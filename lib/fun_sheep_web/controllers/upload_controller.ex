@@ -293,13 +293,22 @@ defmodule FunSheepWeb.UploadController do
   # `:answer_key` or `:sample_questions` when the filename is obviously one
   # of those; everything else falls through to `:textbook` (the prior
   # default). Word-boundary checks avoid false positives like "textbook".
+  #
+  # EPUB files are treated as textbooks — they are structured ebook content.
+  # Note: EPUB must be DRM-free to be processed. The EbookExtractWorker
+  # will fail with a clear error message if a DRM-protected EPUB is uploaded.
   def classify_from_filename(nil), do: :textbook
   def classify_from_filename(""), do: :textbook
 
   def classify_from_filename(file_name) when is_binary(file_name) do
     lower = String.downcase(file_name)
+    ext = Path.extname(lower) |> String.trim_leading(".")
 
     cond do
+      # EPUB files are textbooks
+      ext == "epub" ->
+        :textbook
+
       Regex.match?(~r/\b(answers?|answer[-_ ]?key|solutions?|key)\b/, lower) ->
         :answer_key
 

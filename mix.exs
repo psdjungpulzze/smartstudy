@@ -86,7 +86,10 @@ defmodule FunSheep.MixProject do
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       # Feature flags / kill switches persisted to Postgres
-      {:fun_with_flags, "~> 1.11"}
+      {:fun_with_flags, "~> 1.11"},
+      # EPUB support: HTML parsing + XPath for OPF/NCX
+      {:floki, "~> 0.36"},
+      {:sweet_xml, "~> 0.7"}
     ]
   end
 

@@ -117,7 +117,10 @@ config :fun_sheep, Oban,
     integrations: 3,
     # Parent notifications (weekly digest, opt-in alerts — spec §8). Swoosh
     # is I/O-bound and the digest fan-out is roughly one job per family.
-    notifications: 2
+    notifications: 2,
+    # EPUB extraction and TOC import. Concurrency of 5 matches the expected
+    # throughput of EbookExtractWorker (CPU + ZIP parse, no Vision calls).
+    ebook: 5
   ]
 
 # Interactor integration (billing, auth, agents)
