@@ -19,7 +19,7 @@ defmodule FunSheep.Workers.MaterialClassificationWorker do
 
   use Oban.Worker,
     queue: :ai,
-    max_attempts: 3,
+    max_attempts: 20,
     unique: [
       period: 300,
       fields: [:worker, :args],

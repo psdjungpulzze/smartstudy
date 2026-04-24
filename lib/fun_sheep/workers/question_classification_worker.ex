@@ -14,7 +14,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   # in `enqueue_for_questions/1`.
   use Oban.Worker,
     queue: :ai,
-    max_attempts: 3,
+    max_attempts: 20,
     unique: [
       period: 120,
       fields: [:worker, :args],
