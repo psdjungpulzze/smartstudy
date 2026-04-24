@@ -85,7 +85,10 @@ config :fun_sheep, Oban,
        # Nightly at 03:00 UTC — audit every ready course's
        # (chapter, difficulty) coverage and enqueue generation for
        # tuples below target. Phase 6 demand-driven supply loop.
-       {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker}
+       {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker},
+       # Nightly at 03:30 UTC — mark courses with 0 attempts and
+       # no quality update in 90+ days as dormant (visibility_state: "reduced").
+       {"30 3 * * *", FunSheep.Workers.MarkDormantContentWorker}
      ]}
   ],
   queues: [

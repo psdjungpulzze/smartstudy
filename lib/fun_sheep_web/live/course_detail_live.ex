@@ -4,8 +4,10 @@ defmodule FunSheepWeb.CourseDetailLive do
   import FunSheepWeb.ShareButton
   import FunSheepWeb.TextbookBanner
   import FunSheepWeb.Components.TOCBanners
+  # Import like_button component for use in templates
+  import FunSheepWeb.Components.LikeButton, only: [like_button: 1]
 
-  alias FunSheep.{Assessments, Content, Courses, Questions, Repo}
+  alias FunSheep.{Assessments, Community, Content, Courses, Questions, Repo}
   alias FunSheep.Courses.{Chapter, DiscoveredTOC, Section, TOCRebase}
 
   @impl true
@@ -19,6 +21,7 @@ defmodule FunSheepWeb.CourseDetailLive do
     end
 
     {upcoming, past} = load_test_schedules(user_role_id, course_id)
+    user_reaction = if user_role_id, do: Community.get_user_reaction(user_role_id, course_id)
     discovered_sources = Content.list_discovered_sources(course_id)
     question_count = Questions.count_questions_by_course(course_id)
     validation_counts = Questions.count_by_validation_status(course_id)
@@ -76,7 +79,9 @@ defmodule FunSheepWeb.CourseDetailLive do
        # Community-approval TOC state (pending proposal, post-rebase
        # acknowledgement, claim-ownership). Pre-computed in one helper
        # so the render stays readable.
-       toc_state: toc_state
+       toc_state: toc_state,
+       # Community quality signals
+       user_reaction: user_reaction
      )}
   end
 
@@ -345,6 +350,35 @@ defmodule FunSheepWeb.CourseDetailLive do
           {:error, _} ->
             {:noreply, put_flash(socket, :error, "Couldn't adopt this course right now.")}
         end
+    end
+  end
+
+  # ── Community reactions ────────────────────────────────────────────────
+
+  def handle_event(
+        "react_to_course",
+        %{"course_id" => course_id, "reaction" => reaction},
+        socket
+      ) do
+    user_role_id = socket.assigns.current_user && socket.assigns.current_user["user_role_id"]
+
+    if is_nil(user_role_id) do
+      {:noreply, put_flash(socket, :error, "Please log in to react to this course.")}
+    else
+      case Community.react_to_course(user_role_id, course_id, reaction) do
+        {:ok, _} ->
+          user_reaction = Community.get_user_reaction(user_role_id, course_id)
+          course = Courses.get_course!(course_id)
+
+          {:noreply,
+           assign(socket,
+             user_reaction: user_reaction,
+             course: %{socket.assigns.course | like_count: course.like_count, dislike_count: course.dislike_count}
+           )}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Could not save your reaction. Please try again.")}
+      end
     end
   end
 
@@ -893,6 +927,15 @@ defmodule FunSheepWeb.CourseDetailLive do
               Question Bank
             </.link>
           </div>
+        </div>
+        <%!-- Like / dislike buttons — only shown when user is logged in --%>
+        <div :if={@current_user} class="mt-3 pt-3 border-t border-gray-100">
+          <.like_button
+            course_id={@course.id}
+            like_count={@course.like_count || 0}
+            dislike_count={@course.dislike_count || 0}
+            user_reaction={@user_reaction}
+          />
         </div>
       </div>
 
