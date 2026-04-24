@@ -13,23 +13,7 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     readiness = Assessments.latest_readiness(user_role_id, schedule_id)
     history = Assessments.list_readiness_history(user_role_id, schedule_id, 5)
     attempts_count = Assessments.attempts_count_for_schedule(user_role_id, schedule)
-
-    chapter_ids = get_in(schedule.scope, ["chapter_ids"]) || []
-    chapters = Courses.list_chapters_by_ids(chapter_ids)
-
-    chapter_breakdown =
-      chapters
-      |> Enum.map(fn ch ->
-        score =
-          if readiness do
-            Map.get(readiness.chapter_scores || %{}, ch.id, 0.0)
-          else
-            0.0
-          end
-
-        %{id: ch.id, name: ch.name, score: score}
-      end)
-      |> Enum.sort_by(& &1.score)
+    mastery_map = Assessments.topic_mastery_map(user_role_id, schedule_id)
 
     {:ok,
      assign(socket,
@@ -39,7 +23,8 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
        readiness: readiness,
        history: history,
        attempts_count: attempts_count,
-       chapter_breakdown: chapter_breakdown,
+       mastery_map: mastery_map,
+       readiness_state: readiness_state(mastery_map),
        today: Date.utc_today(),
        generating_guide: false
      )}
@@ -53,20 +38,8 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
     case Assessments.calculate_and_save_readiness(user_role_id, schedule_id) do
       {:ok, readiness} ->
         history = Assessments.list_readiness_history(user_role_id, schedule_id, 5)
-
-        attempts_count =
-          Assessments.attempts_count_for_schedule(user_role_id, socket.assigns.schedule)
-
-        chapter_ids = get_in(socket.assigns.schedule.scope, ["chapter_ids"]) || []
-        chapters = Courses.list_chapters_by_ids(chapter_ids)
-
-        chapter_breakdown =
-          chapters
-          |> Enum.map(fn ch ->
-            score = Map.get(readiness.chapter_scores || %{}, ch.id, 0.0)
-            %{id: ch.id, name: ch.name, score: score}
-          end)
-          |> Enum.sort_by(& &1.score)
+        attempts_count = Assessments.attempts_count_for_schedule(user_role_id, socket.assigns.schedule)
+        mastery_map = Assessments.topic_mastery_map(user_role_id, schedule_id)
 
         {:noreply,
          socket
@@ -74,7 +47,8 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
            readiness: readiness,
            history: history,
            attempts_count: attempts_count,
-           chapter_breakdown: chapter_breakdown
+           mastery_map: mastery_map,
+           readiness_state: readiness_state(mastery_map)
          )
          |> put_flash(:info, "Readiness score updated.")}
 
@@ -114,14 +88,29 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
      |> push_navigate(to: ~p"/courses/#{socket.assigns.course_id}/tests")}
   end
 
+  # --- State Detection ---
+
+  defp readiness_state(mastery_map) do
+    all_topics = Enum.flat_map(mastery_map, & &1.topics)
+    total = length(all_topics)
+    tested = Enum.count(all_topics, fn t -> t.status != :insufficient_data end)
+
+    cond do
+      total == 0 -> :untested
+      tested == 0 -> :untested
+      tested < total -> :in_progress
+      true -> :complete
+    end
+  end
+
+  # --- Helpers ---
+
   defp readiness_share_message(score) when score >= 80, do: "Almost there!"
   defp readiness_share_message(score) when score >= 60, do: "Getting closer every day."
   defp readiness_share_message(score) when score >= 40, do: "Making progress!"
   defp readiness_share_message(_), do: "Just getting started."
 
-  defp days_remaining(test_date) do
-    Date.diff(test_date, Date.utc_today())
-  end
+  defp days_remaining(test_date), do: Date.diff(test_date, Date.utc_today())
 
   defp days_color(days) when days < 3, do: "text-[#FF3B30]"
   defp days_color(days) when days <= 7, do: "text-[#FFCC00]"
@@ -135,14 +124,38 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
   defp score_text_color(score) when score >= 40, do: "text-[#FFCC00]"
   defp score_text_color(_), do: "text-[#FF3B30]"
 
+  defp status_color(:mastered), do: "text-[#4CD964]"
+  defp status_color(:probing), do: "text-[#FFCC00]"
+  defp status_color(:weak), do: "text-[#FF3B30]"
+  defp status_color(:insufficient_data), do: "text-[#8E8E93]"
+
+  defp status_bg(:mastered), do: "bg-[#E8F8EB] text-[#1D8234]"
+  defp status_bg(:probing), do: "bg-[#FFF9E6] text-[#8A6800]"
+  defp status_bg(:weak), do: "bg-[#FFF0EF] text-[#CC3328]"
+  defp status_bg(:insufficient_data), do: "bg-[#F2F2F7] text-[#8E8E93]"
+
+  defp status_label(:mastered), do: "Ready"
+  defp status_label(:probing), do: "Needs Work"
+  defp status_label(:weak), do: "Focus Here"
+  defp status_label(:insufficient_data), do: "Not Tested"
+
   defp aggregate_score(nil), do: 0.0
   defp aggregate_score(readiness), do: readiness.aggregate_score
+
+  defp topic_counts(mastery_map) do
+    all = Enum.flat_map(mastery_map, & &1.topics)
+    total = length(all)
+    tested = Enum.count(all, fn t -> t.status != :insufficient_data end)
+    weak = Enum.count(all, fn t -> t.status == :weak end)
+    mastered = Enum.count(all, fn t -> t.status == :mastered end)
+    %{total: total, tested: tested, weak: weak, mastered: mastered}
+  end
 
   @impl true
   def render(assigns) do
     ~H"""
     <div class="max-w-4xl mx-auto">
-      <%!-- Header Section --%>
+      <%!-- Header --%>
       <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div class="min-w-0">
@@ -174,7 +187,6 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
           </div>
 
           <div class="flex items-center gap-4 sm:gap-8">
-            <%!-- Days Remaining --%>
             <div class="text-center">
               <p class={"text-2xl sm:text-3xl font-bold #{days_color(days_remaining(@schedule.test_date))}"}>
                 {days_remaining(@schedule.test_date)}
@@ -182,113 +194,337 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
               <p class="text-[10px] sm:text-xs text-[#8E8E93]">days left</p>
             </div>
 
-            <%!-- Circular Progress Indicator --%>
+            <%!-- Gauge --%>
             <div class="relative w-20 h-20 sm:w-24 sm:h-24">
               <svg class="w-20 h-20 sm:w-24 sm:h-24 transform -rotate-90" viewBox="0 0 100 100">
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="42"
-                  fill="none"
-                  stroke="#E5E5EA"
-                  stroke-width="8"
-                />
+                <circle cx="50" cy="50" r="42" fill="none" stroke="#E5E5EA" stroke-width="8" />
                 <circle
                   cx="50"
                   cy="50"
                   r="42"
                   fill="none"
                   stroke={
-                    if aggregate_score(@readiness) >= 70,
-                      do: "#4CD964",
-                      else: if(aggregate_score(@readiness) >= 40, do: "#FFCC00", else: "#FF3B30")
+                    cond do
+                      @readiness_state == :untested -> "#E5E5EA"
+                      aggregate_score(@readiness) >= 70 -> "#4CD964"
+                      aggregate_score(@readiness) >= 40 -> "#FFCC00"
+                      true -> "#FF3B30"
+                    end
                   }
                   stroke-width="8"
-                  stroke-dasharray={Float.to_string(aggregate_score(@readiness) / 100 * 263.9) <> " 263.9"}
+                  stroke-dasharray={
+                    Float.to_string(aggregate_score(@readiness) / 100 * 263.9) <> " 263.9"
+                  }
                   stroke-linecap="round"
                 />
               </svg>
-              <div class="absolute inset-0 flex items-center justify-center">
-                <span class={"text-lg sm:text-xl font-bold #{score_text_color(aggregate_score(@readiness))}"}>
-                  {round(aggregate_score(@readiness))}%
-                </span>
+              <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <%= if @readiness_state == :untested do %>
+                  <span class="text-xs font-semibold text-[#8E8E93] text-center leading-tight">
+                    Not yet<br />tested
+                  </span>
+                <% else %>
+                  <span class={"text-lg sm:text-xl font-bold #{score_text_color(aggregate_score(@readiness))}"}>
+                    {round(aggregate_score(@readiness))}%
+                  </span>
+                <% end %>
               </div>
             </div>
           </div>
         </div>
 
+        <%!-- State subtitle --%>
         <p class="mt-3 sm:mt-4 text-sm text-[#8E8E93]">
-          {days_remaining(@schedule.test_date)} days left, readiness: {round(
-            aggregate_score(@readiness)
-          )}% &middot; {@attempts_count} {if @attempts_count == 1,
-            do: "question answered",
-            else: "questions answered"}
+          <%= case @readiness_state do %>
+            <% :untested -> %>
+              You haven't been tested yet — let's find out where you stand
+            <% :in_progress -> %>
+              <% counts = topic_counts(@mastery_map) %>
+              Based on {counts.tested} of {counts.total} topics tested
+              &middot; {@attempts_count} {if @attempts_count == 1,
+                do: "question answered",
+                else: "questions answered"}
+            <% :complete -> %>
+              Based on all {topic_counts(@mastery_map).total} topics
+              &middot; {@attempts_count} {if @attempts_count == 1,
+                do: "question answered",
+                else: "questions answered"}
+          <% end %>
         </p>
-        <p class="mt-1 text-xs text-[#C7C7CC]">
-          Based on all your attempts across all practice sessions
+        <p :if={@readiness_state == :in_progress} class="mt-1 text-xs text-[#C7C7CC]">
+          Complete the assessment for your full readiness picture
         </p>
       </div>
 
-      <%!-- Chapter Breakdown Section --%>
-      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
-        <h2 class="text-lg sm:text-xl font-semibold text-[#1C1C1E] mb-4">Chapter Breakdown</h2>
+      <%!-- State A: Untested --%>
+      <div :if={@readiness_state == :untested} class="bg-white rounded-2xl shadow-md p-6 sm:p-8 mb-6 text-center">
+        <div class="text-5xl mb-4">🐑</div>
+        <h2 class="text-xl font-bold text-[#1C1C1E] mb-2">Let's find your starting point</h2>
+        <p class="text-[#8E8E93] mb-6">
+          Take the diagnostic assessment to see which topics you're ready for and which need work.
+        </p>
+        <.link
+          navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
+          class="inline-block bg-[#4CD964] hover:bg-[#3DBF55] text-white font-semibold px-8 py-3 rounded-full shadow-md transition-colors text-lg"
+        >
+          Start Assessment
+        </.link>
+        <div :if={@mastery_map != []} class="mt-8 text-left">
+          <h3 class="text-sm font-semibold text-[#8E8E93] uppercase tracking-wide mb-3">
+            Topics in scope
+          </h3>
+          <div class="space-y-2">
+            <div :for={chapter <- @mastery_map} class="bg-[#F2F2F7] rounded-xl p-3">
+              <p class="font-medium text-[#1C1C1E] text-sm">{chapter.chapter_name}</p>
+              <p class="text-xs text-[#8E8E93] mt-0.5">
+                {length(chapter.topics)} {if length(chapter.topics) == 1,
+                  do: "topic",
+                  else: "topics"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
 
-        <div :if={@chapter_breakdown == []} class="text-center py-4">
-          <p class="text-[#8E8E93]">No chapters in test scope.</p>
+      <%!-- State B: In Progress --%>
+      <div :if={@readiness_state == :in_progress} class="space-y-6 mb-6">
+        <% counts = topic_counts(@mastery_map) %>
+        <%!-- Coverage progress --%>
+        <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-sm font-semibold text-[#8E8E93] uppercase tracking-wide">
+              Assessment Progress
+            </h2>
+            <span class="text-sm font-semibold text-[#1C1C1E]">
+              {counts.tested} / {counts.total} topics
+            </span>
+          </div>
+          <div class="w-full bg-[#E5E5EA] rounded-full h-2.5">
+            <div
+              class="h-2.5 rounded-full bg-[#007AFF] transition-all"
+              style={"width: #{if counts.total > 0, do: round(counts.tested / counts.total * 100), else: 0}%"}
+            >
+            </div>
+          </div>
         </div>
 
-        <div class="space-y-3 sm:space-y-4">
-          <div :for={chapter <- @chapter_breakdown} class="flex items-center gap-2 sm:gap-4">
-            <div class="w-24 sm:w-40 shrink-0 truncate">
-              <p class="font-medium text-[#1C1C1E] text-xs sm:text-sm truncate">{chapter.name}</p>
-            </div>
-            <div class="flex-1">
-              <div class="w-full bg-[#E5E5EA] rounded-full h-2.5 sm:h-3">
-                <div
-                  class={"h-2.5 sm:h-3 rounded-full #{score_color(chapter.score)} transition-all"}
-                  style={"width: #{chapter.score}%"}
-                >
-                </div>
+        <%!-- Needs Work / Focus Here --%>
+        <% weak_topics =
+          @mastery_map
+          |> Enum.flat_map(fn ch ->
+            ch.topics
+            |> Enum.filter(fn t -> t.status in [:weak, :probing] end)
+            |> Enum.map(fn t -> Map.put(t, :chapter_name, ch.chapter_name) end)
+          end)
+          |> Enum.sort_by(& &1.accuracy) %>
+
+        <div :if={weak_topics != []} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">
+            Needs Work
+            <span class="ml-2 text-sm font-normal text-[#FF3B30]">
+              {length(weak_topics)} topics
+            </span>
+          </h2>
+          <div class="space-y-1">
+            <.topic_row
+              :for={topic <- weak_topics}
+              topic={topic}
+              course_id={@course_id}
+              schedule_id={@schedule.id}
+            />
+          </div>
+        </div>
+
+        <%!-- Not yet tested --%>
+        <% untested =
+          @mastery_map
+          |> Enum.flat_map(fn ch ->
+            ch.topics
+            |> Enum.filter(fn t -> t.status == :insufficient_data end)
+            |> Enum.map(fn t -> Map.put(t, :chapter_name, ch.chapter_name) end)
+          end) %>
+
+        <div :if={untested != []} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <h2 class="text-base font-semibold text-[#8E8E93] mb-3">
+            Not Yet Tested
+            <span class="ml-2 text-sm font-normal">{length(untested)} topics remaining</span>
+          </h2>
+          <div class="space-y-0">
+            <div
+              :for={topic <- untested}
+              class="flex items-center justify-between py-2 border-b border-[#F2F2F7] last:border-0"
+            >
+              <div>
+                <p class="text-sm font-medium text-[#3A3A3C]">{topic.section_name}</p>
+                <p class="text-xs text-[#8E8E93]">{topic.chapter_name}</p>
               </div>
-            </div>
-            <div class="w-12 sm:w-16 text-right shrink-0">
-              <span class={"font-semibold text-xs sm:text-sm #{score_text_color(chapter.score)}"}>
-                {round(chapter.score)}%
+              <span class="text-xs px-2 py-1 rounded-full bg-[#F2F2F7] text-[#8E8E93]">
+                Not Tested
               </span>
             </div>
           </div>
         </div>
+
+        <%!-- Mastered (collapsed) --%>
+        <% mastered =
+          @mastery_map
+          |> Enum.flat_map(fn ch ->
+            ch.topics
+            |> Enum.filter(fn t -> t.status == :mastered end)
+            |> Enum.map(fn t -> Map.put(t, :chapter_name, ch.chapter_name) end)
+          end) %>
+
+        <div :if={mastered != []} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <details>
+            <summary class="cursor-pointer text-sm font-semibold text-[#4CD964] select-none">
+              ✓ {length(mastered)} {if length(mastered) == 1, do: "topic", else: "topics"} ready
+            </summary>
+            <div class="mt-3 space-y-0">
+              <div
+                :for={topic <- mastered}
+                class="flex items-center justify-between py-2 border-b border-[#F2F2F7] last:border-0"
+              >
+                <div>
+                  <p class="text-sm font-medium text-[#3A3A3C]">{topic.section_name}</p>
+                  <p class="text-xs text-[#8E8E93]">{topic.chapter_name}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-[#4CD964]">{round(topic.accuracy)}%</span>
+                  <span class="text-xs px-2 py-1 rounded-full bg-[#E8F8EB] text-[#1D8234]">
+                    Ready
+                  </span>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
       </div>
 
-      <%!-- Actions Section --%>
+      <%!-- State C: Complete --%>
+      <div :if={@readiness_state == :complete} class="space-y-6 mb-6">
+        <% all_topics =
+          @mastery_map
+          |> Enum.flat_map(fn ch ->
+            ch.topics |> Enum.map(fn t -> Map.put(t, :chapter_name, ch.chapter_name) end)
+          end)
+          |> Enum.sort_by(& &1.accuracy) %>
+
+        <%!-- Full ranked topic list --%>
+        <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Topics by Readiness</h2>
+          <div class="space-y-1">
+            <.topic_row
+              :for={topic <- all_topics}
+              topic={topic}
+              course_id={@course_id}
+              schedule_id={@schedule.id}
+            />
+          </div>
+        </div>
+
+        <%!-- Chapter rollup --%>
+        <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Chapter Summary</h2>
+          <div class="space-y-1">
+            <details :for={chapter <- @mastery_map} class="border-b border-[#F2F2F7] last:border-0 py-2">
+              <% ch_score =
+                if chapter.topics == [],
+                  do: 0.0,
+                  else:
+                    Float.round(
+                      Enum.sum(Enum.map(chapter.topics, & &1.accuracy)) / length(chapter.topics),
+                      1
+                    ) %>
+              <summary class="cursor-pointer flex items-center justify-between select-none">
+                <span class="font-medium text-[#1C1C1E] text-sm">{chapter.chapter_name}</span>
+                <span class={"text-sm font-semibold #{score_text_color(ch_score)}"}>
+                  {round(ch_score)}%
+                </span>
+              </summary>
+              <div class="mt-2 ml-4 space-y-0">
+                <div
+                  :for={topic <- Enum.sort_by(chapter.topics, & &1.accuracy)}
+                  class="flex items-center justify-between py-1.5 border-b border-[#F2F2F7] last:border-0"
+                >
+                  <p class="text-sm text-[#3A3A3C]">{topic.section_name}</p>
+                  <div class="flex items-center gap-2">
+                    <span class={"text-xs font-semibold #{status_color(topic.status)}"}>
+                      {round(topic.accuracy)}%
+                    </span>
+                    <span class={"text-xs px-2 py-0.5 rounded-full #{status_bg(topic.status)}"}>
+                      {status_label(topic.status)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <%!-- Predicted score (only when confidence is not :low) --%>
+        <% pred = Assessments.predicted_score_range(@readiness) %>
+        <div :if={pred.confidence != :low} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+          <h2 class="text-base font-semibold text-[#1C1C1E] mb-1">Predicted Test Score</h2>
+          <p class="text-sm text-[#8E8E93] mb-3">Based on your current readiness</p>
+          <div class="flex items-center gap-6">
+            <div class="text-center">
+              <p class="text-2xl font-bold text-[#1C1C1E]">{pred.low}–{pred.high}%</p>
+              <p class="text-xs text-[#8E8E93]">likely range</p>
+            </div>
+            <div class="text-center">
+              <p class={"text-2xl font-bold #{score_text_color(pred.mid)}"}>{pred.mid}%</p>
+              <p class="text-xs text-[#8E8E93]">most likely</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Actions (all states) --%>
       <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
-        <h2 class="text-lg sm:text-xl font-semibold text-[#1C1C1E] mb-4">Actions</h2>
         <div class="flex flex-wrap gap-2 sm:gap-3">
           <.link
+            :if={@readiness_state == :untested}
             navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
             class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
             Start Assessment
           </.link>
-          <button
-            phx-click="generate_study_guide"
+          <.link
+            :if={@readiness_state == :in_progress}
+            navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+          >
+            Continue Assessment
+          </.link>
+          <.link
+            :if={@readiness_state == :complete}
+            navigate={~p"/courses/#{@course_id}/tests/#{@schedule.id}/assess"}
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+          >
+            Re-take Assessment
+          </.link>
+          <.link
+            :if={@readiness_state != :untested}
+            navigate={~p"/courses/#{@course_id}/practice?schedule_id=#{@schedule.id}"}
             class="bg-[#007AFF] hover:bg-blue-600 text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
-            Generate Study Guide
-          </button>
-          <button
-            disabled
-            class="bg-[#E5E5EA] text-[#8E8E93] font-medium px-6 py-2 rounded-full shadow-md cursor-not-allowed"
-          >
             Practice Weak Areas
+          </.link>
+          <button
+            :if={@readiness_state != :untested}
+            phx-click="generate_study_guide"
+            class="bg-white border border-[#007AFF] text-[#007AFF] hover:bg-blue-50 font-medium px-6 py-2 rounded-full shadow-md transition-colors"
+          >
+            Generate Study Guide
           </button>
           <button
             phx-click="calculate_readiness"
             class="bg-white border border-[#4CD964] text-[#4CD964] hover:bg-[#E8F8EB] font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
-            Recalculate Readiness
+            Recalculate
           </button>
           <.share_button
+            :if={@readiness_state != :untested}
             title={"#{@schedule.name} - Readiness #{round(aggregate_score(@readiness))}%"}
             text={"I'm #{round(aggregate_score(@readiness))}% ready for #{@schedule.name} on Fun Sheep! #{readiness_share_message(aggregate_score(@readiness))}"}
             url={share_url(~p"/courses/#{@course_id}/tests/#{@schedule.id}/readiness")}
@@ -297,17 +533,10 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
         </div>
       </div>
 
-      <%!-- Score Trend Section --%>
-      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
+      <%!-- Score History --%>
+      <div :if={@history != []} class="bg-white rounded-2xl shadow-md p-4 sm:p-6">
         <h2 class="text-lg sm:text-xl font-semibold text-[#1C1C1E] mb-4">Score History</h2>
-
-        <div :if={@history == []} class="text-center py-4">
-          <p class="text-[#8E8E93]">
-            No readiness scores yet. Click "Recalculate Readiness" to get started.
-          </p>
-        </div>
-
-        <div :if={@history != []} class="space-y-2 sm:space-y-3">
+        <div class="space-y-2 sm:space-y-3">
           <div :for={score <- Enum.reverse(@history)} class="flex items-center gap-2 sm:gap-4">
             <p class="text-[10px] sm:text-xs text-[#8E8E93] w-20 sm:w-28 shrink-0">
               {Calendar.strftime(score.inserted_at, "%b %d, %H:%M")}
@@ -326,6 +555,43 @@ defmodule FunSheepWeb.ReadinessDashboardLive do
             </span>
           </div>
         </div>
+      </div>
+    </div>
+    """
+  end
+
+  # --- Topic row component (shared across States B and C) ---
+
+  defp topic_row(assigns) do
+    ~H"""
+    <div class="flex items-center gap-3 py-2.5 border-b border-[#F2F2F7] last:border-0">
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-[#1C1C1E] truncate">{@topic.section_name}</p>
+        <div class="flex items-center gap-2 mt-0.5">
+          <p class="text-xs text-[#8E8E93] truncate">{@topic.chapter_name}</p>
+          <span class="text-xs text-[#C7C7CC]">&middot;</span>
+          <p class="text-xs text-[#8E8E93] shrink-0">
+            {@topic.correct_count}/{@topic.attempts_count} correct
+          </p>
+        </div>
+        <div class="mt-1.5 w-full bg-[#E5E5EA] rounded-full h-1.5">
+          <div
+            class={"h-1.5 rounded-full transition-all #{if @topic.accuracy >= 70, do: "bg-[#4CD964]", else: if(@topic.accuracy >= 40, do: "bg-[#FFCC00]", else: "bg-[#FF3B30]")}"}
+            style={"width: #{@topic.accuracy}%"}
+          >
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col items-end gap-1 shrink-0">
+        <span class={"text-xs px-2 py-0.5 rounded-full font-medium #{status_bg(@topic.status)}"}>
+          {status_label(@topic.status)}
+        </span>
+        <.link
+          navigate={~p"/courses/#{@course_id}/practice?section_id=#{@topic.section_id}&schedule_id=#{@schedule_id}"}
+          class="text-xs text-[#007AFF] hover:underline"
+        >
+          Practice →
+        </.link>
       </div>
     </div>
     """

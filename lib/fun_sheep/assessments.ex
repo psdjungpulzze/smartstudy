@@ -692,6 +692,26 @@ defmodule FunSheep.Assessments do
   end
 
   @doc """
+  Returns the weakest topics for a student on a test schedule, sorted by
+  accuracy ascending (worst first). Only includes topics with real signal
+  (status != :insufficient_data). Used to populate the sheep tip sheet and
+  the "Needs Work" panel in the readiness dashboard.
+
+  Each entry includes `:chapter_name` for display context.
+  """
+  def skill_deficits(user_role_id, test_schedule_id, limit \\ 10)
+      when is_binary(user_role_id) and is_binary(test_schedule_id) do
+    topic_mastery_map(user_role_id, test_schedule_id)
+    |> Enum.flat_map(fn %{chapter_name: chapter_name, topics: topics} ->
+      topics
+      |> Enum.filter(fn t -> t.status in [:weak, :probing] end)
+      |> Enum.map(fn t -> Map.put(t, :chapter_name, chapter_name) end)
+    end)
+    |> Enum.sort_by(& &1.accuracy)
+    |> Enum.take(limit)
+  end
+
+  @doc """
   Returns the most recent `limit` attempts for a student on a single
   topic (section), with the question preloaded.
 
