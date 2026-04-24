@@ -12,11 +12,12 @@ defmodule FunSheepWeb.PracticeLive do
     course = Courses.get_course_with_chapters!(course_id)
     user_role_id = socket.assigns.current_user["user_role_id"]
 
-    # Teacher-review fix #2: when the student arrives from the diagnostic
-    # summary's "Practice Weak Topics" CTA with a `schedule_id`, scope the
-    # practice session to the chapters in that test's scope. Otherwise
-    # practice draws from the whole course (legacy behavior).
-    {schedule, scope_opts} = resolve_schedule_scope(params)
+    # When the student arrives with a `schedule_id` (e.g. from the diagnostic
+    # summary "Practice Weak Topics" CTA), scope to that test's chapters and
+    # format. Otherwise fall back to the format from the user's existing
+    # test schedules for this course, so question_types are always respected.
+    {schedule, scope_opts} = resolve_schedule_scope(params, user_role_id, course_id)
+    question_types = Map.get(scope_opts, :question_types, [])
 
     state = PracticeEngine.start_practice(user_role_id, course_id, scope_opts)
     total_questions = length(state.questions)
@@ -29,6 +30,7 @@ defmodule FunSheepWeb.PracticeLive do
         chapters: course.chapters,
         selected_chapter_id: nil,
         test_schedule: schedule,
+        question_types: question_types,
         engine_state: state,
         current_question: nil,
         selected_answer: nil,
@@ -50,7 +52,7 @@ defmodule FunSheepWeb.PracticeLive do
     {:ok, socket}
   end
 
-  defp resolve_schedule_scope(%{"schedule_id" => schedule_id})
+  defp resolve_schedule_scope(%{"schedule_id" => schedule_id}, _user_role_id, _course_id)
        when is_binary(schedule_id) and schedule_id != "" do
     case Assessments.get_test_schedule_with_course!(schedule_id) do
       %{} = schedule ->
@@ -65,10 +67,36 @@ defmodule FunSheepWeb.PracticeLive do
          }}
     end
   rescue
-    Ecto.NoResultsError -> {nil, %{}}
+    Ecto.NoResultsError -> {nil, %{question_types: ["multiple_choice"]}}
   end
 
-  defp resolve_schedule_scope(_params), do: {nil, %{}}
+  defp resolve_schedule_scope(_params, user_role_id, course_id) do
+    question_types = load_course_question_types(user_role_id, course_id)
+    {nil, %{question_types: question_types}}
+  end
+
+  defp load_course_question_types(user_role_id, course_id) do
+    today = Date.utc_today()
+
+    schedules =
+      Assessments.list_test_schedules_for_course_with_format(user_role_id, course_id)
+
+    # Prefer the soonest upcoming schedule with a format template; fall back
+    # to the most recent past one. If none have a format, default to MC-only.
+    template =
+      schedules
+      |> Enum.filter(&(&1.format_template != nil))
+      |> then(fn with_format ->
+        Enum.find(with_format, &(Date.compare(&1.test_date, today) != :lt)) ||
+          List.last(with_format)
+      end)
+      |> then(fn
+        nil -> nil
+        %{format_template: ft} -> ft
+      end)
+
+    format_question_types(template)
+  end
 
   defp format_question_types(format_template) do
     FunSheep.Assessments.Engine.format_question_types(format_template)
@@ -81,9 +109,9 @@ defmodule FunSheepWeb.PracticeLive do
 
     opts =
       if chapter_id == "" do
-        %{}
+        %{question_types: socket.assigns.question_types}
       else
-        %{chapter_id: chapter_id}
+        %{chapter_id: chapter_id, question_types: socket.assigns.question_types}
       end
 
     state = PracticeEngine.start_practice(user_role_id, course_id, opts)
@@ -184,8 +212,8 @@ defmodule FunSheepWeb.PracticeLive do
 
     opts =
       case socket.assigns.selected_chapter_id do
-        nil -> %{}
-        chapter_id -> %{chapter_id: chapter_id}
+        nil -> %{question_types: socket.assigns.question_types}
+        chapter_id -> %{chapter_id: chapter_id, question_types: socket.assigns.question_types}
       end
 
     state = PracticeEngine.start_practice(user_role_id, course_id, opts)
