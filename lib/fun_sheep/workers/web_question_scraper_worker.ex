@@ -254,6 +254,15 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     end
   end
 
+  # Phase 5 signal: an SPA that returned shell HTML instead of hydrated
+  # content will pass the 200 status check but the stripped body will
+  # be tiny (< ~1500 bytes). That pattern was behind several of the
+  # April audit's "0 questions extracted" sources on Quizlet / Khan /
+  # CollegeBoard. Flag any renderer output below this threshold so
+  # admins can eyeball the debug HTML and decide whether it's a renderer
+  # timing issue or an anti-bot wall.
+  @renderer_small_output_bytes 1_500
+
   defp fetch_via_renderer(url) do
     renderer_url = renderer_base_url()
 
@@ -270,7 +279,18 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
            receive_timeout: 60_000
          ) do
       {:ok, %{status: 200, body: %{"content" => content}}} when is_binary(content) ->
-        {:ok, strip_html(content)}
+        stripped = strip_html(content)
+
+        if byte_size(stripped) < @renderer_small_output_bytes do
+          # Don't fail — the caller may still extract something from a
+          # short body — but emit a warning with size so the monitor
+          # can alert on a pattern of small renders from the same host.
+          Logger.warning(
+            "[Scraper] Renderer returned suspiciously small output (#{byte_size(stripped)} bytes) for #{url} — likely SPA shell or anti-bot wall"
+          )
+        end
+
+        {:ok, stripped}
 
       {:ok, %{status: status}} ->
         Logger.warning("[Scraper] Renderer returned status #{status} for #{url}")
