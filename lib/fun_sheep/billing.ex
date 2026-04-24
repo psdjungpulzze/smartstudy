@@ -528,6 +528,16 @@ defmodule FunSheep.Billing do
     ]
   end
 
+  @doc """
+  Returns `true` if the user's subscription includes AI-powered essay grading.
+
+  Essay grading uses Claude Opus and is gated to paid plans. Free-tier
+  students see a locked overlay with an upgrade CTA.
+  """
+  def subscription_has_essay_grading?(user_role_id) do
+    paid_subscription?(user_role_id)
+  end
+
   defp plan_id_for("monthly"), do: "plan_monthly"
   defp plan_id_for("annual"), do: "plan_annual"
   defp plan_id_for(_), do: "plan_free"

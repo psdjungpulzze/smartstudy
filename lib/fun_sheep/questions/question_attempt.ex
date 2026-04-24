@@ -22,6 +22,9 @@ defmodule FunSheep.Questions.QuestionAttempt do
     field :score_max, :integer, default: 10
     field :score_feedback, :string
     field :grader_path, :string
+    # Essay-specific fields
+    field :essay_draft_id, :binary_id
+    field :essay_word_count, :integer
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :question, FunSheep.Questions.Question
@@ -43,7 +46,9 @@ defmodule FunSheep.Questions.QuestionAttempt do
       :score,
       :score_max,
       :score_feedback,
-      :grader_path
+      :grader_path,
+      :essay_draft_id,
+      :essay_word_count
     ])
     |> validate_required([:is_correct, :user_role_id, :question_id])
     |> validate_number(:time_taken_seconds, greater_than_or_equal_to: 0)
