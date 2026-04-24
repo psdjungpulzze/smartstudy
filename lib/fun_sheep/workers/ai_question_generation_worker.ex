@@ -72,6 +72,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     chapter_id = args["chapter_id"]
     count = args["count"] || 10
     mode = args["mode"] || "from_material"
+    difficulty = args["difficulty"]
 
     Logger.info("[AIGen] Generating #{count} questions for course #{course_id}, mode=#{mode}")
 
@@ -93,7 +94,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           })
 
           context = build_context(course, ch, args)
-          prompt = build_prompt(mode, course, ch, context, per_chapter)
+          prompt = build_prompt(mode, course, ch, context, per_chapter, difficulty)
 
           case send_to_ai(prompt, course, ch) do
             {:ok, questions} ->
@@ -126,7 +127,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
       progress_event = maybe_phase(progress_event, :preparing, "Preparing chapter context", 1)
       context = build_context(course, chapter, args)
-      prompt = build_prompt(mode, course, chapter, context, count)
+      prompt = build_prompt(mode, course, chapter, context, count, difficulty)
 
       progress_event = maybe_phase(progress_event, :generating, "Generating questions with AI", 2)
 
@@ -201,6 +202,12 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       |> maybe_put(:count, opts[:count])
       |> maybe_put(:mode, opts[:mode])
       |> maybe_put(:source_material_id, opts[:source_material_id])
+      # Phase 6: difficulty-targeted generation. When set, the prompt
+      # asks the AI to produce questions at this difficulty ONLY.
+      # Powers the demand-driven supply loop — if a student runs out of
+      # :hard questions in a chapter, we re-fill the hard bucket, not
+      # the whole mix.
+      |> maybe_put(:difficulty, opts[:difficulty])
 
     args
     |> __MODULE__.new()
@@ -307,7 +314,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     end
   end
 
-  defp build_prompt(mode, course, chapter, context, count) do
+  defp build_prompt(mode, course, chapter, context, count, difficulty) do
     subject = course.subject || course.name
     grade = course.grade
     chapter_name = if chapter, do: chapter.name, else: "all chapters"
@@ -438,6 +445,28 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     Return ONLY the JSON array, no other text.
     """
 
+    # Phase 6 difficulty lock — when the demand-driven loop calls us
+    # to re-fill a specific (chapter, difficulty) bucket, force every
+    # generated question to the target difficulty so the mix
+    # instructions elsewhere in the prompt don't dilute it.
+    difficulty_lock =
+      case difficulty do
+        nil ->
+          ""
+
+        d when d in ["easy", "medium", "hard"] or d in [:easy, :medium, :hard] ->
+          """
+          CRITICAL — DIFFICULTY LOCK: Every question in this batch MUST have
+          difficulty="#{d}". Do NOT vary the difficulty. The student has
+          exhausted the supply of #{d}-level questions for this chapter and
+          needs more at that exact level.
+
+          """
+
+        _ ->
+          ""
+      end
+
     base <>
       chapters_section <>
       material_section <>
@@ -446,6 +475,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       existing_section <>
       instructions <>
       visual_rule <>
+      difficulty_lock <>
       format
   end
 
