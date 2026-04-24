@@ -328,6 +328,173 @@ defmodule FunSheep.Questions do
     |> Repo.all()
   end
 
+  @page_size 25
+
+  @doc "Returns the page size used by paginated question bank queries."
+  def page_size, do: @page_size
+
+  @doc """
+  Returns a nested count map used to render the hierarchical sidebar.
+
+  Shape: `%{chapter_id => %{total: N, sections: %{section_id | :none => N}}}`
+
+  `section_id` keys are the actual UUIDs; `:none` groups questions whose
+  `section_id` is nil (unclassified within a chapter).
+
+  `opts[:statuses]` — list of validation statuses to include (default `[:passed]`).
+  """
+  @spec list_chapter_section_counts(String.t(), keyword()) :: map()
+  def list_chapter_section_counts(course_id, opts \\ []) do
+    statuses = Keyword.get(opts, :statuses, @student_visible)
+
+    from(q in Question,
+      where: q.course_id == ^course_id and q.validation_status in ^statuses,
+      group_by: [q.chapter_id, q.section_id],
+      select: {q.chapter_id, q.section_id, count(q.id)}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {chapter_id, section_id, n}, acc ->
+      ch_key = chapter_id || :none
+      sec_key = section_id || :none
+
+      Map.update(acc, ch_key, %{total: n, sections: %{sec_key => n}}, fn ch ->
+        %{ch | total: ch.total + n, sections: Map.put(ch.sections, sec_key, n)}
+      end)
+    end)
+  end
+
+  @doc """
+  Paginated list of questions for a single section.
+
+  Returns `{questions, total_count}`.
+
+  Options:
+    * `:page` — 1-based page number (default `1`)
+    * `:statuses` — validation statuses (default `[:passed]`)
+    * `:filters` — map with optional `"difficulty"`, `"question_type"`, `"validation_status"` keys
+  """
+  @spec list_questions_for_section(String.t(), keyword()) ::
+          {[Question.t()], non_neg_integer()}
+  def list_questions_for_section(section_id, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    statuses = Keyword.get(opts, :statuses, @student_visible)
+    filters = Keyword.get(opts, :filters, %{})
+    offset = (page - 1) * @page_size
+
+    base =
+      Question
+      |> where([q], q.section_id == ^section_id and q.validation_status in ^statuses)
+      |> maybe_filter_difficulty(filters)
+      |> maybe_filter_question_type(filters)
+
+    total = base |> Repo.aggregate(:count)
+
+    questions =
+      base
+      |> order_by([q], desc: q.inserted_at)
+      |> offset(^offset)
+      |> limit(^@page_size)
+      |> preload([:chapter, :section])
+      |> Repo.all()
+
+    {questions, total}
+  end
+
+  @doc """
+  Paginated list of questions for an entire chapter (all sections).
+
+  Returns `{questions, total_count}`.
+
+  Options: same as `list_questions_for_section/2`.
+  """
+  @spec list_questions_for_chapter(String.t(), keyword()) ::
+          {[Question.t()], non_neg_integer()}
+  def list_questions_for_chapter(chapter_id, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    statuses = Keyword.get(opts, :statuses, @student_visible)
+    filters = Keyword.get(opts, :filters, %{})
+    offset = (page - 1) * @page_size
+
+    base =
+      Question
+      |> where([q], q.chapter_id == ^chapter_id and q.validation_status in ^statuses)
+      |> maybe_filter_difficulty(filters)
+      |> maybe_filter_question_type(filters)
+
+    total = base |> Repo.aggregate(:count)
+
+    questions =
+      base
+      |> order_by([q], desc: q.inserted_at)
+      |> offset(^offset)
+      |> limit(^@page_size)
+      |> preload([:chapter, :section])
+      |> Repo.all()
+
+    {questions, total}
+  end
+
+  @doc """
+  Admin coverage summary for a course.
+
+  Returns:
+    * `total_sections` — total section count for the course
+    * `sections_with_questions` — sections that have at least 1 passed question
+    * `by_difficulty` — `%{easy: N, medium: N, hard: N}` of passed questions
+    * `needs_review` / `failed` / `pending` — counts by validation status
+    * `coverage_pct` — float 0–100 (sections_with_questions / total_sections × 100)
+  """
+  @spec coverage_summary(String.t()) :: map()
+  def coverage_summary(course_id) do
+    status_counts = count_by_validation_status(course_id)
+
+    by_difficulty =
+      from(q in Question,
+        where: q.course_id == ^course_id and q.validation_status in ^@student_visible,
+        group_by: q.difficulty,
+        select: {q.difficulty, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    total_sections =
+      from(s in FunSheep.Courses.Section,
+        join: ch in FunSheep.Courses.Chapter,
+        on: ch.id == s.chapter_id,
+        where: ch.course_id == ^course_id,
+        select: count(s.id)
+      )
+      |> Repo.one()
+      |> Kernel.||(0)
+
+    sections_with_questions =
+      from(q in Question,
+        where: q.course_id == ^course_id and q.validation_status in ^@student_visible,
+        where: not is_nil(q.section_id),
+        select: count(q.section_id, :distinct)
+      )
+      |> Repo.one()
+      |> Kernel.||(0)
+
+    coverage_pct =
+      if total_sections > 0, do: sections_with_questions / total_sections * 100, else: 0.0
+
+    %{
+      total_sections: total_sections,
+      sections_with_questions: sections_with_questions,
+      coverage_pct: Float.round(coverage_pct, 1),
+      by_difficulty: %{
+        easy: Map.get(by_difficulty, :easy, 0),
+        medium: Map.get(by_difficulty, :medium, 0),
+        hard: Map.get(by_difficulty, :hard, 0)
+      },
+      needs_review: status_counts.needs_review,
+      failed: status_counts.failed,
+      pending: status_counts.pending,
+      passed: status_counts.passed
+    }
+  end
+
   @doc """
   Lists every question for a course regardless of validation state. Used by
   admin / review dashboards only — never by student-facing LiveViews.
