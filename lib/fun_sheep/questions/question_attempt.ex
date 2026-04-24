@@ -18,6 +18,10 @@ defmodule FunSheep.Questions.QuestionAttempt do
     field :time_taken_seconds, :integer
     field :difficulty_at_attempt, :string
     field :confidence, Ecto.Enum, values: [:dont_know, :not_sure, :i_know]
+    field :score, :integer
+    field :score_max, :integer, default: 10
+    field :score_feedback, :string
+    field :grader_path, :string
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :question, FunSheep.Questions.Question
@@ -35,7 +39,11 @@ defmodule FunSheep.Questions.QuestionAttempt do
       :difficulty_at_attempt,
       :confidence,
       :user_role_id,
-      :question_id
+      :question_id,
+      :score,
+      :score_max,
+      :score_feedback,
+      :grader_path
     ])
     |> validate_required([:is_correct, :user_role_id, :question_id])
     |> validate_number(:time_taken_seconds, greater_than_or_equal_to: 0)

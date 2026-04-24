@@ -110,6 +110,14 @@ defmodule FunSheepWeb.Router do
 
       live "/courses/:course_id/study-guides", StudyGuidesListLive, :index
       live "/courses/:course_id/study-guides/:id", StudyGuideLive, :show
+
+      # Custom fixed-question tests
+      live "/custom-tests", FixedTests.BankLive, :index
+      live "/custom-tests/new", FixedTests.BankLive, :new
+      live "/custom-tests/:id", FixedTests.BankLive, :show
+      live "/custom-tests/:id/start", FixedTests.StartLive, :start
+      live "/custom-tests/:id/assign", FixedTests.StartLive, :assign
+      live "/custom-tests/session/:session_id", FixedTests.SessionLive, :show
     end
   end
 

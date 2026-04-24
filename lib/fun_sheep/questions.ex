@@ -8,6 +8,7 @@ defmodule FunSheep.Questions do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
+
   alias FunSheep.Questions.{
     Question,
     QuestionAttempt,
