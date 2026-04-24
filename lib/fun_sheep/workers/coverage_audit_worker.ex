@@ -98,13 +98,18 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
         end
         |> Enum.filter(fn {_ch, _d, _current, deficit} -> deficit > 0 end)
 
-      # Determine generation mode once per course:
-      # - "from_material" when OCR-completed textbook material exists
-      # - "from_curriculum" otherwise (knowledge-based, always available)
-      # This prevents chapters without uploaded material from silently
-      # generating 0 questions every audit cycle.
+      # Determine generation mode once per course (priority order):
+      # 1. "from_material" — OCR-completed uploaded textbook grounding exists
+      # 2. "from_web_context" — scraped web sources exist (discovered_sources.scraped_text)
+      # 3. "from_curriculum" — no external context; AI uses its training knowledge
+      # This prevents chapters without any uploaded or discovered content from
+      # silently generating 0 questions every audit cycle.
       generation_mode =
-        if course_has_grounding_material?(course_id), do: "from_material", else: "from_curriculum"
+        cond do
+          course_has_grounding_material?(course_id) -> "from_material"
+          course_has_web_context?(course_id) -> "from_web_context"
+          true -> "from_curriculum"
+        end
 
       Enum.each(gaps, fn {ch, d, current, deficit} ->
         # Cap at @regen_batch so a chapter with 100-question deficit
@@ -136,5 +141,9 @@ defmodule FunSheep.Workers.CoverageAuditWorker do
       m.ocr_status == :completed and
         FunSheep.Workers.MaterialClassificationWorker.route(m) in [:ground, :extract_and_ground]
     end)
+  end
+
+  defp course_has_web_context?(course_id) do
+    Content.list_sources_with_scraped_text(course_id) != []
   end
 end

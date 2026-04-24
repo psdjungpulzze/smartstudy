@@ -219,8 +219,16 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   # Build context from OCR materials and existing questions
   defp build_context(course, chapter, args) do
+    mode = args["mode"] || "from_material"
+
     {material_text, material_ids} =
-      collect_material_text_with_refs(course.id, args["source_material_id"])
+      case mode do
+        "from_web_context" ->
+          collect_web_context_text(course.id)
+
+        _ ->
+          collect_material_text_with_refs(course.id, args["source_material_id"])
+      end
 
     existing_questions =
       if chapter do
@@ -241,11 +249,30 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       chapter_names: Enum.map(course.chapters, & &1.name),
       figures: figures,
       hobbies: hobbies,
-      # Phase 4: material_ids that fed the prompt, persisted per
-      # question as grounding_refs. Empty when generating from
-      # curriculum with no materials.
       grounding_material_ids: material_ids
     }
+  end
+
+  # Collect scraped text from discovered web sources as generation context.
+  # Returns {"combined text", []} — no material_ids since these are URLs, not
+  # uploaded materials. The web source URLs are stored in grounding_refs by
+  # the caller on each inserted question.
+  defp collect_web_context_text(course_id) do
+    sources = Content.list_sources_with_scraped_text(course_id)
+
+    if sources == [] do
+      {"", []}
+    else
+      text =
+        sources
+        |> Enum.map(fn s ->
+          header = "--- #{s.source_type}: #{s.title} ---"
+          "#{header}\n#{s.scraped_text}"
+        end)
+        |> Enum.join("\n\n")
+
+      {text, []}
+    end
   end
 
   defp student_hobbies_for_course(course, explicit_user_role_id) do
@@ -400,6 +427,23 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
           Make questions specific and educational — not vague or trivial.
           """
+
+        "from_web_context" ->
+          if context.material_text != "" do
+            """
+            Generate #{count} NEW questions based on the web resources above.
+            These resources were discovered for this #{subject} course — use their content and terminology.
+            Mix question types: multiple choice and short answer.
+            Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
+            """
+          else
+            """
+            Generate #{count} NEW questions based on your knowledge of #{subject} at grade #{grade} level.
+            Use the chapter/topic list above to guide what concepts to test.
+            Mix question types: multiple choice and short answer.
+            Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
+            """
+          end
 
         _ ->
           if context.material_text != "" do

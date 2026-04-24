@@ -401,6 +401,22 @@ defmodule FunSheep.Content do
   end
 
   @doc """
+  Returns discovered sources that have scraped text (status = scraped or processed).
+  Used by `AIQuestionGenerationWorker` for `from_web_context` generation.
+  """
+  def list_sources_with_scraped_text(course_id) do
+    from(ds in DiscoveredSource,
+      where:
+        ds.course_id == ^course_id and
+          ds.status in ["scraped", "processed"] and
+          not is_nil(ds.scraped_text) and
+          ds.scraped_text != "",
+      order_by: [desc: ds.confidence_score]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Gets summary stats for discovered sources.
   Returns %{total: N, by_type: %{"textbook" => N, ...}, questions: N}
   """

@@ -63,12 +63,12 @@ defmodule FunSheep.Workers.StuckClassificationSweeperWorker do
     enqueued =
       Enum.count(stuck_chapter_ids, fn chapter_id ->
         case QuestionClassificationWorker.enqueue_for_chapter(chapter_id) do
+          {:ok, %{conflict?: true}} ->
+            false
+
           {:ok, _job} ->
             Logger.info("[StuckClassify] Re-enqueued classification for chapter #{chapter_id}")
             true
-
-          {:ok, %{conflict?: true}} ->
-            false
 
           _error ->
             false
