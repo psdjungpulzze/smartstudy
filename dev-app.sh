@@ -491,7 +491,7 @@ case "$COMMAND" in
     echo -e "${GREEN}=== Fun Sheep ready ===${NC}"
     echo "  App:  http://localhost:$APP_PORT"
     echo "  Logs: ./dev-app.sh logs"
-    [[ "$WAIT_MODE" == "true" ]] && echo "" && tail_logs
+    if [[ "$WAIT_MODE" == "true" ]]; then echo ""; tail_logs; fi
     ;;
 
   stop)
@@ -520,7 +520,7 @@ case "$COMMAND" in
     echo -e "${GREEN}=== Fun Sheep ready ===${NC}"
     echo "  App:  http://localhost:$APP_PORT"
     echo "  Logs: ./dev-app.sh logs"
-    [[ "$WAIT_MODE" == "true" ]] && echo "" && tail_logs
+    if [[ "$WAIT_MODE" == "true" ]]; then echo ""; tail_logs; fi
     ;;
 
   status)

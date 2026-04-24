@@ -3,19 +3,28 @@
 Merge a reviewed-and-approved PR into its base branch and clean up the worktree. Run this **after** `/git-pr-end` has marked the PR ready and review/CI have signed off — this command does not run tests or rename branches.
 
 ### Worktree preamble
-This command operates on the worktree it is invoked from. If invoked from the main repo checkout (not a worktree), stop and tell the user to `/git-pr-attach <pr-number>` first — the cleanup steps need a known worktree path to remove.
 
-Capture the worktree path, branch name, and main-repo path up front:
-- `<worktree-path>` — current working directory (verify via `git rev-parse --show-toplevel`).
-- `<branch>` — `git rev-parse --abbrev-ref HEAD`.
-- `<main-repo-path>` — `git worktree list --porcelain` and find the entry whose branch is `main` (or the repo's default). The cleanup commands run from there because you can't remove the worktree you're standing in.
+This command can be invoked in two ways:
+
+**A) From within a worktree** (the original flow):
+- `<worktree-path>` = current working directory (`git rev-parse --show-toplevel`)
+- `<branch>` = `git rev-parse --abbrev-ref HEAD`
+- `<main-repo-path>` = find via `git worktree list --porcelain` the entry whose branch is `main`
+
+**B) From the main repo checkout** (pass a PR number as the argument, e.g. `/git-pr-merge 42`):
+- Resolve branch from the PR: `gh pr view <pr-number> --json headRefName --jq '.headRefName'`
+- Find the worktree for that branch via `git worktree list --porcelain` — look for a `branch` line matching `refs/heads/<branch>`. If found, that is `<worktree-path>`. If no worktree exists (branch was worked on without a worktree), set `<worktree-path>` to `null` and skip the `worktree remove` step.
+- `<main-repo-path>` = current working directory
+- **Do NOT stop** when invoked from main — proceed with all phases using the resolved values above.
+
+Capture these three values before proceeding to Phase 1.
 
 ### Phase 1: Preflight (all checks must pass)
 Run in parallel:
 
-- `gh pr view --json number,title,state,isDraft,mergeable,mergeStateStatus,baseRefName,url,reviewDecision` — capture PR metadata.
-- `git -C <worktree-path> status --short` — must be empty (no uncommitted/untracked files).
-- `git -C <worktree-path> log origin/<branch>..HEAD --oneline` — must be empty (no unpushed commits).
+- `gh pr view <pr-number-or-blank> --json number,title,state,isDraft,mergeable,mergeStateStatus,baseRefName,url,reviewDecision` — if invoked from a worktree, omit the PR number (gh auto-detects from branch); if invoked from main with a PR number, pass it explicitly.
+- If `<worktree-path>` is not null: `git -C <worktree-path> status --short` — must be empty (no uncommitted/untracked files).
+- If `<worktree-path>` is not null: `git -C <worktree-path> log origin/<branch>..HEAD --oneline` — must be empty (no unpushed commits).
 
 Then validate:
 
@@ -43,11 +52,12 @@ Wait for explicit confirmation. Then:
 ### Phase 3: Cleanup
 Run from the main repo checkout (use `git -C <main-repo-path>` — do not `cd`):
 
-- `git -C <main-repo-path> worktree remove <worktree-path>` — removes the worktree directory and its admin entry.
+- If `<worktree-path>` is not null: `git -C <main-repo-path> worktree remove <worktree-path>` — removes the worktree directory and its admin entry.
     - If this fails because of leftover untracked files, list them and ask before using `--force`.
+    - If `<worktree-path>` is null (no worktree existed), skip this step.
 - `git -C <main-repo-path> fetch --prune origin` — drops the now-deleted remote-tracking ref.
-- `git -C <main-repo-path> branch -d <branch>` — deletes the local branch (safe delete; will refuse if unmerged, which shouldn't happen post-merge but is a useful safety net).
-- `git -C <main-repo-path> checkout main && git -C <main-repo-path> pull origin main` — bring main up to date so the next `/git-pr-new` branches off the merged commit.
+- `git -C <main-repo-path> branch -d <branch>` — deletes the local branch (safe delete; will refuse if unmerged, which shouldn't happen post-merge but is a useful safety net). If the branch doesn't exist locally, skip silently.
+- `git -C <main-repo-path> pull origin main` — bring main up to date so the next `/git-pr-new` branches off the merged commit.
 
 ### Phase 4: Detach the session
 Tell the user (and yourself) explicitly:
