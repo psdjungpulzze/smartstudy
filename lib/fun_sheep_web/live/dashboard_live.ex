@@ -296,6 +296,8 @@ defmodule FunSheepWeb.DashboardLive do
     schedule_id = assigns.test.test.id
     attempts_count = Map.get(assigns.test, :attempts_count, 0)
 
+    card_state = card_readiness_state(readiness_score, attempts_count)
+
     assessment_done? =
       FunSheep.Assessments.ReadinessCalculator.assessment_complete?(readiness_score)
 
@@ -354,6 +356,7 @@ defmodule FunSheepWeb.DashboardLive do
       |> assign(:full_test_readiness, full_test_readiness)
       |> assign(:empty_count, empty_count)
       |> assign(:has_coverage_gap?, has_coverage_gap?)
+      |> assign(:card_state, card_state)
 
     ~H"""
     <div class={[
@@ -433,11 +436,40 @@ defmodule FunSheepWeb.DashboardLive do
             </div>
           </div>
 
-          <p class="text-[11px] sm:text-xs font-medium text-white/80 mt-1.5">
-            {@attempts_count} {if @attempts_count == 1,
-              do: "question answered",
-              else: "questions answered"}
-          </p>
+          <%!-- State-aware readiness label --%>
+          <%= case @card_state do %>
+            <% :untested -> %>
+              <p class="text-[11px] sm:text-xs font-medium text-white/90 mt-1.5">
+                Not yet tested — take the assessment to see where you stand
+              </p>
+            <% :in_progress -> %>
+              <% scores = if @test.readiness, do: @test.readiness.skill_scores, else: %{} %>
+              <% tested_count = Enum.count(scores, fn {_, v} -> v.status != :insufficient_data end) %>
+              <% total_count = map_size(scores) %>
+              <p class="text-[11px] sm:text-xs font-medium text-white/80 mt-1.5">
+                {tested_count} of {total_count} topics assessed
+                &middot; {@attempts_count} {if @attempts_count == 1,
+                  do: "question answered",
+                  else: "questions answered"}
+              </p>
+            <% :complete -> %>
+              <% scores = if @test.readiness, do: @test.readiness.skill_scores, else: %{} %>
+              <% weak_count = Enum.count(scores, fn {_, v} -> v.status == :weak end) %>
+              <% needs_work_count = Enum.count(scores, fn {_, v} -> v.status == :probing end) %>
+              <% total_needing_work = weak_count + needs_work_count %>
+              <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                <p class="text-[11px] sm:text-xs font-medium text-white/80">
+                  {@attempts_count} {if @attempts_count == 1,
+                    do: "question answered",
+                    else: "questions answered"}
+                </p>
+                <span :if={total_needing_work > 0} class="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-semibold">
+                  {total_needing_work} {if total_needing_work == 1,
+                    do: "topic needs work",
+                    else: "topics need work"}
+                </span>
+              </div>
+          <% end %>
         </div>
 
         <%!-- Assessment + Practice steps --%>
@@ -1059,4 +1091,20 @@ defmodule FunSheepWeb.DashboardLive do
   end
 
   defp subject_emoji(_), do: "📘"
+
+  # State A: nothing answered yet
+  defp card_readiness_state(_readiness_score, 0), do: :untested
+  defp card_readiness_state(nil, _), do: :untested
+
+  defp card_readiness_state(%{skill_scores: scores}, _attempts_count) do
+    total = map_size(scores)
+    tested = Enum.count(scores, fn {_, v} -> v.status != :insufficient_data end)
+
+    cond do
+      total == 0 -> :untested
+      tested == 0 -> :untested
+      tested < total -> :in_progress
+      true -> :complete
+    end
+  end
 end
