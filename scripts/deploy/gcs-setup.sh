@@ -130,6 +130,33 @@ gcloud storage buckets update "gs://${BUCKET_NAME}" --lifecycle-file="$LIFECYCLE
 ok "Lifecycle rules applied"
 
 # ---------------------------------------------------------------------------
+# CORS — allow browsers to PUT directly to GCS resumable session URLs.
+# Without this, every direct upload from https://funsheep.com is rejected
+# by the browser's same-origin check after the sign endpoint returns 200.
+# ---------------------------------------------------------------------------
+info "Setting CORS on gs://${BUCKET_NAME}..."
+CORS_FILE=$(mktemp)
+cat > "$CORS_FILE" <<'JSON'
+[
+  {
+    "origin": ["https://funsheep.com"],
+    "method": ["PUT", "GET", "HEAD", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Range",
+      "X-Upload-Content-Type",
+      "X-Upload-Content-Length",
+      "Authorization"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
+JSON
+gsutil cors set "$CORS_FILE" "gs://${BUCKET_NAME}"
+rm -f "$CORS_FILE"
+ok "CORS configured"
+
+# ---------------------------------------------------------------------------
 # Service account for the app (least privilege, bucket-scoped)
 # ---------------------------------------------------------------------------
 if gcloud iam service-accounts describe "$STORAGE_SA_EMAIL" >/dev/null 2>&1; then
