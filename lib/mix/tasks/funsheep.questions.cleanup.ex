@@ -54,6 +54,17 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
           These are infrastructure failures, not content failures — reset
           them to `:pending` so the validator retries under lower load.
 
+      mix funsheep.questions.cleanup reclassify_wrong_chapter --course ID [--confirm]
+
+          Find :needs_review questions where the validator flagged the chapter
+          assignment as incorrect but provided no `suggested_chapter_id` (the
+          `apply_chapter_suggestions` subcommand handles the ones that do have
+          a suggestion). Resets their chapter_id and section_id to NULL and
+          classification_status to :uncategorized, then enqueues
+          QuestionClassificationWorker to re-route them to the correct chapter.
+          The question stays at :needs_review — it will be re-validated after
+          re-classification lands it in the right chapter.
+
       mix funsheep.questions.cleanup delete_garbage --course ID [--confirm]
 
           Delete questions that match one of the strict "definitely garbage"
@@ -129,6 +140,7 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
       "requeue_transport_failures" -> requeue_transport_failures(course_id, dry_run?)
       "apply_chapter_suggestions" -> apply_chapter_suggestions(course_id, dry_run?, opts)
       "classify_missing" -> classify_missing(course_id, dry_run?)
+      "reclassify_wrong_chapter" -> reclassify_wrong_chapter(course_id, dry_run?)
       "delete_garbage" -> delete_garbage(course_id, dry_run?)
       _ -> usage()
     end
@@ -550,6 +562,66 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
     end
   end
 
+  # -- reclassify_wrong_chapter -----------------------------------------------
+
+  defp reclassify_wrong_chapter(course_id, dry_run?) do
+    # The audit labels a question "wrong_chapter" when the validator set a
+    # suggested_chapter_id (i.e., the validator thinks the question belongs
+    # elsewhere). apply_chapter_suggestions only handles the subset where
+    # chapter_id IS NULL; this subcommand handles the majority where the
+    # question already has a chapter_id but needs to move.
+    ids =
+      Repo.query!(
+        """
+        SELECT id FROM questions
+        WHERE course_id = $1
+          AND validation_status = 'needs_review'
+          AND chapter_id IS NOT NULL
+          AND validation_report->'categorization'->>'suggested_chapter_id' IS NOT NULL
+          AND validation_report->'categorization'->>'suggested_chapter_id' != ''
+        """,
+        [Ecto.UUID.dump!(course_id)]
+      )
+      |> Map.get(:rows)
+      |> Enum.map(fn [id] -> Ecto.UUID.load!(id) end)
+
+    Mix.shell().info(
+      "\n=== RECLASSIFY WRONG-CHAPTER (#{if dry_run?, do: "DRY-RUN", else: "CONFIRMED"}) ==="
+    )
+
+    Mix.shell().info(
+      "Questions flagged wrong_chapter with no suggested alternative: #{length(ids)}"
+    )
+
+    cond do
+      ids == [] ->
+        Mix.shell().info("Nothing to reclassify.")
+
+      dry_run? ->
+        Mix.shell().info("(dry-run — pass --confirm to reset chapter_id + enqueue classifier)")
+
+      true ->
+        {count, _} =
+          from(q in Question, where: q.id in ^ids)
+          |> Repo.update_all(
+            set: [
+              chapter_id: nil,
+              section_id: nil,
+              classification_status: :uncategorized,
+              classification_confidence: nil
+            ]
+          )
+
+        Mix.shell().info("Reset chapter_id/section_id for #{count} questions.")
+
+        ids
+        |> Enum.chunk_every(50)
+        |> Enum.each(&FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions/1)
+
+        Mix.shell().info("Enqueued #{length(ids)} for re-classification.")
+    end
+  end
+
   # -- delete_garbage ---------------------------------------------------------
 
   defp delete_garbage(course_id, dry_run?) do
@@ -642,8 +714,9 @@ defmodule Mix.Tasks.Funsheep.Questions.Cleanup do
       audit               Read-only health snapshot
       apply_explanations  Apply validator-suggested explanations to needs_review
       requeue_no_verdict  Reset validator-bug failures to :pending
-      classify_missing    Re-enqueue classifier for null section_id / chapter_id
-      delete_garbage      Delete truncated / too-short / answer-key failures
+      classify_missing         Re-enqueue classifier for null section_id / chapter_id
+      reclassify_wrong_chapter Reset chapter_id for validator-flagged wrong-chapter questions
+      delete_garbage           Delete truncated / too-short / answer-key failures
     """)
   end
 end
