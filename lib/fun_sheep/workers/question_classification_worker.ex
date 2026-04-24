@@ -40,13 +40,6 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   # Override via `CLASSIFIER_CONFIDENCE_THRESHOLD` env var for tuning.
   @default_confidence_threshold 0.5
 
-  # Interactor only applies `assistant_attrs` on first provision, so pushing
-  # a config change (model, prompt, token cap) requires registering under a
-  # new name. Prior names: "question_classifier", "question_classifier_v1".
-  # If config must change again, pick another descriptive name rather than
-  # reusing a prior one.
-  @assistant_name "question_skill_tagger"
-
   @system_prompt "You are a curriculum skill tagger. Given a question and the list of sections in its chapter, pick the single best existing section. If nothing fits, return null and propose a name. Always return a low confidence when unsure."
 
   @llm_opts %{

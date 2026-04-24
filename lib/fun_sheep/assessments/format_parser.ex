@@ -14,8 +14,6 @@ defmodule FunSheep.Assessments.FormatParser do
 
   require Logger
 
-  @assistant_name "funsheep_format_parser"
-
   @system_prompt """
   You parse test format descriptions written by teachers into structured JSON.
 
