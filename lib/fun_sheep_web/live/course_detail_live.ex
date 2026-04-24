@@ -1275,7 +1275,7 @@ defmodule FunSheepWeb.CourseDetailLive do
         <div class="flex items-center justify-between text-sm mb-1.5">
           <span class="text-[#8E8E93]">
             <%= if @uploading do %>
-              Uploading {@progress.completed + @progress.in_flight}/{@progress.total} files...
+              Uploading {@progress.completed}/{@progress.total} files...
             <% else %>
               {@progress.completed}/{@progress.total} files uploaded
               <%= if @progress.failed > 0 do %>
