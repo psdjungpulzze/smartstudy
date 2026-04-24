@@ -11,7 +11,7 @@ defmodule FunSheep.Questions do
   alias FunSheep.Questions.{
     Question,
     QuestionAttempt,
-    QuestionFeedbackVote,
+    QuestionFlag,
     QuestionFigure,
     QuestionStats
   }
@@ -1240,48 +1240,30 @@ defmodule FunSheep.Questions do
     Repo.preload(questions, :figures)
   end
 
-  ## Community Feedback
+  ## Community Flags
 
   @doc """
-  Submits or updates a user's vote on a question.
+  Flags a question as problematic. One flag per user per question.
 
-  Each user can cast exactly one vote per question. Re-calling with a different
-  vote direction replaces the previous vote and recomputes the quality score.
-  Passing `nil` for vote removes the vote entirely.
-
-  The optional `flag_reason` records *why* the user is dissatisfied — this
-  increments the separate flag_count which is weighted 5× in quality score.
+  `reason` is optional — flagging without a reason still counts against
+  quality score. Calling again updates the reason on an existing flag.
   """
-  def submit_question_feedback(user_role_id, question_id, vote, flag_reason \\ nil)
-      when vote in [:like, :dislike, nil] do
+  def flag_question(user_role_id, question_id, reason \\ nil) do
     Repo.transaction(fn ->
-      existing =
-        Repo.get_by(QuestionFeedbackVote,
-          user_role_id: user_role_id,
-          question_id: question_id
-        )
-
       result =
-        case {existing, vote} do
-          {nil, nil} ->
-            {:ok, nil}
-
-          {nil, _vote} ->
-            %QuestionFeedbackVote{}
-            |> QuestionFeedbackVote.changeset(%{
+        case Repo.get_by(QuestionFlag, user_role_id: user_role_id, question_id: question_id) do
+          nil ->
+            %QuestionFlag{}
+            |> QuestionFlag.changeset(%{
               user_role_id: user_role_id,
               question_id: question_id,
-              vote: vote,
-              flag_reason: flag_reason
+              reason: reason
             })
             |> Repo.insert()
 
-          {record, nil} ->
-            Repo.delete(record)
-
-          {record, _vote} ->
-            record
-            |> QuestionFeedbackVote.changeset(%{vote: vote, flag_reason: flag_reason})
+          existing ->
+            existing
+            |> QuestionFlag.changeset(%{reason: reason})
             |> Repo.update()
         end
 
@@ -1296,40 +1278,26 @@ defmodule FunSheep.Questions do
     end)
   end
 
-  @doc "Returns the current user's vote for a question, or nil if none."
-  def get_user_question_vote(user_role_id, question_id) do
-    Repo.get_by(QuestionFeedbackVote,
-      user_role_id: user_role_id,
-      question_id: question_id
-    )
+  @doc "Returns the user's flag for a question, or nil."
+  def get_question_flag(user_role_id, question_id) do
+    Repo.get_by(QuestionFlag, user_role_id: user_role_id, question_id: question_id)
   end
 
   @doc """
-  Recomputes the quality_score and like/dislike/flag counts for a question
-  from the current vote records and updates question_stats in place.
+  Recomputes flag_count and quality_score for a question from the current
+  flag records and writes to question_stats.
   """
   def recompute_quality_score(question_id) do
-    votes =
-      from(v in QuestionFeedbackVote,
-        where: v.question_id == ^question_id,
-        select: {v.vote, v.flag_reason}
-      )
-      |> Repo.all()
+    flag_count =
+      from(f in QuestionFlag, where: f.question_id == ^question_id, select: count(f.id))
+      |> Repo.one()
 
-    likes = Enum.count(votes, fn {vote, _} -> vote == :like end)
-    dislikes = Enum.count(votes, fn {vote, _} -> vote == :dislike end)
-    flags = Enum.count(votes, fn {_, reason} -> not is_nil(reason) end)
-    quality = QuestionStats.compute_quality(likes, dislikes, flags)
+    quality = QuestionStats.compute_quality(flag_count)
 
     stats = get_or_init_stats(question_id)
 
     stats
-    |> QuestionStats.changeset(%{
-      like_count: likes,
-      dislike_count: dislikes,
-      flag_count: flags,
-      quality_score: quality
-    })
+    |> QuestionStats.changeset(%{flag_count: flag_count, quality_score: quality})
     |> Repo.update()
   end
 

@@ -40,7 +40,7 @@ defmodule FunSheepWeb.PracticeLive do
         practice_complete: false,
         summary: nil,
         start_time: System.monotonic_time(:second),
-        question_vote: nil,
+        question_flagged: false,
         # Tutor state
         tutor_open: false,
         tutor_session_id: nil,
@@ -200,7 +200,7 @@ defmodule FunSheepWeb.PracticeLive do
   def handle_event("next_question", _params, socket) do
     socket =
       socket
-      |> assign(feedback: nil, selected_answer: nil, question_vote: nil)
+      |> assign(feedback: nil, selected_answer: nil, question_flagged: false)
       |> reset_tutor()
       |> advance_to_next()
 
@@ -232,35 +232,11 @@ defmodule FunSheepWeb.PracticeLive do
         practice_complete: false,
         summary: nil,
         start_time: System.monotonic_time(:second),
-        question_vote: nil
+        question_flagged: false
       )
       |> maybe_advance_to_next()
 
     {:noreply, socket}
-  end
-
-  def handle_event("vote_question", %{"vote" => vote_str}, socket) do
-    question = socket.assigns.current_question
-    user_role_id = socket.assigns.current_user["user_role_id"]
-
-    if question && user_role_id do
-      vote = if vote_str == "like", do: :like, else: :dislike
-      current = socket.assigns.question_vote
-
-      new_vote =
-        if current == vote do
-          # toggling the same vote off removes it
-          Questions.submit_question_feedback(user_role_id, question.id, nil)
-          nil
-        else
-          Questions.submit_question_feedback(user_role_id, question.id, vote)
-          vote
-        end
-
-      {:noreply, assign(socket, question_vote: new_vote)}
-    else
-      {:noreply, socket}
-    end
   end
 
   def handle_event("flag_question", %{"reason" => reason_str}, socket) do
@@ -268,9 +244,9 @@ defmodule FunSheepWeb.PracticeLive do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if question && user_role_id do
-      flag_reason = String.to_existing_atom(reason_str)
-      Questions.submit_question_feedback(user_role_id, question.id, :dislike, flag_reason)
-      {:noreply, assign(socket, question_vote: :dislike)}
+      reason = if reason_str == "", do: nil, else: String.to_existing_atom(reason_str)
+      Questions.flag_question(user_role_id, question.id, reason)
+      {:noreply, assign(socket, question_flagged: true)}
     else
       {:noreply, socket}
     end
@@ -753,7 +729,7 @@ defmodule FunSheepWeb.PracticeLive do
             </p>
           </div>
 
-          <.question_vote_bar question_vote={@question_vote} />
+          <.question_flag_link question_flagged={@question_flagged} />
 
           <div class="flex justify-end mt-4">
             <button
@@ -1097,58 +1073,34 @@ defmodule FunSheepWeb.PracticeLive do
     """
   end
 
-  attr :question_vote, :atom, default: nil
+  attr :question_flagged, :boolean, default: false
 
-  defp question_vote_bar(assigns) do
+  defp question_flag_link(assigns) do
     ~H"""
-    <div class="flex items-center gap-3 mt-4">
-      <span class="text-xs text-[#8E8E93]">Was this question helpful?</span>
+    <div class="flex justify-end mt-3">
+      <div :if={@question_flagged} class="text-xs text-[#8E8E93]">
+        Reported
+      </div>
 
-      <button
-        type="button"
-        phx-click="vote_question"
-        phx-value-vote="like"
-        aria-label="Helpful"
-        class={[
-          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors",
-          if(@question_vote == :like,
-            do: "bg-[#E8F8EB] border-[#4CD964] text-[#4CD964]",
-            else: "bg-white border-[#E5E5EA] text-[#8E8E93] hover:border-[#4CD964] hover:text-[#4CD964]"
-          )
-        ]}
-      >
-        <.icon name="hero-hand-thumb-up" class="w-4 h-4" /> Yes
-      </button>
-
-      <button
-        type="button"
-        phx-click="vote_question"
-        phx-value-vote="dislike"
-        aria-label="Not helpful"
-        class={[
-          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors",
-          if(@question_vote == :dislike,
-            do: "bg-[#FFE5E3] border-[#FF3B30] text-[#FF3B30]",
-            else: "bg-white border-[#E5E5EA] text-[#8E8E93] hover:border-[#FF3B30] hover:text-[#FF3B30]"
-          )
-        ]}
-      >
-        <.icon name="hero-hand-thumb-down" class="w-4 h-4" /> No
-      </button>
-
-      <div :if={@question_vote == :dislike} class="flex items-center gap-2 flex-wrap ml-1">
-        <span class="text-xs text-[#8E8E93]">Why?</span>
+      <div :if={!@question_flagged} class="flex items-center gap-2">
+        <button
+          type="button"
+          phx-click="flag_question"
+          phx-value-reason=""
+          class="text-xs text-[#C7C7CC] hover:text-[#8E8E93] transition-colors"
+        >
+          Report
+        </button>
         <%= for {label, reason} <- [
           {"Wrong answer", "incorrect_answer"},
           {"Unclear", "unclear"},
-          {"Outdated", "outdated"},
-          {"Inappropriate", "inappropriate"}
+          {"Outdated", "outdated"}
         ] do %>
           <button
             type="button"
             phx-click="flag_question"
             phx-value-reason={reason}
-            class="px-2.5 py-1 text-xs rounded-full border border-[#E5E5EA] text-[#8E8E93] hover:border-[#FF3B30] hover:text-[#FF3B30] transition-colors"
+            class="text-xs text-[#C7C7CC] hover:text-[#8E8E93] transition-colors"
           >
             {label}
           </button>

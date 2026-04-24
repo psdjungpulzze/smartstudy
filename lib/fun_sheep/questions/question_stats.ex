@@ -2,15 +2,12 @@ defmodule FunSheep.Questions.QuestionStats do
   @moduledoc """
   Aggregate statistics for a question across all students.
 
-  Tracks attempts, difficulty, and community feedback signals.
+  Tracks attempt difficulty and community flags. Positive quality signals
+  (attempts, completions) are handled by the engagement scoring layer.
+  quality_score here is a penalty-only value: 0.0 is clean, negative means
+  students have flagged problems with this question.
 
-  quality_score formula:
-    (like_count × 1.0) - (dislike_count × 3.0) - (flag_count × 5.0)
-
-  Dislikes are weighted 3× likes because explicit negative feedback requires
-  deliberate action and is a stronger quality signal than a passive like.
-  Flags (incorrect/unclear content) are weighted 5× — they indicate a specific
-  content defect that hurts every student who sees that question.
+  Formula: quality_score = -(flag_count × 5.0)
   """
 
   use Ecto.Schema
@@ -19,8 +16,6 @@ defmodule FunSheep.Questions.QuestionStats do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @like_weight 1.0
-  @dislike_weight 3.0
   @flag_weight 5.0
 
   schema "question_stats" do
@@ -29,8 +24,6 @@ defmodule FunSheep.Questions.QuestionStats do
     field :difficulty_score, :float, default: 0.5
     field :avg_time_seconds, :float, default: 0.0
 
-    field :like_count, :integer, default: 0
-    field :dislike_count, :integer, default: 0
     field :flag_count, :integer, default: 0
     field :quality_score, :float, default: 0.0
 
@@ -47,8 +40,6 @@ defmodule FunSheep.Questions.QuestionStats do
       :correct_attempts,
       :difficulty_score,
       :avg_time_seconds,
-      :like_count,
-      :dislike_count,
       :flag_count,
       :quality_score,
       :question_id
@@ -60,8 +51,6 @@ defmodule FunSheep.Questions.QuestionStats do
       greater_than_or_equal_to: 0.0,
       less_than_or_equal_to: 1.0
     )
-    |> validate_number(:like_count, greater_than_or_equal_to: 0)
-    |> validate_number(:dislike_count, greater_than_or_equal_to: 0)
     |> validate_number(:flag_count, greater_than_or_equal_to: 0)
     |> unique_constraint(:question_id)
   end
@@ -80,16 +69,11 @@ defmodule FunSheep.Questions.QuestionStats do
   def compute_difficulty(_correct, _total), do: 0.5
 
   @doc """
-  Computes quality_score from community feedback counts.
-
-  Dislikes are weighted #{@dislike_weight}× and flags #{@flag_weight}× because they represent
-  deliberate negative signals — a user who goes out of their way to say
-  a question is bad is providing stronger information than a passive like.
+  Computes quality_score from flag count. Returns 0.0 or negative — the
+  positive ranking dimension is handled by engagement metrics (attempts,
+  completions), not community votes.
   """
-  def compute_quality(likes, dislikes, flags) do
-    Float.round(
-      likes * @like_weight - dislikes * @dislike_weight - flags * @flag_weight,
-      2
-    )
+  def compute_quality(flags) do
+    Float.round(-flags * @flag_weight, 2)
   end
 end
