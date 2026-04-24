@@ -8,7 +8,7 @@ defmodule FunSheepWeb.AssessmentLive do
   alias FunSheep.Assessments.{Engine, SessionStore, StateCache}
   alias FunSheep.Gamification.FpEconomy
   alias FunSheep.Progress.Event, as: ProgressEvent
-  alias FunSheep.Questions.FreeformGrader
+  alias FunSheep.Questions.{FreeformGrader, ScoredFreeformGrader}
 
   require Logger
 
@@ -229,7 +229,14 @@ defmodule FunSheepWeb.AssessmentLive do
       freeform? = question.question_type in [:short_answer, :free_response]
 
       if freeform? do
-        task = Task.async(fn -> FreeformGrader.grade(question, answer) end)
+        user_role_id = socket.assigns.current_user["user_role_id"]
+
+        grader =
+          if Billing.subscription_has_scored_grading?(user_role_id),
+            do: ScoredFreeformGrader,
+            else: FreeformGrader
+
+        task = Task.async(fn -> grader.grade(question, answer) end)
 
         {:noreply,
          socket
@@ -238,7 +245,7 @@ defmodule FunSheepWeb.AssessmentLive do
         is_correct = check_answer(question, answer)
 
         socket =
-          apply_grading_result(socket, question, answer, state, start_time, is_correct, nil)
+          apply_grading_result(socket, question, answer, state, start_time, is_correct, nil, nil)
 
         {:noreply, socket}
       end
@@ -301,6 +308,33 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   @impl true
+  def handle_info({ref, {:ok, %{score: _score, is_correct: is_correct} = grade_result}}, socket)
+      when socket.assigns.grading_task == ref do
+    Process.demonitor(ref, [:flush])
+
+    %{
+      current_question: question,
+      selected_answer: answer,
+      engine_state: state,
+      start_time: start_time
+    } = socket.assigns
+
+    socket =
+      socket
+      |> assign(grading: false, grading_task: nil)
+      |> apply_grading_result(
+        question,
+        answer,
+        state,
+        start_time,
+        is_correct,
+        grade_result.feedback,
+        grade_result
+      )
+
+    {:noreply, socket}
+  end
+
   def handle_info({ref, {:ok, %{correct: is_correct, feedback: ai_feedback}}}, socket)
       when socket.assigns.grading_task == ref do
     Process.demonitor(ref, [:flush])
@@ -315,7 +349,7 @@ defmodule FunSheepWeb.AssessmentLive do
     socket =
       socket
       |> assign(grading: false, grading_task: nil)
-      |> apply_grading_result(question, answer, state, start_time, is_correct, ai_feedback)
+      |> apply_grading_result(question, answer, state, start_time, is_correct, ai_feedback, nil)
 
     {:noreply, socket}
   end
@@ -336,7 +370,7 @@ defmodule FunSheepWeb.AssessmentLive do
     socket =
       socket
       |> assign(grading: false, grading_task: nil)
-      |> apply_grading_result(question, answer, state, start_time, is_correct, nil)
+      |> apply_grading_result(question, answer, state, start_time, is_correct, nil, nil)
 
     {:noreply, socket}
   end
@@ -355,7 +389,7 @@ defmodule FunSheepWeb.AssessmentLive do
     socket =
       socket
       |> assign(grading: false, grading_task: nil)
-      |> apply_grading_result(question, answer, state, start_time, is_correct, nil)
+      |> apply_grading_result(question, answer, state, start_time, is_correct, nil, nil)
 
     {:noreply, socket}
   end
@@ -390,19 +424,42 @@ defmodule FunSheepWeb.AssessmentLive do
 
   def handle_info(_other, socket), do: {:noreply, socket}
 
-  defp apply_grading_result(socket, question, answer, state, start_time, is_correct, ai_feedback) do
+  defp apply_grading_result(
+         socket,
+         question,
+         answer,
+         state,
+         start_time,
+         is_correct,
+         ai_feedback,
+         grade_result
+       ) do
     time_taken = System.monotonic_time(:second) - start_time
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
-      Questions.record_attempt_with_stats(%{
+      base_attrs = %{
         user_role_id: user_role_id,
         question_id: question.id,
         answer_given: answer,
         is_correct: is_correct,
         time_taken_seconds: max(time_taken, 0),
         difficulty_at_attempt: to_string(state.current_difficulty)
-      })
+      }
+
+      attrs =
+        if grade_result do
+          Map.merge(base_attrs, %{
+            score: grade_result.score,
+            score_max: grade_result.max_score,
+            score_feedback: grade_result.feedback,
+            grader_path: to_string(grade_result.grader_path)
+          })
+        else
+          base_attrs
+        end
+
+      Questions.record_attempt_with_stats(attrs)
 
       if is_correct do
         Gamification.award_xp(user_role_id, @xp_per_correct, "assessment", source_id: question.id)
@@ -419,7 +476,8 @@ defmodule FunSheepWeb.AssessmentLive do
       feedback: %{
         is_correct: is_correct,
         correct_answer: question.answer,
-        ai_feedback: ai_feedback
+        ai_feedback: ai_feedback,
+        grade_result: grade_result
       }
     )
     |> save_state_to_cache()
@@ -964,18 +1022,42 @@ defmodule FunSheepWeb.AssessmentLive do
               {if @feedback.is_correct, do: "Correct!", else: "Incorrect"}
             </p>
             <p
-              :if={!@feedback.is_correct and is_nil(@feedback[:ai_feedback])}
+              :if={
+                !@feedback.is_correct and is_nil(@feedback[:ai_feedback]) and
+                  is_nil(@feedback[:grade_result])
+              }
               class="text-sm text-[#8E8E93] mt-1"
             >
               Correct answer: {@feedback.correct_answer}
             </p>
             <p
-              :if={!@feedback.is_correct and @feedback[:ai_feedback]}
+              :if={
+                !@feedback.is_correct and @feedback[:ai_feedback] and is_nil(@feedback[:grade_result])
+              }
               class="text-sm text-[#8E8E93] mt-1"
             >
               {@feedback.ai_feedback}
             </p>
           </div>
+        </div>
+
+        <%!-- Rubric score badge — shown for premium users with scored grading --%>
+        <.score_badge
+          :if={@feedback[:grade_result]}
+          grade_result={@feedback.grade_result}
+        />
+
+        <%!-- Free-user upsell for freeform questions --%>
+        <div
+          :if={
+            is_nil(@feedback[:grade_result]) and
+              @question.question_type in [:short_answer, :free_response]
+          }
+          class="mt-3 text-xs text-[#8E8E93] text-center"
+        >
+          <.link navigate={~p"/subscription"} class="text-[#4CD964] hover:underline">
+            Upgrade to Premium for rubric scoring →
+          </.link>
         </div>
 
         <%!-- Community stats - shown after answering --%>
@@ -1237,6 +1319,76 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   defp score_delta(_, _), do: nil
+
+  attr :grade_result, :map, required: true
+
+  defp score_badge(assigns) do
+    score = assigns.grade_result.score
+
+    {color, label} =
+      cond do
+        score <= 4 -> {"#FF3B30", score_label(score)}
+        score <= 6 -> {"#FFCC00", score_label(score)}
+        true -> {"#4CD964", score_label(score)}
+      end
+
+    assigns =
+      assign(assigns,
+        score_color: color,
+        score_label: label
+      )
+
+    ~H"""
+    <div class="mt-4 rounded-2xl border border-[#E5E5EA] p-4">
+      <div class="text-2xl font-bold" style={"color: #{@score_color};"}>
+        {@grade_result.score} / {@grade_result.max_score} · {@score_label}
+      </div>
+      <p :if={@grade_result.feedback} class="text-sm text-gray-700 mt-2">
+        {@grade_result.feedback}
+      </p>
+
+      <%!-- Rubric breakdown (only for full scored AI path) --%>
+      <div
+        :if={@grade_result.grader_path == :scored_ai and @grade_result.criteria != []}
+        class="mt-3 space-y-1"
+      >
+        <details>
+          <summary class="text-xs text-[#8E8E93] cursor-pointer hover:text-[#1C1C1E] select-none">
+            View rubric breakdown
+          </summary>
+          <div class="mt-2 space-y-2">
+            <div
+              :for={criterion <- @grade_result.criteria}
+              class="flex items-start justify-between gap-2 text-xs"
+            >
+              <div class="flex-1">
+                <span class="font-medium text-[#1C1C1E]">{criterion["name"]}</span>
+                <span :if={criterion["comment"]} class="block text-[#8E8E93] mt-0.5">
+                  {criterion["comment"]}
+                </span>
+              </div>
+              <span class="shrink-0 font-bold text-[#1C1C1E]">
+                {criterion["earned"]}/{criterion["max"]}
+              </span>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <%!-- Improvement hint --%>
+      <p :if={@grade_result.improvement_hint} class="text-sm text-[#8E8E93] mt-3">
+        💡 {@grade_result.improvement_hint}
+      </p>
+    </div>
+    """
+  end
+
+  defp score_label(score) when score == 0, do: "No Credit"
+  defp score_label(score) when score in 1..3, do: "Minimal"
+  defp score_label(score) when score in 4..6, do: "Partial Credit"
+  defp score_label(score) when score in 7..8, do: "Mostly Correct"
+  defp score_label(score) when score in 9..10, do: "Full Credit"
+  defp score_label(_), do: "Scored"
 
   attr :stats, :map, required: true
 

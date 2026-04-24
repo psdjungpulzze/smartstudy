@@ -5,7 +5,7 @@ defmodule FunSheepWeb.DashboardLive do
 
   import FunSheepWeb.ShareButton
 
-  alias FunSheep.{Courses, Assessments, Gamification, Integrations}
+  alias FunSheep.{Courses, Assessments, FixedTests, Gamification, Integrations, MemorySpan}
   alias FunSheep.Engagement.{SpacedRepetition, StudySessions}
 
   @impl true
@@ -17,7 +17,8 @@ defmodule FunSheepWeb.DashboardLive do
     end
 
     {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations,
-     pinned_id} =
+     pinned_id,
+     custom_assignments} =
       case Ecto.UUID.cast(user_role_id) do
         {:ok, _uuid} ->
           tests = Assessments.list_upcoming_schedules(user_role_id, 90)
@@ -35,12 +36,28 @@ defmodule FunSheepWeb.DashboardLive do
           daily = StudySessions.daily_summary(user_role_id)
           int = Integrations.list_for_user(user_role_id)
           pinned = Assessments.pinned_test_id(user_role_id)
-          {tests_with_readiness, gam, count, review, daily, int, pinned}
+
+          tests_with_readiness_and_spans =
+            Enum.map(tests_with_readiness, fn entry ->
+              span = MemorySpan.get_course_span(user_role_id, entry.test.course_id)
+              Map.put(entry, :memory_span, span)
+            end)
+
+          custom_assignments = FixedTests.list_assignments_for_student(user_role_id)
+
+          {tests_with_readiness_and_spans, gam, count, review, daily, int, pinned,
+           custom_assignments}
 
         :error ->
           {[], default_gamification(), 0, default_review_stats(), default_daily_summary(), [],
-           nil}
+           nil, []}
       end
+
+    # Build memory_spans map: course_id → span (for quick lookup in templates)
+    memory_spans =
+      upcoming_tests
+      |> Enum.map(fn entry -> {entry.test.course_id, Map.get(entry, :memory_span)} end)
+      |> Map.new()
 
     # Primary = pinned test (if still upcoming) or nearest-deadline fallback.
     # "Stale pins" (test has passed / deleted) silently degrade to nearest-deadline.
@@ -57,7 +74,9 @@ defmodule FunSheepWeb.DashboardLive do
         course_count: course_count,
         review_stats: review_stats,
         daily_summary: daily_summary,
-        integrations: integrations
+        integrations: integrations,
+        memory_spans: memory_spans,
+        custom_assignments: custom_assignments
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "dashboard",
@@ -159,7 +178,16 @@ defmodule FunSheepWeb.DashboardLive do
 
     pinned_id = socket.assigns.pinned_test_id
     {primary, other} = split_primary_and_other(updated_tests, pinned_id)
-    {:noreply, assign(socket, primary_test: primary, other_tests: other)}
+
+    memory_spans =
+      updated_tests
+      |> Enum.map(fn entry ->
+        {entry.test.course_id, MemorySpan.get_course_span(user_role_id, entry.test.course_id)}
+      end)
+      |> Map.new()
+
+    {:noreply,
+     assign(socket, primary_test: primary, other_tests: other, memory_spans: memory_spans)}
   end
 
   # Ignore other PubSub messages we're not interested in.
@@ -233,6 +261,15 @@ defmodule FunSheepWeb.DashboardLive do
         />
       </div>
 
+      <%!-- ── Memory Span Card ── --%>
+      <div :if={@primary_test} class="animate-slide-up">
+        <.memory_span_card
+          course_id={@primary_test.test.course_id}
+          span={Map.get(@memory_spans, @primary_test.test.course_id)}
+          course_name={if @primary_test.test.course, do: @primary_test.test.course.name, else: ""}
+        />
+      </div>
+
       <%!-- ── Connected apps ── --%>
       <div class="animate-slide-up">
         <.connected_apps_card integrations={@integrations} />
@@ -245,6 +282,16 @@ defmodule FunSheepWeb.DashboardLive do
         </h2>
         <div class="space-y-2">
           <.test_row :for={t <- @other_tests} test={t} pinned_id={@pinned_test_id} />
+        </div>
+      </div>
+
+      <%!-- ── Custom (fixed) test assignments ── --%>
+      <div :if={@custom_assignments != []} class="animate-slide-up">
+        <h2 class="text-sm font-extrabold text-gray-400 uppercase tracking-wider mb-3">
+          Custom Tests
+        </h2>
+        <div class="space-y-2">
+          <.custom_test_row :for={a <- @custom_assignments} assignment={a} />
         </div>
       </div>
 
@@ -792,6 +839,51 @@ defmodule FunSheepWeb.DashboardLive do
     """
   end
 
+  # ── Custom Test Row ──────────────────────────────────────────────────────
+
+  defp custom_test_row(assigns) do
+    bank = assigns.assignment.bank
+    due = assigns.assignment.due_at
+
+    due_label =
+      cond do
+        is_nil(due) -> nil
+        Date.diff(DateTime.to_date(due), Date.utc_today()) < 0 -> "Overdue"
+        Date.diff(DateTime.to_date(due), Date.utc_today()) == 0 -> "Due today"
+        true -> "Due #{Calendar.strftime(due, "%b %d")}"
+      end
+
+    assigns = assign(assigns, bank: bank, due_label: due_label)
+
+    ~H"""
+    <.link
+      navigate={~p"/custom-tests/#{@bank.id}/start"}
+      class="bg-white rounded-2xl border border-gray-100 p-3 sm:p-4 flex items-center gap-3 card-hover block"
+    >
+      <div class="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
+        <span class="text-indigo-600 text-lg">📋</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
+            Custom
+          </span>
+          <p class="font-semibold text-[#1C1C1E] text-sm truncate">{@bank.title}</p>
+        </div>
+        <%= if @due_label do %>
+          <p class={[
+            "text-xs mt-0.5",
+            if(@due_label == "Overdue", do: "text-[#FF3B30]", else: "text-[#8E8E93]")
+          ]}>
+            {@due_label}
+          </p>
+        <% end %>
+      </div>
+      <span class="text-[#8E8E93] text-sm">→</span>
+    </.link>
+    """
+  end
+
   # ── Just This: Anxiety-Reducing Micro-Task ───────────────────────────────
 
   defp just_this_card(assigns) do
@@ -959,6 +1051,121 @@ defmodule FunSheepWeb.DashboardLive do
     </div>
     """
   end
+
+  # ── Memory Span Card ─────────────────────────────────────────────────────
+
+  attr :course_id, :string, required: true
+  attr :course_name, :string, required: true
+  attr :span, :any, default: nil
+
+  defp memory_span_card(assigns) do
+    formatted = FunSheep.MemorySpan.format_span(assigns.span && assigns.span.span_hours)
+    color = FunSheep.MemorySpan.span_color(assigns.span && assigns.span.span_hours)
+    trend = assigns.span && assigns.span.trend
+    previous_hours = assigns.span && assigns.span.previous_span_hours
+    span_hours = assigns.span && assigns.span.span_hours
+
+    trend_arrow =
+      case trend do
+        "improving" -> "↑"
+        "declining" -> "↓"
+        "stable" -> "→"
+        _ -> nil
+      end
+
+    trend_days =
+      if is_integer(span_hours) and is_integer(previous_hours) do
+        diff = div(abs(span_hours - previous_hours), 24)
+        if diff > 0, do: "+#{diff} days", else: nil
+      end
+
+    {_emoji_label, description} = FunSheep.MemorySpan.span_label(span_hours)
+
+    assigns =
+      assigns
+      |> assign(:formatted, formatted)
+      |> assign(:color, color)
+      |> assign(:trend, trend)
+      |> assign(:trend_arrow, trend_arrow)
+      |> assign(:trend_days, trend_days)
+      |> assign(:description, description)
+      |> assign(:span_hours, span_hours)
+
+    ~H"""
+    <div class="rounded-2xl bg-white shadow-sm border border-[#E5E5EA] p-6">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center text-lg shrink-0">
+          🧠
+        </div>
+        <div>
+          <h3 class="font-bold text-gray-900 text-sm">Memory Span</h3>
+          <p class="text-xs text-gray-400">{@course_name}</p>
+        </div>
+      </div>
+
+      <div :if={is_nil(@span_hours)} class="text-sm text-gray-500 mb-3">
+        Keep practicing to unlock your memory span!
+      </div>
+
+      <div :if={@span_hours} class="flex items-center gap-2 mb-2">
+        <span class={[
+          "text-xl font-extrabold",
+          memory_span_text_color(@color)
+        ]}>
+          {@formatted}
+        </span>
+        <span
+          :if={@trend_arrow}
+          class={[
+            "text-sm font-bold",
+            memory_span_trend_color(@trend)
+          ]}
+        >
+          {@trend_arrow}
+          <span :if={@trend_days} class="text-xs font-medium">{@trend_days}</span>
+        </span>
+        <span class={[
+          "text-xs font-semibold px-2 py-0.5 rounded-full ml-auto",
+          memory_span_badge_class(@color)
+        ]}>
+          {memory_span_badge_label(@color)}
+        </span>
+      </div>
+
+      <p :if={@span_hours} class="text-xs text-gray-500 mb-3 leading-relaxed">
+        {@description}
+      </p>
+
+      <.link
+        navigate={~p"/courses/#{@course_id}/memory-span"}
+        class="text-xs font-semibold text-[#4CD964] hover:text-[#3DBF55] transition-colors inline-flex items-center gap-1"
+      >
+        See breakdown by topic <.icon name="hero-arrow-right" class="w-3.5 h-3.5" />
+      </.link>
+    </div>
+    """
+  end
+
+  defp memory_span_text_color("green"), do: "text-[#4CD964]"
+  defp memory_span_text_color("yellow"), do: "text-amber-500"
+  defp memory_span_text_color("red"), do: "text-red-500"
+  defp memory_span_text_color(_), do: "text-gray-400"
+
+  # Takes the trend value ("improving" | "declining" | "stable" | nil)
+  defp memory_span_trend_color("improving"), do: "text-[#4CD964]"
+  defp memory_span_trend_color("declining"), do: "text-red-500"
+  defp memory_span_trend_color(_), do: "text-gray-400"
+
+  # The badge and text helpers below take the span color ("green" | "yellow" | "red" | "gray")
+  defp memory_span_badge_class("green"), do: "bg-green-100 text-[#4CD964]"
+  defp memory_span_badge_class("yellow"), do: "bg-amber-100 text-amber-600"
+  defp memory_span_badge_class("red"), do: "bg-red-100 text-red-600"
+  defp memory_span_badge_class(_), do: "bg-gray-100 text-gray-500"
+
+  defp memory_span_badge_label("green"), do: "Strong"
+  defp memory_span_badge_label("yellow"), do: "Moderate"
+  defp memory_span_badge_label("red"), do: "At risk"
+  defp memory_span_badge_label(_), do: "No data"
 
   # ── Helpers ─────────────────────────────────────────────────────────────
 
