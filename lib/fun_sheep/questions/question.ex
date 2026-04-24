@@ -17,7 +17,18 @@ defmodule FunSheep.Questions.Question do
     field :answer, :string
 
     field :question_type, Ecto.Enum,
-      values: [:multiple_choice, :short_answer, :free_response, :true_false, :essay]
+      values: [
+        :multiple_choice,
+        :short_answer,
+        :free_response,
+        :true_false,
+        :essay,
+        :multi_select,
+        :cloze,
+        :matching,
+        :ordering,
+        :numeric
+      ]
 
     field :options, :map
     field :source_url, :string
@@ -72,7 +83,11 @@ defmodule FunSheep.Questions.Question do
     # Array of %{"title" => ..., "body" => ...} for DBQ/synthesis prompts
     field :essay_source_documents, :map
 
+    # Comprehension group fields — set when question belongs to a stimulus group
+    field :group_sequence, :integer
+
     belongs_to :essay_rubric_template, FunSheep.Essays.EssayRubricTemplate
+    belongs_to :question_group, FunSheep.Questions.QuestionGroup
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :chapter, FunSheep.Courses.Chapter
     belongs_to :section, FunSheep.Courses.Section
@@ -125,7 +140,9 @@ defmodule FunSheep.Questions.Question do
       :essay_time_limit_minutes,
       :essay_word_target,
       :essay_word_limit,
-      :essay_source_documents
+      :essay_source_documents,
+      :question_group_id,
+      :group_sequence
     ])
     |> validate_required([:content, :answer, :question_type, :difficulty, :course_id])
     |> foreign_key_constraint(:course_id)
@@ -133,5 +150,6 @@ defmodule FunSheep.Questions.Question do
     |> foreign_key_constraint(:section_id)
     |> foreign_key_constraint(:school_id)
     |> foreign_key_constraint(:essay_rubric_template_id)
+    |> foreign_key_constraint(:question_group_id)
   end
 end
