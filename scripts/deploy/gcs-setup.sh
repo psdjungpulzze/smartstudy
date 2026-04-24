@@ -130,31 +130,43 @@ gcloud storage buckets update "gs://${BUCKET_NAME}" --lifecycle-file="$LIFECYCLE
 ok "Lifecycle rules applied"
 
 # ---------------------------------------------------------------------------
-# CORS — allow browsers to PUT directly to GCS resumable session URLs.
-# Without this, every direct upload from https://funsheep.com is rejected
-# by the browser's same-origin check after the sign endpoint returns 200.
+# CORS — required for browser-side resumable uploads
+#
+# The JS client POSTs to /api/uploads/sign (same-origin, no CORS needed),
+# then PUTs the file body directly to the GCS session URI returned by that
+# endpoint (cross-origin — storage.googleapis.com).  Without CORS the browser
+# refuses the preflight OPTIONS request and every upload fails immediately.
+#
+# Allowed headers cover:
+#   content-type       — sent on every PUT
+#   content-range      — sent on chunked PUTs (>8 MB files)
+#   x-goog-resumable   — GCS-specific header echoed in initiation responses
 # ---------------------------------------------------------------------------
-info "Setting CORS on gs://${BUCKET_NAME}..."
+info "Configuring CORS for browser-side uploads..."
 CORS_FILE=$(mktemp)
-cat > "$CORS_FILE" <<'JSON'
+# Add CORS file to the cleanup trap alongside LIFECYCLE_FILE
+trap 'rm -f "$LIFECYCLE_FILE" "$CORS_FILE"' EXIT
+
+# APP_ORIGIN may be overridden; defaults to the production URL.
+APP_ORIGIN="${APP_ORIGIN:-https://funsheep.com}"
+
+cat > "$CORS_FILE" <<JSON
 [
   {
-    "origin": ["https://funsheep.com"],
-    "method": ["PUT", "GET", "HEAD", "OPTIONS"],
+    "origin": ["${APP_ORIGIN}"],
+    "method": ["PUT", "GET", "OPTIONS"],
     "responseHeader": [
       "Content-Type",
       "Content-Range",
-      "X-Upload-Content-Type",
-      "X-Upload-Content-Length",
-      "Authorization"
+      "Authorization",
+      "X-Goog-Resumable"
     ],
     "maxAgeSeconds": 3600
   }
 ]
 JSON
-gsutil cors set "$CORS_FILE" "gs://${BUCKET_NAME}"
-rm -f "$CORS_FILE"
-ok "CORS configured"
+gcloud storage buckets update "gs://${BUCKET_NAME}" --cors-file="$CORS_FILE"
+ok "CORS configured for ${APP_ORIGIN}"
 
 # ---------------------------------------------------------------------------
 # Service account for the app (least privilege, bucket-scoped)
