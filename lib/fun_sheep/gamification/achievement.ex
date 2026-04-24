@@ -28,6 +28,14 @@ defmodule FunSheep.Gamification.Achievement do
     night_owl
     early_bird
     comeback_kid
+    first_follow
+    first_follower
+    flock_starter
+    shepherd
+    lead_shepherd
+    flock_builder
+    study_buddy
+    mutual_10
   )
 
   schema "achievements" do
@@ -105,6 +113,30 @@ defmodule FunSheep.Gamification.Achievement do
 
       "comeback_kid" ->
         %{name: "Comeback Kid", emoji: "🐑", description: "Recovered a broken streak"}
+
+      "first_follow" ->
+        %{name: "Friendly Sheep", emoji: "🐑", description: "Followed your first classmate"}
+
+      "first_follower" ->
+        %{name: "Flock Magnet", emoji: "🐏", description: "Someone followed you!"}
+
+      "flock_starter" ->
+        %{name: "Flock Starter", emoji: "🌱", description: "Gained 5 followers"}
+
+      "shepherd" ->
+        %{name: "Shepherd", emoji: "🐕", description: "Invited 5 students who joined"}
+
+      "lead_shepherd" ->
+        %{name: "Lead Shepherd", emoji: "🏅", description: "Invited 10 students who joined"}
+
+      "flock_builder" ->
+        %{name: "Flock Builder", emoji: "🌟", description: "Invited 20 students who joined"}
+
+      "study_buddy" ->
+        %{name: "Study Buddy", emoji: "🤝", description: "Completed a shared course together"}
+
+      "mutual_10" ->
+        %{name: "Social Butterfly", emoji: "♥", description: "10 mutual follows — true friends!"}
 
       _ ->
         %{name: type, emoji: "🏅", description: "Achievement unlocked"}

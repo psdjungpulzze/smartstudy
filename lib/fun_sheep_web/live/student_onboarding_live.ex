@@ -1,16 +1,17 @@
 defmodule FunSheepWeb.StudentOnboardingLive do
   @moduledoc """
-  4-step student onboarding wizard.
+  5-step student onboarding wizard.
 
   Step 1: Display name + grade
   Step 2: School search (optional/skippable)
   Step 3: Course catalog with one-click enrollment
-  Step 4: Done screen
+  Step 4: Follow classmates
+  Step 5: Done screen
   """
 
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Accounts, Courses, Enrollments, Geo}
+  alias FunSheep.{Accounts, Courses, Enrollments, Geo, Social}
 
   @grade_options ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College Adult)
 
@@ -42,7 +43,9 @@ defmodule FunSheepWeb.StudentOnboardingLive do
        invite_email: "",
        invite_sent: false,
        other_school_courses: [],
-       show_other_courses: false
+       show_other_courses: false,
+       onboarding_peers: [],
+       followed_in_onboarding: MapSet.new()
      )}
   end
 
@@ -55,7 +58,7 @@ defmodule FunSheepWeb.StudentOnboardingLive do
       Accounts.complete_onboarding(user_role)
     end
 
-    {:noreply, assign(socket, step: 4)}
+    {:noreply, assign(socket, step: 5)}
   end
 
   def handle_params(_params, _uri, socket) do
@@ -157,7 +160,19 @@ defmodule FunSheepWeb.StudentOnboardingLive do
     user_role = Accounts.get_user_role!(user_role_id)
     Accounts.complete_onboarding(user_role)
 
-    {:noreply, assign(socket, step: 4, enrolled_courses: enrolled)}
+    peers = Social.school_peers(user_role_id, limit: 8)
+    {:noreply, assign(socket, step: 4, enrolled_courses: enrolled, onboarding_peers: peers)}
+  end
+
+  def handle_event("onboarding_follow", %{"id" => target_id}, socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    Social.follow(user_role_id, target_id, "suggested_school")
+    followed = MapSet.put(socket.assigns.followed_in_onboarding, target_id)
+    {:noreply, assign(socket, followed_in_onboarding: followed)}
+  end
+
+  def handle_event("step4_done", _params, socket) do
+    {:noreply, assign(socket, step: 5)}
   end
 
   def handle_event("invite_teacher_email", %{"email" => email}, socket) do
@@ -209,13 +224,13 @@ defmodule FunSheepWeb.StudentOnboardingLive do
       <div class="w-full max-w-lg">
         <%!-- Progress indicator --%>
         <div class="flex items-center justify-center gap-2 mb-8">
-          <%= for i <- 1..4 do %>
+          <%= for i <- 1..5 do %>
             <div class={[
               "h-2 rounded-full transition-all duration-300",
               if(i <= @step, do: "bg-[#4CD964] w-8", else: "bg-gray-200 dark:bg-gray-700 w-4")
             ]} />
           <% end %>
-          <span class="text-xs text-gray-500 ml-2">Step {@step} of 4</span>
+          <span class="text-xs text-gray-500 ml-2">Step {@step} of 5</span>
         </div>
 
         <%= case @step do %>
@@ -227,6 +242,8 @@ defmodule FunSheepWeb.StudentOnboardingLive do
             {render_step3(assigns)}
           <% 4 -> %>
             {render_step4(assigns)}
+          <% 5 -> %>
+            {render_step5(assigns)}
         <% end %>
       </div>
     </div>
@@ -511,6 +528,67 @@ defmodule FunSheepWeb.StudentOnboardingLive do
   end
 
   defp render_step4(assigns) do
+    ~H"""
+    <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-6">
+      <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-1">
+        Follow your classmates 🐑
+      </h2>
+      <p class="text-gray-500 dark:text-gray-400 text-sm mb-4">
+        See how they're doing and cheer each other on.
+      </p>
+
+      <%= if @onboarding_peers == [] do %>
+        <div class="text-center py-8">
+          <p class="text-gray-400 text-sm mb-1">No classmates found yet.</p>
+          <p class="text-xs text-gray-400">Make sure your school is set so we can find them.</p>
+        </div>
+      <% else %>
+        <div class="space-y-2 mb-4">
+          <%= for peer <- @onboarding_peers do %>
+            <div class="flex items-center gap-3 p-3 bg-[#F5F5F7] dark:bg-[#3A3A3C] rounded-2xl">
+              <div class="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-sm font-bold text-gray-600 dark:text-gray-200 shrink-0">
+                {String.first(peer.display_name || "?")}
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-bold text-gray-900 dark:text-white truncate">
+                  {peer.display_name}
+                </p>
+                <p class="text-xs text-gray-400">Grade {peer.grade || "?"}</p>
+              </div>
+              <%= if MapSet.member?(@followed_in_onboarding, peer.id) do %>
+                <span class="text-xs text-[#4CD964] font-bold">Following ✓</span>
+              <% else %>
+                <button
+                  type="button"
+                  phx-click="onboarding_follow"
+                  phx-value-id={peer.id}
+                  class="text-xs px-3 py-1.5 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors shrink-0"
+                >
+                  + Follow
+                </button>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+
+      <div class="flex flex-col gap-3">
+        <button
+          type="button"
+          phx-click="step4_done"
+          class="w-full bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium py-3 rounded-full shadow-md transition-colors"
+        >
+          {if MapSet.size(@followed_in_onboarding) > 0, do: "Continue →", else: "Skip for now →"}
+        </button>
+        <.link navigate={~p"/social/find"} class="text-sm text-center text-gray-400 hover:text-gray-600">
+          Search all classmates →
+        </.link>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_step5(assigns) do
     ~H"""
     <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-8 text-center">
       <div class="text-5xl mb-4">🎉</div>

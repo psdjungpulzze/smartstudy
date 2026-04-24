@@ -89,6 +89,9 @@ defmodule FunSheepWeb.Router do
       live "/subscription", SubscriptionLive, :index
       live "/leaderboard", LeaderboardLive, :index
 
+      live "/social/profile/:id", UserProfileLive, :show
+      live "/social/find", FindFriendsLive, :index
+
       live "/integrations", IntegrationsLive, :index
 
       live "/courses", CourseSearchLive, :index

@@ -5,7 +5,7 @@ defmodule FunSheepWeb.CourseDetailLive do
   import FunSheepWeb.TextbookBanner
   import FunSheepWeb.Components.TOCBanners
 
-  alias FunSheep.{Assessments, Content, Courses, Questions, Repo}
+  alias FunSheep.{Assessments, Content, Courses, Questions, Repo, Social}
   alias FunSheep.Courses.{Chapter, DiscoveredTOC, Section, TOCRebase}
 
   @impl true
@@ -76,7 +76,13 @@ defmodule FunSheepWeb.CourseDetailLive do
        # Community-approval TOC state (pending proposal, post-rebase
        # acknowledgement, claim-ownership). Pre-computed in one helper
        # so the render stays readable.
-       toc_state: toc_state
+       toc_state: toc_state,
+       # Social: course sharing
+       shareable_followers: load_shareable_followers(user_role_id, course_id),
+       received_share: load_received_share(user_role_id, course_id),
+       show_share_modal: false,
+       selected_share_recipients: MapSet.new(),
+       share_sent: false
      )}
   end
 
@@ -715,7 +721,69 @@ defmodule FunSheepWeb.CourseDetailLive do
     {:noreply, put_flash(socket, :info, message)}
   end
 
+  # ── Social: Course Sharing ────────────────────────────────────────────────
+
+  def handle_event("open_share_modal", _params, socket) do
+    {:noreply, assign(socket, show_share_modal: true, selected_share_recipients: MapSet.new(), share_sent: false)}
+  end
+
+  def handle_event("close_share_modal", _params, socket) do
+    {:noreply, assign(socket, show_share_modal: false)}
+  end
+
+  def handle_event("toggle_share_recipient", %{"id" => recipient_id}, socket) do
+    selected = socket.assigns.selected_share_recipients
+    new_selected =
+      if MapSet.member?(selected, recipient_id),
+        do: MapSet.delete(selected, recipient_id),
+        else: MapSet.put(selected, recipient_id)
+    {:noreply, assign(socket, selected_share_recipients: new_selected)}
+  end
+
+  def handle_event("submit_share", _params, socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    course_id = socket.assigns.course.id
+    recipients = MapSet.to_list(socket.assigns.selected_share_recipients)
+
+    if recipients == [] do
+      {:noreply, put_flash(socket, :error, "Select at least one friend to share with.")}
+    else
+      case Social.share_course(user_role_id, course_id, recipients) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> assign(
+             show_share_modal: false,
+             share_sent: true,
+             shareable_followers: load_shareable_followers(user_role_id, course_id)
+           )
+           |> put_flash(:info, "Course shared with #{length(recipients)} friend(s)!")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Couldn't share. Please try again.")}
+      end
+    end
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────
+
+  defp load_shareable_followers(nil, _course_id), do: []
+  defp load_shareable_followers(user_role_id, course_id) do
+    case Ecto.UUID.cast(user_role_id) do
+      {:ok, _} -> Social.shareable_followers(user_role_id, course_id)
+      :error -> []
+    end
+  end
+
+  defp load_received_share(nil, _course_id), do: nil
+  defp load_received_share(user_role_id, course_id) do
+    case Ecto.UUID.cast(user_role_id) do
+      {:ok, _} ->
+        Social.list_received_shares(user_role_id)
+        |> Enum.find(fn r -> r.share.course_id == course_id end)
+      :error -> nil
+    end
+  end
 
   defp share_test_text(schedule, course, score) do
     base = "I'm preparing for #{schedule.name} (#{course.subject}) on Fun Sheep!"
@@ -832,6 +900,25 @@ defmodule FunSheepWeb.CourseDetailLive do
 
       <.claim_ownership_banner :if={@toc_state.can_adopt} course={@course} />
 
+      <%!-- Shared-with-you banner --%>
+      <div :if={@received_share} class="bg-[#E8F8EB] border border-[#4CD964]/30 rounded-2xl px-4 py-3 mb-4 flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-[#4CD964] flex items-center justify-center text-white text-sm font-bold shrink-0">
+          {String.first((@received_share.share.sharer && @received_share.share.sharer.display_name) || "?")}
+        </div>
+        <p class="text-sm text-gray-700 flex-1">
+          <span class="font-bold">{(@received_share.share.sharer && @received_share.share.sharer.display_name) || "A friend"}</span>
+          shared this course with you! You're studying together. 🐑
+        </p>
+      </div>
+
+      <%!-- Share modal --%>
+      <.course_share_modal
+        :if={@show_share_modal}
+        followers={@shareable_followers}
+        selected={@selected_share_recipients}
+        course_name={@course.name}
+      />
+
       <%!-- Course Header --%>
       <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6">
         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
@@ -860,6 +947,18 @@ defmodule FunSheepWeb.CourseDetailLive do
               url={share_url(~p"/courses/#{@course.id}")}
               style={:icon}
             />
+            <button
+              :if={@shareable_followers != []}
+              phx-click="open_share_modal"
+              class="flex items-center gap-1.5 px-3 py-2 rounded-full bg-[#4CD964] text-white text-xs font-bold hover:bg-[#3DBF55] transition-colors shadow-sm"
+              title="Share with a friend"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h12" />
+              </svg>
+              Share
+            </button>
             <button
               phx-click="toggle_upload"
               class={[
@@ -2346,5 +2445,86 @@ defmodule FunSheepWeb.CourseDetailLive do
     socket
     |> assign(:course, reloaded)
     |> assign(:toc_state, build_toc_state(reloaded, user_role_id, socket.assigns.current_user))
+  end
+
+  # ── Course Share Modal Component ──────────────────────────────────────────
+
+  attr :followers, :list, required: true
+  attr :selected, :any, required: true
+  attr :course_name, :string, required: true
+
+  defp course_share_modal(assigns) do
+    ~H"""
+    <div
+      class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      phx-click="close_share_modal"
+    >
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm" phx-click-away="close_share_modal">
+        <div class="p-5 border-b border-gray-100">
+          <h3 class="font-extrabold text-gray-900">Share with Classmates</h3>
+          <p class="text-xs text-gray-400 mt-0.5">
+            Study <span class="font-medium text-gray-600">{@course_name}</span> together
+          </p>
+        </div>
+
+        <div class="p-3 max-h-64 overflow-y-auto divide-y divide-gray-50">
+          <div
+            :for={peer <- @followers}
+            class="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors"
+            phx-click="toggle_share_recipient"
+            phx-value-id={peer.id}
+          >
+            <div class={[
+              "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0",
+              if(MapSet.member?(@selected, peer.id),
+                do: "bg-[#4CD964] text-white",
+                else: "bg-gray-100 text-gray-600"
+              )
+            ]}>
+              {String.first(peer.display_name || "?")}
+            </div>
+            <span class="text-sm font-medium text-gray-800 flex-1">{peer.display_name}</span>
+            <div class={[
+              "w-5 h-5 rounded-full border-2 flex items-center justify-center",
+              if(MapSet.member?(@selected, peer.id),
+                do: "bg-[#4CD964] border-[#4CD964]",
+                else: "border-gray-300"
+              )
+            ]}>
+              <svg :if={MapSet.member?(@selected, peer.id)} class="w-3 h-3 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+          </div>
+
+          <div :if={@followers == []} class="py-8 text-center">
+            <p class="text-sm text-gray-400">No mutual friends to share with yet.</p>
+          </div>
+        </div>
+
+        <div class="p-4 border-t border-gray-100 flex gap-2">
+          <button
+            phx-click="close_share_modal"
+            class="flex-1 py-2 rounded-full border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            phx-click="submit_share"
+            disabled={MapSet.size(@selected) == 0}
+            class={[
+              "flex-1 py-2 rounded-full text-sm font-bold transition-colors",
+              if(MapSet.size(@selected) > 0,
+                do: "bg-[#4CD964] text-white hover:bg-[#3DBF55]",
+                else: "bg-gray-100 text-gray-400 cursor-not-allowed"
+              )
+            ]}
+          >
+            Share ({MapSet.size(@selected)})
+          </button>
+        </div>
+      </div>
+    </div>
+    """
   end
 end

@@ -196,15 +196,38 @@ defmodule FunSheep.Gamification do
         {:already_earned, existing}
 
       nil ->
-        %Achievement{}
-        |> Achievement.changeset(%{
-          user_role_id: user_role_id,
-          achievement_type: achievement_type,
-          earned_at: DateTime.utc_now(),
-          metadata: metadata
-        })
-        |> Repo.insert()
+        result =
+          %Achievement{}
+          |> Achievement.changeset(%{
+            user_role_id: user_role_id,
+            achievement_type: achievement_type,
+            earned_at: DateTime.utc_now(),
+            metadata: metadata
+          })
+          |> Repo.insert()
+
+        case result do
+          {:ok, _achievement} -> fan_out_achievement(user_role_id, achievement_type)
+          _ -> :ok
+        end
+
+        result
     end
+  end
+
+  defp fan_out_achievement(user_role_id, achievement_type) do
+    follower_ids =
+      from(f in FunSheep.Social.Follow,
+        where: f.following_id == ^user_role_id,
+        select: f.follower_id
+      )
+      |> Repo.all()
+
+    msg = {:friend_achievement, user_role_id, achievement_type}
+
+    Enum.each(follower_ids, fn fid ->
+      Phoenix.PubSub.broadcast(FunSheep.PubSub, "social:feed:#{fid}", msg)
+    end)
   end
 
   @doc "Lists all achievements for a user."
