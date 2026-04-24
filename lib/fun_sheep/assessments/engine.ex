@@ -65,8 +65,11 @@ defmodule FunSheep.Assessments.Engine do
     types = extract_format_question_types(format_template)
 
     if types == [] do
-      # No explicit format — exclude T/F by default
-      ["multiple_choice", "short_answer", "free_response"]
+      # No format template configured — default to MC only.
+      # Short-answer/free-response require AI grading (slow, expensive) and
+      # should only appear when the format template explicitly requests them.
+      # T/F is excluded for the same reason as without a format.
+      ["multiple_choice"]
     else
       types
     end
