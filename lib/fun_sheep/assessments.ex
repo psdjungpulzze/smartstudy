@@ -82,6 +82,92 @@ defmodule FunSheep.Assessments do
   end
 
   @doc """
+  Returns the student's primary (pinned or nearest-deadline) upcoming test.
+
+  Resolution (per ADR-005):
+  1. If `user_roles.pinned_test_schedule_id` is set AND the referenced test
+     is still upcoming, that is primary.
+  2. Otherwise, the nearest-deadline upcoming test.
+  3. Otherwise, `nil`.
+
+  Stale pins (pinned test has passed / been deleted) silently fall through
+  to the nearest-deadline default — we do not resurrect an expired pin.
+  """
+  def primary_test(nil), do: nil
+
+  def primary_test(user_role_id) when is_binary(user_role_id) do
+    upcoming = list_upcoming_schedules(user_role_id, 365)
+    primary_test_from_upcoming(user_role_id, upcoming)
+  end
+
+  @doc """
+  Same as `primary_test/1` but takes a pre-fetched upcoming list to avoid
+  duplicate queries when the dashboard has already loaded it.
+  """
+  def primary_test_from_upcoming(nil, _), do: nil
+  def primary_test_from_upcoming(_, []), do: nil
+
+  def primary_test_from_upcoming(user_role_id, upcoming) when is_list(upcoming) do
+    case Repo.get(UserRole, user_role_id) do
+      %UserRole{pinned_test_schedule_id: nil} ->
+        List.first(upcoming)
+
+      %UserRole{pinned_test_schedule_id: pinned_id} ->
+        Enum.find(upcoming, fn ts -> ts.id == pinned_id end) || List.first(upcoming)
+
+      nil ->
+        List.first(upcoming)
+    end
+  end
+
+  @doc """
+  Returns the student's pinned test schedule id, or `nil` if none is
+  pinned. This is the raw stored value; callers that want the effective
+  primary (honoring stale-pin fallback) should use `primary_test/1`.
+  """
+  def pinned_test_id(nil), do: nil
+
+  def pinned_test_id(user_role_id) do
+    case Repo.get(UserRole, user_role_id) do
+      %UserRole{pinned_test_schedule_id: id} -> id
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Pins a test as the student's primary. The test must belong to this
+  user_role. Returns `{:ok, user_role}` or `{:error, changeset}`.
+  """
+  def pin_test(user_role_id, test_schedule_id) do
+    with %UserRole{} = user_role <- Repo.get(UserRole, user_role_id),
+         %TestSchedule{user_role_id: ^user_role_id} <-
+           Repo.get(TestSchedule, test_schedule_id) do
+      user_role
+      |> UserRole.changeset(%{pinned_test_schedule_id: test_schedule_id})
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+      %TestSchedule{} -> {:error, :forbidden}
+    end
+  end
+
+  @doc """
+  Clears any pinned test; the student falls back to the nearest-deadline
+  default.
+  """
+  def unpin_test(user_role_id) do
+    case Repo.get(UserRole, user_role_id) do
+      nil ->
+        {:error, :not_found}
+
+      user_role ->
+        user_role
+        |> UserRole.changeset(%{pinned_test_schedule_id: nil})
+        |> Repo.update()
+    end
+  end
+
+  @doc """
   Returns upcoming test schedules grouped by course_id.
   Each entry includes the schedule and its latest readiness score.
   Result: %{course_id => [%{schedule: schedule, readiness: score_or_nil}]}

@@ -1053,40 +1053,8 @@ defmodule FunSheep.Questions do
     |> maybe_filter_section(filters)
     |> maybe_filter_difficulty(filters)
     |> maybe_filter_question_type(filters)
-    |> maybe_filter_source_material(filters)
     |> order_by([q], desc: q.inserted_at)
     |> preload([:chapter, :section, :stats])
-    |> Repo.all()
-  end
-
-  defp maybe_filter_source_material(query, %{source_material_ids: ids})
-       when is_list(ids) and ids != [] do
-    where(query, [q], q.source_material_id in ^ids)
-  end
-
-  defp maybe_filter_source_material(query, %{"source_material_ids" => ids})
-       when is_list(ids) and ids != [] do
-    where(query, [q], q.source_material_id in ^ids)
-  end
-
-  defp maybe_filter_source_material(query, _), do: query
-
-  @doc """
-  Returns distinct source materials that have questions for a course.
-  Used for the question set toggle UI.
-  """
-  def list_question_sources(course_id) do
-    from(q in Question,
-      where: q.course_id == ^course_id and not is_nil(q.source_material_id),
-      join: m in FunSheep.Content.UploadedMaterial,
-      on: m.id == q.source_material_id,
-      select: %{
-        material_id: m.id,
-        file_name: m.file_name,
-        question_count: count(q.id)
-      },
-      group_by: [m.id, m.file_name]
-    )
     |> Repo.all()
   end
 

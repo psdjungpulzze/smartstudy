@@ -73,6 +73,75 @@ defmodule FunSheepWeb.UploadControllerTest do
 
       assert body["material_kind"] == "textbook"
     end
+
+    test "classifies answer-key filenames as :answer_key when no kind is supplied",
+         %{conn: conn} do
+      user_role = create_user_role()
+
+      for filename <- ["Biology Answers - 31.jpg", "Midterm Answer Key.pdf", "solutions.pdf"] do
+        params =
+          Map.merge(base_params(user_role.id), %{
+            "file" => upload_plug(filename)
+          })
+
+        conn = post(conn, "/api/upload", params)
+        body = json_response(conn, 200)
+
+        assert body["material_kind"] == "answer_key",
+               "expected #{inspect(filename)} to classify as answer_key, got #{body["material_kind"]}"
+      end
+    end
+
+    test "classifies quiz/practice filenames as :sample_questions when no kind is supplied",
+         %{conn: conn} do
+      user_role = create_user_role()
+
+      for filename <- ["practice test 3.pdf", "Chapter 5 Quiz.pdf", "past exam.pdf"] do
+        params =
+          Map.merge(base_params(user_role.id), %{
+            "file" => upload_plug(filename)
+          })
+
+        conn = post(conn, "/api/upload", params)
+        body = json_response(conn, 200)
+
+        assert body["material_kind"] == "sample_questions",
+               "expected #{inspect(filename)} to classify as sample_questions, got #{body["material_kind"]}"
+      end
+    end
+
+    test "accepts explicit :answer_key kind (new enum value)", %{conn: conn} do
+      user_role = create_user_role()
+
+      params =
+        Map.merge(base_params(user_role.id), %{
+          "file" => upload_plug("key.pdf"),
+          "material_kind" => "answer_key"
+        })
+
+      conn = post(conn, "/api/upload", params)
+      body = json_response(conn, 200)
+
+      assert body["material_kind"] == "answer_key"
+      material = Content.get_uploaded_material!(body["id"])
+      assert material.material_kind == :answer_key
+    end
+
+    test "explicit kind beats filename heuristic", %{conn: conn} do
+      user_role = create_user_role()
+
+      # Filename screams "answer key" but the user explicitly flags it as textbook.
+      params =
+        Map.merge(base_params(user_role.id), %{
+          "file" => upload_plug("answer_key_chapter_1.pdf"),
+          "material_kind" => "textbook"
+        })
+
+      conn = post(conn, "/api/upload", params)
+      body = json_response(conn, 200)
+
+      assert body["material_kind"] == "textbook"
+    end
   end
 
   describe "POST /api/uploads/sign" do

@@ -257,13 +257,15 @@ There is no accessible platform that:
 
 **Priority**: Must Have
 
-**Description**: Adaptive/progressive testing that identifies knowledge gaps.
+**Description**: Adaptive/progressive testing that identifies knowledge gaps **within the scope of an upcoming test** (defined by FR-006 / FR-006b). Assessment does not exist as a global, course-wide mode — it always operates on the chapters of a specific scheduled test, and readiness (FR-008) is scored per test.
 
-**User Story**: As a student, I want the platform to test me adaptively, so that it can quickly identify exactly what I know and don't know.
+**User Story**: As a student, I want the platform to test me adaptively on the material my upcoming test will cover, so that it can quickly identify exactly what I know and don't know *for that test*.
 
 **Acceptance Criteria**:
+- [ ] Assessment is always scoped to a `TestSchedule` — no global/course-wide assessment route
+- [ ] Questions are drawn only from chapters in the test's scope (`scope.chapter_ids`)
 - [ ] Tests at least 3 questions per topic
-- [ ] If any wrong, adaptively tests again to verify the gap
+- [ ] If any wrong, adaptively tests again to verify the gap (confirmation — see North Star I-2)
 - [ ] Starts easy, progressively increases difficulty
 - [ ] Uses stored questions first; generates new only after exhausting stored pool
 - [ ] Generated questions are copyright-safe derivatives (changed numbers/words)
@@ -272,8 +274,13 @@ There is no accessible platform that:
 - [ ] Can filter to show only correct or incorrect answered questions
 - [ ] For free-response questions, AI agent evaluates and provides corrections
 - [ ] Assessment modeled as Interactor Workflow (state machine)
+- [ ] No source-level (per-uploaded-file) picker is shown to the student; source attribution is an admin concern only
+
+**Non-goal**: Global readiness across an entire course independent of any test. Skill mastery (per `sections/skill_tags`) remains global and transfers between tests that share skills — but the readiness score is always test-scoped.
 
 **Interactor Services**: Workflows (assessment state machine), AI Agents (Assessment Evaluator)
+
+**Related**: ADR-005 (test-scoped assessment + readiness)
 
 ---
 
@@ -281,16 +288,19 @@ There is no accessible platform that:
 
 **Priority**: Must Have
 
-**Description**: Shows the student's readiness for their upcoming test.
+**Description**: Shows the student's readiness for their upcoming test. Readiness is always scoped to a specific `TestSchedule` — per-skill mastery stays global (transfers between tests), but the aggregate readiness score reflects the weakest in-scope skills of one test at a time.
 
 **User Story**: As a student, I want to see my estimated test score, so that I know if I'm ready or need to study more.
 
 **Acceptance Criteria**:
 - [ ] Shows test scope coverage
 - [ ] Per-chapter score
-- [ ] Per-topic score
-- [ ] Aggregate estimated total test score
+- [ ] Per-topic (skill) score
+- [ ] Aggregate estimated total test score (weakest-N-average across in-scope skills per North Star I-10)
 - [ ] Scores update in real-time as assessments are completed
+- [ ] When a student has multiple upcoming tests, the dashboard shows readiness per test; the nearest-deadline test is the default focus (see ADR-005)
+
+**Related**: ADR-005 (test-scoped assessment + readiness)
 
 ---
 

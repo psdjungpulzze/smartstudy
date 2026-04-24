@@ -116,6 +116,84 @@ defmodule FunSheep.AssessmentsTest do
     end
   end
 
+  describe "primary test selection (pin / nearest-deadline)" do
+    setup %{user_role: ur, course: c, chapter: ch} do
+      {:ok, near} =
+        Assessments.create_test_schedule(%{
+          name: "Near",
+          test_date: Date.add(Date.utc_today(), 5),
+          scope: %{"chapter_ids" => [ch.id]},
+          user_role_id: ur.id,
+          course_id: c.id
+        })
+
+      {:ok, far} =
+        Assessments.create_test_schedule(%{
+          name: "Far",
+          test_date: Date.add(Date.utc_today(), 30),
+          scope: %{"chapter_ids" => [ch.id]},
+          user_role_id: ur.id,
+          course_id: c.id
+        })
+
+      %{near: near, far: far}
+    end
+
+    test "primary_test/1 defaults to the nearest-deadline test when nothing is pinned",
+         %{user_role: ur, near: near} do
+      assert %{id: id} = Assessments.primary_test(ur.id)
+      assert id == near.id
+    end
+
+    test "pin_test/2 sets the pinned id and primary_test honors it",
+         %{user_role: ur, far: far} do
+      assert {:ok, _} = Assessments.pin_test(ur.id, far.id)
+      assert Assessments.pinned_test_id(ur.id) == far.id
+      assert %{id: id} = Assessments.primary_test(ur.id)
+      assert id == far.id
+    end
+
+    test "unpin_test/1 clears the pin and primary reverts to nearest-deadline",
+         %{user_role: ur, near: near, far: far} do
+      {:ok, _} = Assessments.pin_test(ur.id, far.id)
+      assert {:ok, _} = Assessments.unpin_test(ur.id)
+      assert Assessments.pinned_test_id(ur.id) == nil
+      assert %{id: id} = Assessments.primary_test(ur.id)
+      assert id == near.id
+    end
+
+    test "primary_test/1 silently falls back when the pinned test is stale",
+         %{user_role: ur, near: near, far: far} do
+      {:ok, _} = Assessments.pin_test(ur.id, far.id)
+      {:ok, _} = Assessments.delete_test_schedule(far)
+      # Pinned row is now gone (on_delete: :nilify_all clears the FK)
+      assert Assessments.pinned_test_id(ur.id) == nil
+      assert %{id: id} = Assessments.primary_test(ur.id)
+      assert id == near.id
+    end
+
+    test "pin_test/2 rejects a test owned by another user", %{course: c, chapter: ch} do
+      other = ContentFixtures.create_user_role()
+
+      {:ok, others_test} =
+        Assessments.create_test_schedule(%{
+          name: "Other's",
+          test_date: Date.add(Date.utc_today(), 3),
+          scope: %{"chapter_ids" => [ch.id]},
+          user_role_id: other.id,
+          course_id: c.id
+        })
+
+      me = ContentFixtures.create_user_role()
+      assert {:error, :forbidden} = Assessments.pin_test(me.id, others_test.id)
+    end
+
+    test "primary_test/1 returns nil when no upcoming tests exist" do
+      lonely = ContentFixtures.create_user_role()
+      assert Assessments.primary_test(lonely.id) == nil
+    end
+  end
+
   describe "delete_test_schedule/1" do
     test "deletes a schedule", %{user_role: ur, course: c, chapter: ch} do
       {:ok, schedule} =

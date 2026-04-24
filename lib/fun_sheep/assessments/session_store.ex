@@ -8,7 +8,7 @@ defmodule FunSheep.Assessments.SessionStore do
 
   The `engine_state` is serialized via JSON round-trip. Atom-keyed maps
   survive the round-trip via `Jason.decode!/2` with `keys: :atoms!` on
-  load. The `enabled_sources` MapSet is serialized as a list of strings.
+  load.
 
   ## Responsibility split
 
@@ -29,12 +29,11 @@ defmodule FunSheep.Assessments.SessionStore do
   Persists assessment state for a user+schedule pair.
 
   Upserts on the composite key (user_role_id, schedule_id). The engine_state
-  map and enabled_sources MapSet are serialized to JSON-compatible structures.
+  map is serialized to a JSON-compatible structure.
   """
   @spec save(String.t(), String.t(), map()) :: :ok
   def save(user_role_id, schedule_id, state) do
     serialized_engine = serialize_engine_state(state[:engine_state])
-    enabled_sources = serialize_enabled_sources(state[:enabled_sources])
 
     attrs = %{
       user_role_id: user_role_id,
@@ -42,7 +41,6 @@ defmodule FunSheep.Assessments.SessionStore do
       engine_state: serialized_engine,
       question_number: state[:question_number] || 0,
       phase: to_string(state[:phase] || "testing"),
-      enabled_sources: enabled_sources,
       selected_answer: state[:selected_answer],
       assessment_complete: state[:assessment_complete] || false
     }
@@ -56,7 +54,6 @@ defmodule FunSheep.Assessments.SessionStore do
            :engine_state,
            :question_number,
            :phase,
-           :enabled_sources,
            :selected_answer,
            :assessment_complete,
            :updated_at
@@ -93,7 +90,6 @@ defmodule FunSheep.Assessments.SessionStore do
 
       record ->
         engine_state = deserialize_engine_state(record.engine_state)
-        enabled_sources = deserialize_enabled_sources(record.enabled_sources)
 
         state = %{
           engine_state: engine_state,
@@ -102,7 +98,6 @@ defmodule FunSheep.Assessments.SessionStore do
           selected_answer: record.selected_answer,
           feedback: nil,
           question_number: record.question_number,
-          enabled_sources: enabled_sources,
           assessment_complete: record.assessment_complete,
           summary: nil,
           phase: String.to_existing_atom(record.phase)
@@ -159,13 +154,6 @@ defmodule FunSheep.Assessments.SessionStore do
       Logger.warning("[SessionStore] Could not deserialize engine_state: #{inspect(e)}")
       nil
   end
-
-  defp serialize_enabled_sources(nil), do: []
-  defp serialize_enabled_sources(%MapSet{} = set), do: MapSet.to_list(set)
-  defp serialize_enabled_sources(list) when is_list(list), do: list
-
-  defp deserialize_enabled_sources(nil), do: MapSet.new()
-  defp deserialize_enabled_sources(list) when is_list(list), do: MapSet.new(list)
 
   # Convert any atoms in the engine state to strings for JSON serialization.
   # Jason handles atom keys/values natively, but we encode then decode to get

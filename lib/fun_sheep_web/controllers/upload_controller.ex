@@ -12,7 +12,7 @@ defmodule FunSheepWeb.UploadController do
   def create(conn, %{"file" => upload, "batch_id" => batch_id} = params) do
     user_role_id = params["user_role_id"]
     folder_name = params["folder_name"]
-    material_kind = normalize_kind(params["material_kind"])
+    material_kind = normalize_kind(params["material_kind"], upload.filename)
 
     unless user_role_id do
       conn |> put_status(401) |> json(%{error: "unauthorized"}) |> halt()
@@ -113,8 +113,8 @@ defmodule FunSheepWeb.UploadController do
   def finalize(conn, %{"object_key" => object_key, "batch_id" => batch_id} = params) do
     user_role_id = params["user_role_id"] || get_user_role_id(conn)
     folder_name = params["folder_name"]
-    material_kind = normalize_kind(params["material_kind"])
     file_name = params["file_name"] || Path.basename(object_key)
+    material_kind = normalize_kind(params["material_kind"], file_name)
     declared_type = params["file_type"] || "application/octet-stream"
 
     cond do
@@ -267,18 +267,50 @@ defmodule FunSheepWeb.UploadController do
     end
   end
 
-  defp normalize_kind(nil), do: :textbook
-  defp normalize_kind(""), do: :textbook
+  # Client-supplied kind wins when valid. Fall back to a filename heuristic
+  # when no kind is supplied (or it's junk) so files like "Biology Answers.pdf"
+  # don't get silently ingested as `:textbook` and fed to the question
+  # extractor — the root cause of the answer-key-as-source bug.
+  defp normalize_kind(nil, file_name), do: classify_from_filename(file_name)
+  defp normalize_kind("", file_name), do: classify_from_filename(file_name)
 
-  defp normalize_kind(value) when is_binary(value) do
+  defp normalize_kind(value, file_name) when is_binary(value) do
     allowed = FunSheep.Content.UploadedMaterial.material_kinds()
     atom = String.to_existing_atom(value)
-    if atom in allowed, do: atom, else: :textbook
+    if atom in allowed, do: atom, else: classify_from_filename(file_name)
   rescue
-    ArgumentError -> :textbook
+    ArgumentError -> classify_from_filename(file_name)
   end
 
-  defp normalize_kind(value) when is_atom(value) do
-    if value in FunSheep.Content.UploadedMaterial.material_kinds(), do: value, else: :textbook
+  defp normalize_kind(value, file_name) when is_atom(value) do
+    if value in FunSheep.Content.UploadedMaterial.material_kinds(),
+      do: value,
+      else: classify_from_filename(file_name)
+  end
+
+  @doc false
+  # Filename-based heuristic for material_kind. Conservative: only claims
+  # `:answer_key` or `:sample_questions` when the filename is obviously one
+  # of those; everything else falls through to `:textbook` (the prior
+  # default). Word-boundary checks avoid false positives like "textbook".
+  def classify_from_filename(nil), do: :textbook
+  def classify_from_filename(""), do: :textbook
+
+  def classify_from_filename(file_name) when is_binary(file_name) do
+    lower = String.downcase(file_name)
+
+    cond do
+      Regex.match?(~r/\b(answers?|answer[-_ ]?key|solutions?|key)\b/, lower) ->
+        :answer_key
+
+      Regex.match?(
+        ~r/\b(quiz|quizzes|practice[-_ ]?test|sample[-_ ]?questions?|past[-_ ]?exam|mock[-_ ]?exam)\b/,
+        lower
+      ) ->
+        :sample_questions
+
+      true ->
+        :textbook
+    end
   end
 end

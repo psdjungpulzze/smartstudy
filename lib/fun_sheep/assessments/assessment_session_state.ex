@@ -18,7 +18,6 @@ defmodule FunSheep.Assessments.AssessmentSessionState do
     field :engine_state, :map
     field :question_number, :integer, default: 0
     field :phase, :string
-    field :enabled_sources, {:array, :string}
     field :selected_answer, :string
     field :assessment_complete, :boolean, default: false
 
@@ -33,7 +32,6 @@ defmodule FunSheep.Assessments.AssessmentSessionState do
       :engine_state,
       :question_number,
       :phase,
-      :enabled_sources,
       :selected_answer,
       :assessment_complete
     ])
