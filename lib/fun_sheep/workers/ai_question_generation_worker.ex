@@ -325,6 +325,22 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
     """
 
+    difficulty_rubric = """
+    DIFFICULTY RUBRIC — apply these criteria to every question, whether multiple choice or short answer:
+    - easy: Recall or recognise a single fact, definition, or term directly from the material. The answer is stated explicitly or requires no reasoning. The student only needs to remember it.
+      MCQ example: "What molecule carries oxygen in red blood cells?" → Haemoglobin.
+      Short answer example: "Name the process plants use to make food from sunlight."
+    - medium: Apply or explain a concept in a concrete scenario. The student must understand the concept, not just recall it. Requires connecting an idea to a new context, explaining a mechanism, or working through a single logical step.
+      MCQ example: "A cell is placed in a solution more concentrated than its cytoplasm. What will happen, and why?" → The cell will lose water by osmosis.
+      Short answer example: "Explain why photosynthesis rate increases when light intensity rises, up to a point."
+    - hard: Analyse, compare, evaluate, or synthesise across multiple concepts. Requires multi-step reasoning, predicting outcomes from combined factors, evaluating trade-offs, or identifying cause-and-effect chains not stated directly in the material. The answer cannot be found in any single sentence.
+      MCQ example: "A plant has been kept in darkness for 48 hours and is suddenly exposed to bright light. How will ATP production in chloroplasts compare to mitochondria over the first 30 minutes, and what limits the rate in each case?"
+      Short answer example: "A scientist finds a cell's membrane potential has collapsed. Describe two distinct mechanisms that could cause this and explain how each would disrupt normal cell function."
+
+    Assign difficulty based on the cognitive demand above, not on how obscure the topic is. A hard question on a simple topic outranks an easy question on a complex topic.
+
+    """
+
     material_section =
       if context.material_text != "" do
         """
@@ -437,7 +453,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     - "answer": the correct answer (for MCQ use the letter like "A")
     - "question_type": one of "multiple_choice", "short_answer" (use "true_false" only if the question is genuinely a true/false statement and the test format explicitly uses T/F questions)
     - "options": for multiple_choice, an object like {"A": "...", "B": "...", "C": "...", "D": "..."}
-    - "difficulty": one of "easy", "medium", "hard"
+    - "difficulty": one of "easy", "medium", "hard" — assign based on the DIFFICULTY RUBRIC above
     - "explanation": REQUIRED — 1–2 sentences explaining why the answer is correct, citing the concept or mechanism. Questions without a non-empty explanation will be rejected at insert time and never reach students (Phase 4 quality gate).
     - "figure_ids": (optional) array of figure IDs from the FIGURES AVAILABLE list, when the question depends on a visual
     - "table_spec": (optional) JSON table spec when the question requires a table you are inventing. Format: {"headers": [...], "rows": [[...], ...], "caption": "..."}
@@ -459,7 +475,8 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           CRITICAL — DIFFICULTY LOCK: Every question in this batch MUST have
           difficulty="#{d}". Do NOT vary the difficulty. The student has
           exhausted the supply of #{d}-level questions for this chapter and
-          needs more at that exact level.
+          needs more at that exact level. Refer to the DIFFICULTY RUBRIC above
+          and ensure every question matches the cognitive demand described for "#{d}".
 
           """
 
@@ -468,6 +485,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       end
 
     base <>
+      difficulty_rubric <>
       chapters_section <>
       material_section <>
       figures_section <>
