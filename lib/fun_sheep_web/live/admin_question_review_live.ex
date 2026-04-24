@@ -1,31 +1,55 @@
 defmodule FunSheepWeb.AdminQuestionReviewLive do
   @moduledoc """
-  Admin review queue for questions flagged by the validator.
+  Admin question management: review flagged questions and manage all questions
+  regardless of validation status.
 
-  Lists every question in `validation_status = :needs_review`, shows the
-  full validator report (why it was flagged, suggested corrections), and
-  lets an admin:
+  Per-card actions:
+    * Approve — mark passed (student-visible)
+    * Reject  — mark failed (hidden from students)
+    * Edit & Approve — apply corrections and approve in one step
+    * Delete — permanently remove the question (audit-logged)
 
-    * Approve — override the flag and make the question visible to students
-    * Reject — mark it failed so students never see it
-    * Edit & Approve — apply the validator's suggested corrections (or their
-      own edits) and approve in one step
+  A status filter lets admins browse all questions, not just the review queue.
   """
 
   use FunSheepWeb, :live_view
 
-  alias FunSheep.Questions
+  alias FunSheep.{Admin, Questions}
   alias FunSheep.Questions.Question
+
+  @statuses [
+    {"Review queue", :needs_review},
+    {"Passed", :passed},
+    {"Failed", :failed},
+    {"Pending", :pending},
+    {"All", nil}
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Question Review", editing_id: nil)
+     |> assign(page_title: "Question Review", editing_id: nil, status_filter: :needs_review)
      |> load_queue()}
   end
 
   @impl true
+  def handle_event("filter_status", %{"status" => raw}, socket) do
+    status =
+      case raw do
+        "needs_review" -> :needs_review
+        "passed" -> :passed
+        "failed" -> :failed
+        "pending" -> :pending
+        _ -> nil
+      end
+
+    {:noreply,
+     socket
+     |> assign(status_filter: status, editing_id: nil)
+     |> load_queue()}
+  end
+
   def handle_event("approve", %{"id" => id}, socket) do
     question = Questions.get_question!(id)
 
@@ -53,6 +77,21 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to reject question.")}
+    end
+  end
+
+  def handle_event("delete", %{"id" => id}, socket) do
+    question = Questions.get_question!(id)
+
+    case Admin.admin_delete_question(question, socket.assigns.current_user) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Question deleted.")
+         |> load_queue()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete question.")}
     end
   end
 
@@ -97,8 +136,10 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
   defp parse_edit_attrs(attrs), do: attrs
 
   defp load_queue(socket) do
-    questions = Questions.list_all_questions_needing_review()
-    assign(socket, questions: questions, queue_count: length(questions))
+    status = socket.assigns.status_filter
+    questions = Questions.list_all_questions_for_admin(status)
+    counts = Questions.count_questions_by_status()
+    assign(socket, questions: questions, queue_count: length(questions), status_counts: counts)
   end
 
   defp reviewer_id(socket) do
@@ -111,26 +152,53 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :statuses, @statuses)
+
     ~H"""
     <div class="max-w-5xl mx-auto p-6">
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-[#1C1C1E]">Question Review Queue</h1>
+          <h1 class="text-2xl font-bold text-[#1C1C1E]">Questions</h1>
           <p class="text-sm text-[#8E8E93] mt-1">
-            Questions flagged by the validator for manual review.
+            Review, edit, approve, reject, or delete questions.
           </p>
         </div>
         <div class="bg-white rounded-2xl shadow-md px-4 py-2">
           <span class="text-2xl font-bold text-[#4CD964]">{@queue_count}</span>
-          <span class="text-sm text-[#8E8E93] ml-1">pending</span>
+          <span class="text-sm text-[#8E8E93] ml-1">shown</span>
         </div>
+      </div>
+
+      <%!-- Status filter tabs --%>
+      <div class="bg-white rounded-2xl shadow-md p-3 mb-4 flex items-center gap-2 flex-wrap">
+        <button
+          :for={{label, status} <- @statuses}
+          type="button"
+          phx-click="filter_status"
+          phx-value-status={status || "all"}
+          class={[
+            "px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+            if(@status_filter == status,
+              do: "bg-[#4CD964] text-white border-[#4CD964]",
+              else: "bg-white text-[#1C1C1E] border-[#E5E5EA] hover:border-[#4CD964]/40"
+            )
+          ]}
+        >
+          {label}
+          <span :if={status && Map.get(@status_counts, status, 0) > 0} class="ml-1 opacity-75">
+            ({Map.get(@status_counts, status, 0)})
+          </span>
+          <span :if={is_nil(status)} class="ml-1 opacity-75">
+            ({@status_counts |> Map.values() |> Enum.sum()})
+          </span>
+        </button>
       </div>
 
       <div :if={@questions == []} class="bg-white rounded-2xl shadow-md p-12 text-center">
         <div class="text-4xl mb-3">✅</div>
-        <p class="text-[#1C1C1E] font-semibold">Queue is empty</p>
+        <p class="text-[#1C1C1E] font-semibold">No questions in this view</p>
         <p class="text-sm text-[#8E8E93] mt-1">
-          No questions are currently flagged for review.
+          Try a different status filter above.
         </p>
       </div>
 
@@ -170,6 +238,12 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
             </span>
             <span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
               {@question.difficulty}
+            </span>
+            <span class={[
+              "px-2 py-0.5 rounded-full text-xs font-medium",
+              status_badge_class(@question.validation_status)
+            ]}>
+              {@question.validation_status}
             </span>
           </div>
           <div :if={score(@report)} class="flex items-center gap-2">
@@ -225,6 +299,7 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
         <div class="flex flex-wrap gap-2 mt-5 pt-4 border-t border-[#E5E5EA]">
           <button
+            :if={@question.validation_status != :passed}
             type="button"
             phx-click="approve"
             phx-value-id={@question.id}
@@ -241,6 +316,7 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
             Edit &amp; Approve
           </button>
           <button
+            :if={@question.validation_status != :failed}
             type="button"
             phx-click="reject"
             phx-value-id={@question.id}
@@ -248,6 +324,15 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
             class="bg-[#FF3B30] hover:bg-red-600 text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors"
           >
             Reject
+          </button>
+          <button
+            type="button"
+            phx-click="delete"
+            phx-value-id={@question.id}
+            data-confirm="Permanently delete this question? This cannot be undone."
+            class="bg-white hover:bg-[#FFE5E3] text-[#FF3B30] font-medium px-6 py-2 rounded-full border border-[#FF3B30]/30 shadow-sm transition-colors"
+          >
+            Delete
           </button>
         </div>
       <% end %>
@@ -368,6 +453,11 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
     do: "#{name} · Grade #{grade}"
 
   defp course_label(_), do: ""
+
+  defp status_badge_class(:passed), do: "bg-[#E8F8EB] text-[#4CD964]"
+  defp status_badge_class(:failed), do: "bg-[#FFE5E3] text-[#FF3B30]"
+  defp status_badge_class(:needs_review), do: "bg-[#FFF4CC] text-[#8E6000]"
+  defp status_badge_class(_), do: "bg-[#F5F5F7] text-[#8E8E93]"
 
   defp score(%{"topic_relevance_score" => s}) when is_number(s), do: s
   defp score(_), do: nil

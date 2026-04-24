@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.AdminUsersLive do
   @moduledoc """
   Admin user management: list, search, filter by role, and per-row
-  promote / demote / suspend / unsuspend actions.
+  promote / demote / suspend / unsuspend / delete / edit-profile actions.
   """
   use FunSheepWeb, :live_view
 
@@ -19,6 +19,7 @@ defmodule FunSheepWeb.AdminUsersLive do
      |> assign(:role_filter, nil)
      |> assign(:page, 0)
      |> assign(:editing_subscription, nil)
+     |> assign(:editing_profile, nil)
      |> load_users()}
   end
 
@@ -198,6 +199,65 @@ defmodule FunSheepWeb.AdminUsersLive do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to reset usage.")}
+    end
+  end
+
+  def handle_event("delete_user", %{"id" => id}, socket) do
+    target = Accounts.get_user_role!(id)
+
+    case Admin.delete_user(target, socket.assigns.current_user) do
+      {:ok, _} ->
+        {:noreply, socket |> put_flash(:info, "User #{target.email} deleted.") |> load_users()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete user.")}
+    end
+  end
+
+  def handle_event("open_edit_profile", %{"id" => id}, socket) do
+    target = Accounts.get_user_role!(id)
+
+    editing = %{
+      user_id: target.id,
+      email: target.email,
+      display_name: target.display_name || "",
+      grade: target.grade || "",
+      timezone: target.timezone || ""
+    }
+
+    {:noreply, assign(socket, :editing_profile, editing)}
+  end
+
+  def handle_event("close_edit_profile", _, socket) do
+    {:noreply, assign(socket, :editing_profile, nil)}
+  end
+
+  def handle_event("save_edit_profile", %{"profile" => attrs}, socket) do
+    editing = socket.assigns.editing_profile
+    target = Accounts.get_user_role!(editing.user_id)
+    actor = socket.assigns.current_user
+
+    allowed = %{
+      display_name: attrs["display_name"],
+      email: attrs["email"],
+      grade: attrs["grade"],
+      timezone: attrs["timezone"]
+    }
+
+    case Admin.edit_user_profile(target, allowed, actor) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Profile updated for #{attrs["email"] || target.email}.")
+         |> assign(:editing_profile, nil)
+         |> load_users()}
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        errors = Enum.map_join(cs.errors, ", ", fn {k, {msg, _}} -> "#{k}: #{msg}" end)
+        {:noreply, put_flash(socket, :error, "Failed to update: #{errors}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update profile.")}
     end
   end
 
@@ -385,6 +445,23 @@ defmodule FunSheepWeb.AdminUsersLive do
                       Impersonate
                     </button>
                   </.form>
+                  <button
+                    type="button"
+                    phx-click="open_edit_profile"
+                    phx-value-id={u.id}
+                    class="px-3 py-1 rounded-full text-xs font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7]"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="delete_user"
+                    phx-value-id={u.id}
+                    data-confirm={"Permanently delete #{u.email}? This removes their FunSheep account and all local data. Their Interactor login is unaffected."}
+                    class="px-3 py-1 rounded-full text-xs font-medium text-[#FF3B30] border border-[#FF3B30]/30 hover:bg-[#FFE5E3]"
+                  >
+                    Delete
+                  </button>
                 </div>
               </td>
             </tr>
@@ -396,6 +473,7 @@ defmodule FunSheepWeb.AdminUsersLive do
       </div>
 
       <.subscription_modal :if={@editing_subscription} editing={@editing_subscription} />
+      <.edit_profile_modal :if={@editing_profile} editing={@editing_profile} />
 
       <div class="mt-4 flex items-center justify-between text-sm text-[#8E8E93]">
         <div>
@@ -540,6 +618,112 @@ defmodule FunSheepWeb.AdminUsersLive do
             <button
               type="button"
               phx-click="close_subscription"
+              class="px-4 py-2 rounded-full text-sm font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="px-4 py-2 rounded-full text-sm font-medium text-white bg-[#4CD964] hover:bg-[#3DBF55] shadow-md"
+            >
+              Save
+            </button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
+  end
+
+  attr :editing, :map, required: true
+
+  defp edit_profile_modal(assigns) do
+    ~H"""
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      phx-click="close_edit_profile"
+    >
+      <div
+        class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4"
+        onclick="event.stopPropagation()"
+        phx-window-keydown="close_edit_profile"
+        phx-key="escape"
+      >
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-bold text-[#1C1C1E]">Edit Profile</h2>
+            <p class="text-xs text-[#8E8E93] mt-0.5">{@editing.email}</p>
+          </div>
+          <button
+            type="button"
+            phx-click="close_edit_profile"
+            aria-label="Close"
+            class="text-[#8E8E93] hover:text-[#1C1C1E] text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <.form for={%{}} phx-submit="save_edit_profile" class="space-y-4">
+          <div>
+            <label for="profile_email" class="block text-sm font-medium text-[#1C1C1E] mb-1">
+              Email
+            </label>
+            <input
+              id="profile_email"
+              type="email"
+              name="profile[email]"
+              value={@editing.email}
+              required
+              class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+            />
+          </div>
+
+          <div>
+            <label for="profile_display_name" class="block text-sm font-medium text-[#1C1C1E] mb-1">
+              Display name
+            </label>
+            <input
+              id="profile_display_name"
+              type="text"
+              name="profile[display_name]"
+              value={@editing.display_name}
+              class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+            />
+          </div>
+
+          <div>
+            <label for="profile_grade" class="block text-sm font-medium text-[#1C1C1E] mb-1">
+              Grade
+            </label>
+            <input
+              id="profile_grade"
+              type="text"
+              name="profile[grade]"
+              value={@editing.grade}
+              placeholder="e.g. 10"
+              class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+            />
+          </div>
+
+          <div>
+            <label for="profile_timezone" class="block text-sm font-medium text-[#1C1C1E] mb-1">
+              Timezone
+            </label>
+            <input
+              id="profile_timezone"
+              type="text"
+              name="profile[timezone]"
+              value={@editing.timezone}
+              placeholder="e.g. America/New_York"
+              class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+            />
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              phx-click="close_edit_profile"
               class="px-4 py-2 rounded-full text-sm font-medium text-[#1C1C1E] border border-[#E5E5EA] hover:bg-[#F5F5F7]"
             >
               Cancel

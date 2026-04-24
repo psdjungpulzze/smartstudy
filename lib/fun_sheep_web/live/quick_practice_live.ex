@@ -586,7 +586,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
-  defp record_attempt(socket, question, answer_given, is_correct, opts \\ []) do
+  defp record_attempt(socket, question, answer_given, is_correct, opts) do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
