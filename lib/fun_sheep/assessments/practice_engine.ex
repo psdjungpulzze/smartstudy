@@ -20,7 +20,13 @@ defmodule FunSheep.Assessments.PracticeEngine do
   alias FunSheep.Questions
 
   @default_limit 20
-  @default_interleave_ratio 0.25
+  # Phase 10: raised from 0.25 to 0.35. Cepeda et al. 2008 + Rohrer &
+  # Taylor 2007 show higher interleaving fractions (~35-50%) improve
+  # long-term retention on the kind of concept-practice FunSheep
+  # serves. Paired with spaced review prioritization in
+  # Questions.list_review_candidates/3, so each review slot is more
+  # likely to target a section the student is actually forgetting.
+  @default_interleave_ratio 0.35
   @default_review_floor 0.3
 
   def start_practice(user_role_id, course_id, opts \\ %{}) do

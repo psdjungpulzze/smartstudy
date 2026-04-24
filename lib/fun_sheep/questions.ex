@@ -736,13 +736,38 @@ defmodule FunSheep.Questions do
     if mastered_section_ids == [] do
       []
     else
+      # Phase 10: spaced review prioritization. The Ebbinghaus
+      # forgetting curve + Cepeda et al. 2008 say a mastered skill
+      # decays without revisit — the longer since the student last
+      # touched a section, the higher the retention benefit of
+      # interleaving one of its questions now. Left-join to the
+      # per-section "last attempt at" timestamp and order by that
+      # ascending (oldest first) instead of random. Sections without
+      # prior attempts bubble up first (they can't be decayed but also
+      # haven't been practiced for this student, so review is still
+      # valuable).
+      last_attempt_by_section =
+        from(q in Question,
+          join: qa in QuestionAttempt,
+          on: qa.question_id == q.id,
+          where: qa.user_role_id == ^user_role_id,
+          group_by: q.section_id,
+          select: %{section_id: q.section_id, last_attempt: max(qa.inserted_at)}
+        )
+
       Question
       |> where([q], q.course_id == ^course_id)
       |> where([q], q.validation_status in ^@student_visible)
       |> tagged_for_adaptive()
       |> where([q], q.section_id in ^mastered_section_ids)
       |> maybe_exclude_question_ids(exclude_ids)
-      |> order_by([q], asc: fragment("random()"))
+      |> join(:left, [q], la in subquery(last_attempt_by_section),
+        on: la.section_id == q.section_id
+      )
+      |> order_by([q, la],
+        asc_nulls_first: la.last_attempt,
+        asc: fragment("random()")
+      )
       |> limit(^limit)
       |> preload([:chapter, :section, :stats])
       |> Repo.all()
