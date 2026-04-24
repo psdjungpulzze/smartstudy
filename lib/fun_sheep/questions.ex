@@ -1507,4 +1507,65 @@ defmodule FunSheep.Questions do
         stats
     end
   end
+
+  ## QuestionGroup functions
+
+  @doc """
+  Returns all questions belonging to a group, ordered by `group_sequence`.
+  """
+  def list_group_questions(group_id) do
+    from(q in Question,
+      where: q.question_group_id == ^group_id,
+      order_by: [asc: q.group_sequence]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a question group by id, returns `nil` if not found.
+  """
+  def get_question_group(id), do: Repo.get(FunSheep.Questions.QuestionGroup, id)
+
+  @doc """
+  Gets a question group by id, raises if not found.
+  """
+  def get_question_group!(id), do: Repo.get!(FunSheep.Questions.QuestionGroup, id)
+
+  @doc """
+  Creates a question group.
+  """
+  def create_question_group(attrs) do
+    %FunSheep.Questions.QuestionGroup{}
+    |> FunSheep.Questions.QuestionGroup.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Lists question groups, optionally filtered by `course_id`.
+  """
+  def list_question_groups(filters \\ []) do
+    from(g in FunSheep.Questions.QuestionGroup)
+    |> maybe_filter_by_course(filters[:course_id])
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns `%{stimulus_type => count}` of question groups for a course.
+  Powers coverage reporting for comprehension question types.
+  """
+  def coverage_by_stimulus_type(course_id) do
+    from(g in FunSheep.Questions.QuestionGroup,
+      where: g.course_id == ^course_id,
+      group_by: g.stimulus_type,
+      select: {g.stimulus_type, count(g.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp maybe_filter_by_course(query, nil), do: query
+
+  defp maybe_filter_by_course(query, course_id) do
+    where(query, [g], g.course_id == ^course_id)
+  end
 end
