@@ -10,7 +10,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
   """
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Billing, Courses, Questions, Tutor, Tutorials}
+  alias FunSheep.{Assessments, Billing, Content, Courses, Questions, Tutor, Tutorials}
   alias FunSheep.Assessments.QuickTestEngine
   alias FunSheep.Gamification
   alias FunSheep.Questions.{FreeformGrader, ScoredFreeformGrader}
@@ -60,7 +60,9 @@ defmodule FunSheepWeb.QuickPracticeLive do
         # Async grading state
         grading: false,
         grading_task: nil,
-        pending_grade_result: nil
+        pending_grade_result: nil,
+        # Study references
+        current_question_videos: []
       )
 
     {:ok, socket}
@@ -182,6 +184,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     if question do
       record_attempt(socket, question, "not_sure", false, confidence: :not_sure)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
+      videos = Content.list_videos_for_section(question.section_id)
 
       {:noreply,
        assign(socket,
@@ -190,7 +193,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
          show_answer: true,
          feedback: nil,
          stats: %{stats | incorrect: stats.incorrect + 1},
-         session_streak: 0
+         session_streak: 0,
+         current_question_videos: videos
        )}
     else
       {:noreply, socket}
@@ -203,6 +207,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     if question do
       record_attempt(socket, question, "dont_know", false, confidence: :dont_know)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
+      videos = Content.list_videos_for_section(question.section_id)
 
       {:noreply,
        assign(socket,
@@ -211,7 +216,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
          show_answer: true,
          feedback: nil,
          stats: %{stats | incorrect: stats.incorrect + 1},
-         session_streak: 0
+         session_streak: 0,
+         current_question_videos: videos
        )}
     else
       {:noreply, socket}
@@ -327,7 +333,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
         selected_answer: nil,
         show_answer: false,
         pending_is_correct: nil,
-        pending_answer: nil
+        pending_answer: nil,
+        current_question_videos: []
       )
       |> reset_tutor()
       |> advance_to_next_card()
@@ -342,7 +349,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
         card_phase: :question,
         feedback: nil,
         selected_answer: nil,
-        show_answer: false
+        show_answer: false,
+        current_question_videos: []
       )
       |> reset_tutor()
       |> advance_to_next_card()
@@ -1060,6 +1068,9 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </span>
             </div>
 
+            <%!-- Video lessons (reveal phase only) --%>
+            <.skill_videos :if={@card_phase == :reveal} videos={@current_question_videos} />
+
             <%!-- Tutor quick actions --%>
             <div class="flex items-center justify-center gap-2 flex-wrap mb-4">
               <button
@@ -1594,6 +1605,9 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </p>
             </div>
 
+            <%!-- Video lessons (reveal phase only, desktop) --%>
+            <.skill_videos :if={@card_phase == :reveal} videos={@current_question_videos} />
+
             <div class="flex items-center gap-2 flex-wrap mb-4">
               <button
                 :if={@card_phase == :feedback && @feedback && !@feedback.is_correct}
@@ -1925,6 +1939,33 @@ defmodule FunSheepWeb.QuickPracticeLive do
   defp practice_score_label(score) when score in 7..8, do: "Mostly Correct"
   defp practice_score_label(score) when score in 9..10, do: "Full Credit"
   defp practice_score_label(_), do: "Scored"
+
+  # ── Inline video reference chips ──
+
+  defp skill_videos(%{videos: []} = assigns), do: ~H""
+
+  defp skill_videos(assigns) do
+    ~H"""
+    <div class="mt-3 p-3 rounded-2xl bg-blue-50 border border-blue-100">
+      <p class="text-xs font-bold text-[#007AFF] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <.icon name="hero-video-camera" class="w-4 h-4" /> Watch & Learn
+      </p>
+      <ul class="space-y-1.5">
+        <li :for={video <- @videos}>
+          <.link
+            href={video.url}
+            target="_blank"
+            rel="noopener"
+            class="text-sm text-[#007AFF] hover:underline inline-flex items-center gap-1"
+          >
+            <.icon name="hero-play-circle" class="w-4 h-4 shrink-0" />
+            <span class="truncate">{video.title}</span>
+          </.link>
+        </li>
+      </ul>
+    </div>
+    """
+  end
 
   # ── Tutor markdown renderer ──
 
