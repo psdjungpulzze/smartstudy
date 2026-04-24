@@ -30,6 +30,18 @@ defmodule FunSheep.Billing do
 
   ## Subscription Management
 
+  @doc """
+  Returns true if the user's active subscription includes AI scored freeform grading.
+  Currently gates on any paid plan (monthly/annual). Narrows to premium/professional
+  when those tiers are added.
+  """
+  def subscription_has_scored_grading?(user_role_id) do
+    case get_subscription(user_role_id) do
+      %Subscription{} = sub -> Subscription.paid?(sub)
+      nil -> false
+    end
+  end
+
   def get_or_create_subscription(user_role_id) do
     case Repo.get_by(Subscription, user_role_id: user_role_id) do
       %Subscription{} = sub -> {:ok, sub}
