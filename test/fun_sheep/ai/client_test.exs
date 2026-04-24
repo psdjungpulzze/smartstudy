@@ -6,12 +6,9 @@ defmodule FunSheep.AI.ClientTest do
 
   setup :verify_on_exit!
 
-  setup do
-    Application.put_env(:fun_sheep, :ai_client_impl, FunSheep.AI.ClientMock)
-    on_exit(fn -> Application.delete_env(:fun_sheep, :ai_client_impl) end)
-    :ok
-  end
-
+  # config/test.exs already pins :ai_client_impl to ClientMock globally;
+  # no per-test put_env/delete_env needed (and delete_env would poison
+  # other async: false tests that rely on the configured value).
   defp client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 
   test "dispatches through mock when ai_client_impl is set" do

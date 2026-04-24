@@ -36,14 +36,43 @@ defmodule FunSheep.Content.MaterialClassifier do
 
   require Logger
 
-  @assistant_name "material_content_classifier"
-
   # Below this floor we write `:uncertain` — the classifier saw
   # something but wasn't sure enough to authorize extraction. Tuned
   # conservatively: `:answer_key` false-negatives (labeled as
   # `:question_bank`) are the specific failure mode we're defending
   # against, so we err on the side of admin review.
   @default_confidence_floor 0.6
+
+  @system_prompt """
+  You are a content classifier for an educational platform. Classify the following material. Read the excerpt and decide which single category best describes it. The categories are:
+
+  * question_bank      — Practice questions (stems + options or
+                         stems + expected answers). Examples: chapter
+                         review questions, past exam questions,
+                         sample-question PDFs.
+  * answer_key         — Only answer letters/indices, no question
+                         stems. Examples: "1. C  2. B  3. D  4. A"
+                         repeated page after page. This is NOT a
+                         question bank — there are no questions here.
+  * knowledge_content  — Textbook prose, study guide summaries,
+                         lecture notes, glossary, diagrams. Learning
+                         material, not questions.
+  * mixed              — Questions AND surrounding prose interleaved
+                         (e.g. a worked example with a question at
+                         the end).
+  * unusable           — Blank, cover page, copyright page, index
+                         only, table of contents, OCR noise with no
+                         meaningful content.
+
+  Be especially careful to distinguish answer_key (only letters/indices, no question stems) from question_bank — mis-routing an answer key as questions produces garbage content. When unsure, return lower confidence rather than guessing.
+  """
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 200,
+    temperature: 0.0,
+    source: "material_classifier"
+  }
 
   @type kind ::
           :question_bank
@@ -80,12 +109,9 @@ defmodule FunSheep.Content.MaterialClassifier do
          notes: "OCR text too short (<40 chars) to classify"
        }}
     else
-      prompt = build_prompt(text, opts)
+      user_prompt = build_user_prompt(text, opts)
 
-      case agents_impl().chat(@assistant_name, prompt, %{
-             source: "material_classifier",
-             metadata: %{subject: opts[:subject]}
-           }) do
+      case ai_client().call(@system_prompt, user_prompt, @llm_opts) do
         {:ok, response} ->
           parse_response(
             response,
@@ -93,7 +119,7 @@ defmodule FunSheep.Content.MaterialClassifier do
           )
 
         {:error, reason} ->
-          Logger.warning("[MaterialClassifier] Agent call failed: #{inspect(reason)}")
+          Logger.warning("[MaterialClassifier] LLM call failed: #{inspect(reason)}")
           {:error, reason}
       end
     end
@@ -101,7 +127,7 @@ defmodule FunSheep.Content.MaterialClassifier do
 
   # -- prompt -----------------------------------------------------------------
 
-  defp build_prompt(text, opts) do
+  defp build_user_prompt(text, opts) do
     subject_line =
       case opts[:subject] do
         nil -> ""
@@ -115,27 +141,6 @@ defmodule FunSheep.Content.MaterialClassifier do
     sampled = sample_text(text)
 
     """
-    Classify the following material. Read the excerpt and decide which
-    single category best describes it. The categories are:
-
-    * question_bank      — Practice questions (stems + options or
-                           stems + expected answers). Examples: chapter
-                           review questions, past exam questions,
-                           sample-question PDFs.
-    * answer_key         — Only answer letters/indices, no question
-                           stems. Examples: "1. C  2. B  3. D  4. A"
-                           repeated page after page. This is NOT a
-                           question bank — there are no questions here.
-    * knowledge_content  — Textbook prose, study guide summaries,
-                           lecture notes, glossary, diagrams. Learning
-                           material, not questions.
-    * mixed              — Questions AND surrounding prose interleaved
-                           (e.g. a worked example with a question at
-                           the end).
-    * unusable           — Blank, cover page, copyright page, index
-                           only, table of contents, OCR noise with no
-                           meaningful content.
-
     #{subject_line}Excerpt (#{String.length(text)} chars total; showing up to 6000):
     ---
     #{sampled}
@@ -206,17 +211,17 @@ defmodule FunSheep.Content.MaterialClassifier do
 
   @behaviour FunSheep.Interactor.AssistantSpec
 
-  # Configurable impl so tests can stub the Interactor round-trip.
-  # Production resolves to `FunSheep.Interactor.Agents`; tests set this
-  # via `Application.put_env(:fun_sheep, :interactor_agents_impl, Mock)`.
-  defp agents_impl do
-    Application.get_env(:fun_sheep, :interactor_agents_impl, FunSheep.Interactor.Agents)
+  # Configurable impl so tests can stub the LLM round-trip.
+  # Production resolves to `FunSheep.AI.Client`; tests set this
+  # via `Application.put_env(:fun_sheep, :ai_client_impl, Mock)`.
+  defp ai_client do
+    Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
   end
 
   @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
     %{
-      name: @assistant_name,
+      name: "material_content_classifier",
       description:
         "Classifies uploaded course material (OCR text or scraped web content) into question_bank / answer_key / knowledge_content / mixed / unusable. Returns JSON with kind + confidence.",
       system_prompt:

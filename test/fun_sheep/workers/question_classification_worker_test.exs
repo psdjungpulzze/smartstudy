@@ -1,45 +1,20 @@
 defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
   @moduledoc """
-  Regression tests around the 2026-04-22 prod incident where the classifier
-  worker discarded `ensure_assistant/0`'s return value and proceeded to call
-  `Agents.chat/3` with an unknown assistant name — producing 530 consecutive
-  `:assistant_not_found` errors before the operator bumped the assistant
-  name.
+  Regression tests for the classification worker.
 
-  These tests drive the worker through the Mox-backed `AgentsMock` so we can
-  pin the exact failure mode without a real Interactor round-trip.
+  The worker now calls the LLM directly via FunSheep.AI.ClientMock in tests,
+  bypassing Interactor entirely.
   """
 
   use FunSheep.DataCase, async: true
   import Mox
 
   alias FunSheep.{Courses, Questions}
-  alias FunSheep.Interactor.AgentsMock
+  alias FunSheep.AI.ClientMock
   alias FunSheep.Questions.Question
   alias FunSheep.Workers.QuestionClassificationWorker
 
   setup :verify_on_exit!
-
-  setup do
-    # Route Agents calls through the Mox-backed stub for the duration of this
-    # test. The default in test env is the real `FunSheep.Interactor.Agents`
-    # module (with mock-mode Client responses), so other tests are unaffected.
-    Application.put_env(
-      :fun_sheep,
-      :interactor_agents_impl,
-      FunSheep.Interactor.AgentsMock
-    )
-
-    on_exit(fn ->
-      Application.delete_env(:fun_sheep, :interactor_agents_impl)
-    end)
-
-    # persistent_term is process-independent; a cached id from a prior test
-    # would make `ensure_assistant/0` skip provisioning entirely. Wipe it.
-    :persistent_term.erase({QuestionClassificationWorker, :assistant_id})
-
-    :ok
-  end
 
   defp fixture do
     {:ok, course} = Courses.create_course(%{name: "Math 101", subject: "Math", grade: "10"})
@@ -65,19 +40,13 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
     %{course: course, chapter: chapter, section: section, question: question}
   end
 
-  describe "assistant provisioning failure" do
-    test "skips Agents.chat and leaves the question uncategorized" do
+  describe "LLM call failure" do
+    test "leaves the question uncategorized when the LLM is unavailable" do
       %{question: question} = fixture()
 
-      # Provisioning fails on the very first call. If the short-circuit is
-      # broken, the worker would still reach `chat/3` and the test would fail
-      # with a Mox "received unexpected call" error — which is precisely the
-      # regression guarantee we want.
-      expect(AgentsMock, :resolve_or_create_assistant, fn _attrs ->
-        {:error, {:assistant_not_found, "question_skill_tagger"}}
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
+        {:error, :rate_limited}
       end)
-
-      # No chat/3 expectation — any call to it would fail the test.
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -87,7 +56,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
                    })
         end)
 
-      assert log =~ "Assistant not provisioned"
+      assert log =~ "LLM call failed"
 
       reloaded = Repo.get!(Question, question.id)
       assert reloaded.classification_status == :uncategorized
@@ -115,9 +84,8 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
           classification_status: :uncategorized
         })
 
-      # NO mock expectations — the auto-default branch must not call AI at
-      # all (no chat AND no resolve_or_create_assistant). With Mox `expect`
-      # absent, any unexpected call fails the test.
+      # NO mock expectations — the auto-default branch must not call the LLM at all.
+      # Any unexpected call to ClientMock.call/3 would fail the test.
 
       assert :ok =
                QuestionClassificationWorker.perform(%Oban.Job{
@@ -131,26 +99,21 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
       refute is_nil(reloaded.section_id)
       refute is_nil(reloaded.classified_at)
 
-      # The Overview section now exists for that chapter.
       [section] = Courses.list_sections_by_chapter(chapter.id)
       assert section.name == "Overview"
       assert section.id == reloaded.section_id
 
-      # And the metadata is honest about the auto-default path.
       classification = reloaded.metadata["classification"]
       assert classification["auto_default"] == true
     end
   end
 
   describe "happy path" do
-    test "classifies the question when resolve + chat both succeed" do
+    test "classifies the question when LLM returns a valid section_number" do
       %{section: section, question: question} = fixture()
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _attrs -> {:ok, "mock-id"} end)
-
-      # New shape: LLM returns section_number (1-indexed), worker resolves
-      # to the real UUID. Eliminates UUID-hallucination as a failure mode.
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      # New shape: LLM returns section_number (1-indexed), worker resolves to UUID.
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "question_classification_worker"} ->
         {:ok,
          Jason.encode!(%{
            "section_number" => 1,
@@ -172,9 +135,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
     test "still accepts the legacy section_id shape (forward-compat)" do
       %{section: section, question: question} = fixture()
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _attrs -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          Jason.encode!(%{
            "section_id" => section.id,
@@ -194,11 +155,9 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
     test "out-of-range section_number routes to :low_confidence (no crash, no hallucination leak)" do
       %{question: question} = fixture()
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _attrs -> {:ok, "mock-id"} end)
-
       # The fixture chapter has exactly 1 section. Asking for #5 must NOT
       # silently pick a random section — it must mark :low_confidence.
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          Jason.encode!(%{
            "section_number" => 5,
@@ -233,16 +192,14 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
       :ok
     end
 
-    test "default threshold (0.5) accepts the LLM's mid-confidence picks instead of rotting them at :low_confidence" do
+    test "default threshold (0.5) accepts mid-confidence picks instead of rotting them at :low_confidence" do
       # The 2026-04-22 incident: LLM consistently returned 0.5–0.7 for valid
       # AP Bio chapter→section assignments, but the old 0.85 threshold
       # rejected all of them. With the new default (0.5), a 0.6 verdict
       # against a valid in-chapter section must come through as :ai_classified.
       %{section: section, question: question} = fixture()
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          Jason.encode!(%{
            "section_id" => section.id,
@@ -265,9 +222,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
     test "below-threshold confidence still routes to :low_confidence (no false promotions)" do
       %{question: question} = fixture()
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          Jason.encode!(%{
            "section_id" => Ecto.UUID.generate(),
@@ -291,9 +246,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorkerTest do
 
       Application.put_env(:fun_sheep, :classification_confidence_threshold, 0.9)
 
-      expect(AgentsMock, :resolve_or_create_assistant, fn _ -> {:ok, "mock-id"} end)
-
-      expect(AgentsMock, :chat, fn _name, _prompt, _opts ->
+      expect(ClientMock, :call, fn _sys, _usr, _opts ->
         {:ok,
          Jason.encode!(%{
            "section_id" => section.id,

@@ -23,7 +23,6 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.Question
-  alias FunSheep.Interactor.Agents
 
   import Ecto.Query
   require Logger
@@ -47,6 +46,15 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   # If config must change again, pick another descriptive name rather than
   # reusing a prior one.
   @assistant_name "question_skill_tagger"
+
+  @system_prompt "You are a curriculum skill tagger. Given a question and the list of sections in its chapter, pick the single best existing section. If nothing fits, return null and propose a name. Always return a low confidence when unsure."
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 400,
+    temperature: 0.1,
+    source: "question_classification_worker"
+  }
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -129,37 +137,20 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
   defp classify_one(question, sections) do
     prompt = build_prompt(question, sections)
 
-    # Provisioning failures must short-circuit — otherwise Agents.chat/3 hits
-    # Interactor with an unknown assistant name and every call returns
-    # :assistant_not_found (prod incident 2026-04-22: 530 questions failed
-    # this way before the name was bumped).
-    case ensure_assistant() do
-      {:ok, _id} ->
-        case agents_impl().chat(@assistant_name, prompt, %{
-               source: "question_classification_worker",
-               metadata: %{question_id: question.id, chapter_id: question.chapter_id}
-             }) do
-          {:ok, response} ->
-            case parse_response(response, sections) do
-              {:ok, parsed} ->
-                apply_classification(question, sections, parsed)
-
-              {:error, reason} ->
-                Logger.warning("[QClassify] Parse failed for #{question.id}: #{inspect(reason)}")
-                {:error, :parse_failed}
-            end
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
+      {:ok, response} ->
+        case parse_response(response, sections) do
+          {:ok, parsed} ->
+            apply_classification(question, sections, parsed)
 
           {:error, reason} ->
-            Logger.error("[QClassify] AI unavailable for #{question.id}: #{inspect(reason)}")
-            {:error, :ai_unavailable}
+            Logger.warning("[QClassify] Parse failed for #{question.id}: #{inspect(reason)}")
+            {:error, :parse_failed}
         end
 
       {:error, reason} ->
-        Logger.error(
-          "[QClassify] Assistant not provisioned for #{question.id}; leaving for retry: #{inspect(reason)}"
-        )
-
-        {:error, :assistant_unavailable}
+        Logger.error("[QClassify] LLM call failed for #{question.id}: #{inspect(reason)}")
+        {:error, :ai_unavailable}
     end
   end
 
@@ -341,37 +332,5 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     }
   end
 
-  @doc """
-  Ensures the classifier assistant exists on Interactor. Safe to call
-  repeatedly — cached in `persistent_term`.
-  """
-  def ensure_assistant do
-    case :persistent_term.get({__MODULE__, :assistant_id}, nil) do
-      nil ->
-        provision_assistant()
-
-      id ->
-        {:ok, id}
-    end
-  end
-
-  defp provision_assistant do
-    # Race-safe: if a peer just created the assistant, we'll re-resolve
-    # instead of fighting a 422.
-    case agents_impl().resolve_or_create_assistant(assistant_attrs()) do
-      {:ok, id} ->
-        :persistent_term.put({__MODULE__, :assistant_id}, id)
-        {:ok, id}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # Routes Agents calls through a configurable impl so tests can stub the
-  # Interactor round-trip without real HTTP. Production always resolves to
-  # `FunSheep.Interactor.Agents`; tests set this to a Mox-backed stub.
-  defp agents_impl do
-    Application.get_env(:fun_sheep, :interactor_agents_impl, Agents)
-  end
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

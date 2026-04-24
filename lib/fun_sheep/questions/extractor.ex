@@ -11,16 +11,14 @@ defmodule FunSheep.Questions.Extractor do
     - 122 other OCR fragments
 
   Strategy:
-    * AI-first — structured JSON output from the `question_extract`
-      assistant. Prompt deliberately instructs "return [] if this is
-      an answer key, cover page, or prose-only content" so the
-      extractor short-circuits on materials the classifier didn't
-      already filter out.
+    * AI-first — structured JSON output from a direct LLM call.
+      Prompt deliberately instructs "return [] if this is an answer
+      key, cover page, or prose-only content" so the extractor
+      short-circuits on materials the classifier didn't already filter.
     * Hard pre-insert gates — every extracted question must clear a
       strict validator BEFORE it hits the database. The validator
       defends against the specific garbage patterns the April audit
-      surfaced, so even a compromised extractor can't reintroduce
-      them.
+      surfaced, so even a compromised extractor can't reintroduce them.
     * Regex fallback — only runs when the AI path returns nothing AND
       the source is a known-structured layout (sample_questions
       material kind, or `page_type == "multiple_choice_quiz"` on the
@@ -33,8 +31,6 @@ defmodule FunSheep.Questions.Extractor do
   """
 
   require Logger
-
-  @assistant_name "question_extract"
 
   # Pre-insert gates — these are the failure patterns the April audit
   # surfaced, codified. Kept here (not the changeset) because they're
@@ -49,6 +45,37 @@ defmodule FunSheep.Questions.Extractor do
   # mid-word, and option-list echoes.
   @answer_key_regex ~r/^[A-D](\s*\d+\.\s*[A-D]\s*){2,}/
   @fragment_regex ~r/[a-z]$/
+
+  @system_prompt """
+  You are a question extractor for an educational platform. Extract practice questions from the content the user provides.
+
+  Rules:
+  - Only return questions that actually appear in the input — do not invent or paraphrase stems.
+  - If the content is an answer key (letters/indices only, no question stems), a cover page, or prose summary with no questions, return [].
+  - Every extracted question MUST include a non-empty explanation.
+  - Reject any stem that looks truncated mid-sentence.
+  - If a question looks like an answer-key row (e.g. "1. C 2. B 3. D") with no question stem, SKIP IT.
+
+  Return ONLY a JSON array. Each question object must have:
+    "content":       the question stem (string, at least 20 chars, no trailing mid-word fragments)
+    "answer":        the correct answer (letter for MCQ, "True"/"False" for T/F, a concise
+                     expected answer for short/free response, empty string ONLY for ungradable
+                     free response)
+    "question_type": one of "multiple_choice" | "true_false" | "short_answer" | "free_response"
+    "options":       for multiple_choice only, an object with at least 3 keys from A/B/C/D/E;
+                     otherwise null
+    "difficulty":    "easy" | "medium" | "hard"
+    "explanation":   a 1-2 sentence explanation of why the answer is correct (REQUIRED)
+
+  Return [] if nothing extractable.
+  """
+
+  @llm_opts %{
+    model: "gpt-4o-mini",
+    max_tokens: 2_000,
+    temperature: 0.1,
+    source: "questions_extractor"
+  }
 
   @type source_ref :: %{
           optional(:material_id) => Ecto.UUID.t(),
@@ -85,7 +112,6 @@ defmodule FunSheep.Questions.Extractor do
 
     cond do
       String.length(trimmed) < @min_content_length * 2 ->
-        # Too little content to reasonably contain any question
         []
 
       true ->
@@ -99,22 +125,19 @@ defmodule FunSheep.Questions.Extractor do
   # -- AI path ----------------------------------------------------------------
 
   defp run_ai(text, opts) do
-    prompt = build_prompt(text, opts)
+    user_prompt = build_user_prompt(text, opts)
 
-    case agents_impl().chat(@assistant_name, prompt, %{
-           source: "questions_extractor",
-           metadata: %{subject: opts[:subject], source: opts[:source]}
-         }) do
+    case ai_client().call(@system_prompt, user_prompt, @llm_opts) do
       {:ok, response} ->
         parse_response(response)
 
       {:error, reason} ->
-        Logger.warning("[Extractor] agent call failed: #{inspect(reason)}")
+        Logger.warning("[Extractor] LLM call failed: #{inspect(reason)}")
         []
     end
   end
 
-  defp build_prompt(text, opts) do
+  defp build_user_prompt(text, opts) do
     subject_line =
       case opts[:subject] do
         nil -> ""
@@ -131,37 +154,11 @@ defmodule FunSheep.Questions.Extractor do
     sampled = sample(text)
 
     """
-    Extract practice questions from the following content. Be strict:
-    if the content is an answer key, a prose summary, a cover page, or
-    otherwise not practice questions, return an empty array.
-
     #{subject_line}#{source_line}
     Content (sampled; #{String.length(text)} chars total):
     ---
     #{sampled}
     ---
-
-    Return ONLY a JSON array. Each question object must have:
-      "content": the question stem (string, at least 20 chars, no
-                 trailing mid-word fragments)
-      "answer":  the correct answer (letter for MCQ, "True"/"False"
-                 for T/F, a concise expected answer for short/free
-                 response, empty string ONLY for ungradable free
-                 response)
-      "question_type": one of "multiple_choice" | "true_false" |
-                      "short_answer" | "free_response"
-      "options": for multiple_choice only, an object with at least
-                 3 keys from A/B/C/D/E; otherwise null
-      "difficulty": "easy" | "medium" | "hard"
-      "explanation": a 1-2 sentence explanation of why the answer is
-                     correct (REQUIRED — questions without an
-                     explanation will be rejected downstream)
-
-    If a question looks like an answer-key row (e.g. "1. C 2. B 3. D")
-    with no question stem, SKIP IT — do not fabricate a stem.
-    If content appears truncated mid-sentence, SKIP IT.
-
-    Return [] if nothing extractable.
     """
   end
 
@@ -261,9 +258,7 @@ defmodule FunSheep.Questions.Extractor do
   defp maybe_string(s) when is_binary(s), do: String.trim(s)
   defp maybe_string(_), do: nil
 
-  # Hard pre-insert gates. Each defp returns true only if the question
-  # CAN be trusted to reach a student (or at least the validator queue,
-  # where it'll be checked again).
+  # Hard pre-insert gates.
   defp accept?(%{content: content} = q) do
     content_ok?(content) and
       not answer_key_artifact?(content) and
@@ -292,11 +287,6 @@ defmodule FunSheep.Questions.Extractor do
     Regex.match?(@answer_key_regex, content)
   end
 
-  # "Fragment" = ends with a lowercase letter AND is short enough that
-  # it's likely a mid-word truncation rather than a legitimate short
-  # sentence without terminal punctuation. Long stems that happen to
-  # end mid-word are rare; false positives here are acceptable (the
-  # content gate already required ≥20 chars).
   defp fragment?(content) do
     String.length(content) < 100 and Regex.match?(@fragment_regex, content)
   end
@@ -308,33 +298,25 @@ defmodule FunSheep.Questions.Extractor do
   defp mcq_options_ok?(%{question_type: :multiple_choice}), do: false
   defp mcq_options_ok?(_), do: true
 
-  # Free-response may legitimately have an empty answer when the
-  # question is ungradable without a human. Everything else needs a
-  # non-empty answer.
   defp answer_ok?(%{question_type: :free_response, answer: _}), do: true
   defp answer_ok?(%{answer: a}) when is_binary(a) and a != "", do: true
   defp answer_ok?(_), do: false
-
-  # -- test hook --------------------------------------------------------------
-
-  defp agents_impl do
-    Application.get_env(:fun_sheep, :interactor_agents_impl, FunSheep.Interactor.Agents)
-  end
 
   @behaviour FunSheep.Interactor.AssistantSpec
 
   @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
     %{
-      name: @assistant_name,
+      name: "question_extract",
       description:
         "Extracts practice questions from course material text or scraped web content. Returns a JSON array with stem, answer, options, difficulty, explanation. Skips answer keys, prose, and truncated fragments.",
-      system_prompt:
-        "You are a question extractor for an educational platform. Only return questions that appear in the input — do not invent. If the content is an answer key, cover page, or prose summary, return []. Every extracted question must include a non-empty explanation. Reject any stem that looks truncated mid-sentence.",
+      system_prompt: @system_prompt,
       llm_provider: "openai",
       llm_model: "gpt-4o-mini",
       llm_config: %{temperature: 0.1, max_tokens: 2000},
       metadata: %{app: "funsheep", role: "question_extractor"}
     }
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end
