@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.DashboardLive do
   use FunSheepWeb, :live_view
 
-  import FunSheepWeb.SheepMascot
+  import FunSheepWeb.SheepMascot, only: [sheep: 1, sheep_icon: 1]
 
   import FunSheepWeb.ShareButton
 
@@ -517,13 +517,13 @@ defmodule FunSheepWeb.DashboardLive do
               {@test.test.name}
             </h3>
           </div>
-          <div class="text-right shrink-0">
+          <div class={"text-right shrink-0 #{days_urgency_class(@days_left)}"}>
             <p class="text-2xl sm:text-3xl font-extrabold text-white">{@days_left}</p>
             <p class="text-[10px] sm:text-xs font-bold text-white/70">days left</p>
           </div>
         </div>
 
-        <%!-- Readiness bar --%>
+        <%!-- Readiness bar with walking sheep mascot --%>
         <div class="mt-3 sm:mt-4">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs sm:text-sm font-bold text-white/90">
@@ -531,14 +531,23 @@ defmodule FunSheepWeb.DashboardLive do
             </span>
             <span class="text-xs sm:text-sm font-extrabold text-white">{@readiness}%</span>
           </div>
-          <div class="w-full bg-white/20 rounded-full h-2.5 sm:h-3">
+          <div
+            id={"focus-readiness-bar-#{@schedule_id}"}
+            phx-hook="SheepProgressBar"
+            data-readiness={@readiness}
+            class="relative w-full bg-white/20 rounded-full h-2.5 sm:h-3 overflow-visible"
+          >
             <div
-              class="bg-white h-2.5 sm:h-3 rounded-full transition-all duration-1000 relative"
+              class="bg-white h-2.5 sm:h-3 rounded-full transition-all duration-1000"
               style={"width: #{@readiness}%"}
             >
-              <div class="absolute -top-3 -right-3 w-6 h-6 hidden sm:block">
-                <.sheep_inline state={:studying} />
-              </div>
+            </div>
+            <div
+              data-sheep
+              class="absolute top-1/2 -translate-y-1/2 pointer-events-none hidden sm:block"
+              style="will-change: transform; position: absolute;"
+            >
+              <.sheep_icon size="sm" state={readiness_to_state(@readiness)} />
             </div>
           </div>
           <div class="flex justify-between mt-1">
@@ -906,7 +915,11 @@ defmodule FunSheepWeb.DashboardLive do
 
   defp daily_goal(assigns) do
     ~H"""
-    <div class="bg-gradient-to-r from-[#4CD964] to-[#3DBF55] rounded-2xl p-3.5 sm:p-4 text-white shadow-lg">
+    <div
+      id="daily-goal-confetti"
+      phx-hook="ConfettiBurst"
+      class="relative bg-gradient-to-r from-[#4CD964] to-[#3DBF55] rounded-2xl p-3.5 sm:p-4 text-white shadow-lg overflow-hidden"
+    >
       <div class="flex items-center gap-3 sm:gap-4">
         <div class="text-2xl sm:text-3xl shrink-0">🎯</div>
         <div class="flex-1 min-w-0">
@@ -919,7 +932,14 @@ defmodule FunSheepWeb.DashboardLive do
           <p class="text-xs sm:text-sm text-green-100 mt-0.5">+50 Fleece Points</p>
         </div>
         <div class="text-right shrink-0">
-          <p class="text-xl sm:text-2xl font-extrabold">{@gamification.xp_today}</p>
+          <p
+            id="daily-xp-counter"
+            phx-hook="CountUp"
+            data-target={@gamification.xp_today}
+            class="text-xl sm:text-2xl font-extrabold"
+          >
+            {@gamification.xp_today}
+          </p>
           <p class="text-[10px] sm:text-xs text-green-100">FP today</p>
         </div>
       </div>
@@ -1366,6 +1386,15 @@ defmodule FunSheepWeb.DashboardLive do
   defp readiness_pct_color(score) when score >= 70, do: "text-[#4CD964]"
   defp readiness_pct_color(score) when score >= 40, do: "text-amber-500"
   defp readiness_pct_color(_), do: "text-red-500"
+
+  # Maps readiness percentage to a sheep_icon state string.
+  defp readiness_to_state(r) when r >= 80, do: "run"
+  defp readiness_to_state(_), do: "walk"
+
+  # Maps days_left to urgency animation class for the days counter.
+  defp days_urgency_class(days) when days in 1..2, do: "heartbeat-fast text-red-400"
+  defp days_urgency_class(days) when days in 3..6, do: "heartbeat-pulse text-amber-400"
+  defp days_urgency_class(_), do: ""
 
   defp subject_emoji(nil), do: "📘"
 

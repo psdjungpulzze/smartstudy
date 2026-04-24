@@ -182,17 +182,26 @@ defmodule FunSheepWeb.PracticeLive do
       new_state = PracticeEngine.record_answer(state, question.id, answer, is_correct)
 
       socket =
-        assign(socket,
+        socket
+        |> assign(
           engine_state: new_state,
           feedback: %{
             is_correct: is_correct,
             correct_answer: question.answer,
+            # Teacher-review fix #3: show the canonical explanation inline
+            # on wrong-answer feedback instead of gating learning behind a
+            # Tutor click. Presence is optional — the generator is supposed
+            # to always fill this, but legacy rows may be empty.
             explanation: question.explanation
           }
         )
 
       socket =
-        if is_correct, do: socket, else: push_event(socket, "play_sound", %{name: "sheep_wrong"})
+        if is_correct do
+          push_event(socket, "confetti_burst", %{})
+        else
+          push_event(socket, "play_sound", %{name: "sheep_wrong"})
+        end
 
       {:noreply, socket}
     end
@@ -580,15 +589,36 @@ defmodule FunSheepWeb.PracticeLive do
         </form>
       </div>
 
-      <%!-- Progress bar --%>
+      <%!-- Progress bar with walking sheep mascot --%>
       <div :if={!@practice_complete and @total_questions > 0} class="mb-6">
-        <div class="w-full bg-[#E5E5EA] rounded-full h-2">
+        <div
+          id="practice-readiness-bar"
+          phx-hook="SheepProgressBar"
+          data-readiness={progress_percentage(@question_number, @total_questions)}
+          class="relative w-full bg-[#E5E5EA] rounded-full h-3 overflow-visible"
+        >
           <div
-            class="bg-[#4CD964] h-2 rounded-full transition-all duration-300"
+            class="bg-[#4CD964] h-3 rounded-full transition-all duration-300"
             style={"width: #{progress_percentage(@question_number, @total_questions)}%"}
           >
           </div>
+          <div
+            data-sheep
+            class="absolute top-1/2 -translate-y-1/2 pointer-events-none"
+            style="will-change: transform; position: absolute;"
+          >
+            <FunSheepWeb.SheepMascot.sheep_icon size="sm" state="walk" />
+          </div>
         </div>
+      </div>
+
+      <%!-- Confetti burst container for correct answers --%>
+      <div
+        id="practice-confetti"
+        phx-hook="ConfettiBurst"
+        class="relative overflow-hidden pointer-events-none"
+        style="height: 0;"
+      >
       </div>
 
       <%!-- No questions state --%>
