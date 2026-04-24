@@ -66,9 +66,7 @@ defmodule Mix.Tasks.Funsheep.Courses.RetryFailed do
       try do
         course = Courses.get_course!(id)
 
-        Mix.shell().info(
-          "  [#{id}] #{course.name} / status=#{course.processing_status}"
-        )
+        Mix.shell().info("  [#{id}] #{course.name} / status=#{course.processing_status}")
 
         if not dry_run? do
           case Courses.reprocess_course(id) do

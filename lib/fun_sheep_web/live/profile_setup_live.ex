@@ -343,10 +343,11 @@ defmodule FunSheepWeb.ProfileSetupLive do
              assigns.hobby_interests
            ) do
       if assigns.first_time? do
-        {:noreply,
-         socket
-         |> put_flash(:info, "Profile setup complete!")
-         |> redirect(to: "/dashboard")}
+        # New students: before the dashboard, offer LMS integration (the
+        # options-first path). Step 3 is skippable — students whose school
+        # isn't on Google Classroom / Canvas click "Skip for now" and fall
+        # through to the dashboard's own empty-state CTAs.
+        {:noreply, assign(socket, step: 3)}
       else
         # Returning user finished an edit — refresh the summary and flip back to view mode.
         refreshed = load_existing_profile(assigns.current_user)
@@ -384,6 +385,25 @@ defmodule FunSheepWeb.ProfileSetupLive do
 
   def handle_event("prev_step", _params, %{assigns: %{step: step}} = socket) when step > 1 do
     {:noreply, assign(socket, step: step - 1)}
+  end
+
+  # Step 3 actions (first-time onboarding only).
+  # "Connect" → student goes to /integrations to wire up Google Classroom or
+  # Canvas; their imported tests will show up on the dashboard when they
+  # return. "Skip" → fall through to dashboard; the options-first empty
+  # state there still promotes integration.
+  def handle_event("connect_lms", _params, socket) do
+    {:noreply,
+     socket
+     |> put_flash(:info, "Profile saved. Connect your school's LMS to import your tests.")
+     |> redirect(to: "/integrations")}
+  end
+
+  def handle_event("skip_lms_connect", _params, socket) do
+    {:noreply,
+     socket
+     |> put_flash(:info, "Profile setup complete!")
+     |> redirect(to: "/dashboard")}
   end
 
   def handle_event("edit_profile", _params, socket) do
@@ -524,6 +544,8 @@ defmodule FunSheepWeb.ProfileSetupLive do
                   hobby_interests={@hobby_interests}
                   first_time?={@first_time?}
                 />
+              <% 3 -> %>
+                <.step3_connect_lms />
             <% end %>
           </div>
       <% end %>
@@ -623,6 +645,8 @@ defmodule FunSheepWeb.ProfileSetupLive do
       <.step_dot number={1} label="Demographics" active={@step >= 1} current={@step == 1} />
       <div class={"w-8 sm:w-16 h-0.5 #{if @step > 1, do: "bg-[#4CD964]", else: "bg-[#E5E5EA]"}"} />
       <.step_dot number={2} label="Hobbies" active={@step >= 2} current={@step == 2} />
+      <div class={"w-8 sm:w-16 h-0.5 #{if @step > 2, do: "bg-[#4CD964]", else: "bg-[#E5E5EA]"}"} />
+      <.step_dot number={3} label="Connect" active={@step >= 3} current={@step == 3} />
     </div>
     """
   end
@@ -950,9 +974,70 @@ defmodule FunSheepWeb.ProfileSetupLive do
           phx-click="complete_hobbies"
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors"
         >
-          {if @first_time?, do: "Complete Setup", else: "Save Changes"}
+          {if @first_time?, do: "Next", else: "Save Changes"}
         </button>
       </div>
+    </div>
+    """
+  end
+
+  # ── Step 3: Connect School LMS (first-time onboarding only) ──────────────
+
+  defp step3_connect_lms(assigns) do
+    ~H"""
+    <div>
+      <h2 class="text-xl font-semibold text-[#1C1C1E] mb-2">Connect your school</h2>
+      <p class="text-sm text-[#8E8E93] mb-6">
+        We can import your upcoming tests automatically if your school uses Google Classroom or Canvas. Otherwise, you can add tests yourself later — takes about a minute.
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-6">
+        <div class="p-4 rounded-2xl border-2 border-[#E5E5EA] bg-white flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center text-xl shrink-0">
+            🎓
+          </div>
+          <div class="min-w-0">
+            <p class="font-semibold text-[#1C1C1E] text-sm">Google Classroom</p>
+            <p class="text-xs text-[#8E8E93] mt-0.5">
+              Import active classes and upcoming tests
+            </p>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-2xl border-2 border-[#E5E5EA] bg-white flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center text-xl shrink-0">
+            📚
+          </div>
+          <div class="min-w-0">
+            <p class="font-semibold text-[#1C1C1E] text-sm">Canvas</p>
+            <p class="text-xs text-[#8E8E93] mt-0.5">
+              Import courses and assignments with due dates
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Navigation buttons --%>
+      <div class="flex justify-between mt-8 gap-4 flex-wrap">
+        <button
+          type="button"
+          phx-click="skip_lms_connect"
+          class="bg-white hover:bg-gray-50 text-[#1C1C1E] font-medium px-6 py-3 rounded-full shadow-sm border border-gray-200 transition-colors"
+        >
+          Skip for now
+        </button>
+        <button
+          type="button"
+          phx-click="connect_lms"
+          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-8 py-3 rounded-full shadow-md transition-colors inline-flex items-center justify-center gap-2"
+        >
+          <.icon name="hero-link" class="w-4 h-4" /> Connect School LMS
+        </button>
+      </div>
+
+      <p class="text-xs text-[#8E8E93] text-center mt-4">
+        You can always connect (or disconnect) your school from Integrations later.
+      </p>
     </div>
     """
   end
