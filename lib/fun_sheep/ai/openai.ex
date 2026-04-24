@@ -34,18 +34,22 @@ defmodule FunSheep.AI.OpenAI do
   end
 
   defp do_call(body, timeout, source, attempt) do
-    case Req.post(@api_url,
-           [json: body,
-            headers: headers(),
-            receive_timeout: timeout,
-            retry: false] ++ extra_req_opts() ++ @finch_opts) do
+    case Req.post(
+           @api_url,
+           [json: body, headers: headers(), receive_timeout: timeout, retry: false] ++
+             extra_req_opts() ++ @finch_opts
+         ) do
       {:ok, %{status: 200, body: resp}} ->
         extract_text(resp)
 
       {:ok, %{status: 429, headers: resp_headers, body: resp_body}} ->
         if attempt < @max_retries do
           wait = retry_wait(resp_headers, resp_body, attempt)
-          Logger.warning("[AI.OpenAI] Rate limited (429), waiting #{wait}ms (attempt #{attempt + 1})")
+
+          Logger.warning(
+            "[AI.OpenAI] Rate limited (429), waiting #{wait}ms (attempt #{attempt + 1})"
+          )
+
           Process.sleep(wait)
           do_call(body, timeout, source, attempt + 1)
         else

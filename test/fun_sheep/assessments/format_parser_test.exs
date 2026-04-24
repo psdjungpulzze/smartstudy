@@ -15,8 +15,7 @@ defmodule FunSheep.Assessments.FormatParserTest do
 
     test "parses a well-formed LLM response" do
       expect(ClientMock, :call, fn _sys, _usr, %{source: "format_parser"} ->
-        {:ok,
-         ~S({
+        {:ok, ~S({
            "sections": [
              {"name": "Multiple Choice", "question_type": "multiple_choice", "count": 20, "points_per_question": 1, "time_minutes": 30},
              {"name": "FRQ", "question_type": "free_response", "count": 3, "points_per_question": 5, "time_minutes": 35}
@@ -38,7 +37,8 @@ defmodule FunSheep.Assessments.FormatParserTest do
 
     test "normalizes invalid question types to multiple_choice" do
       expect(ClientMock, :call, fn _sys, _usr, _opts ->
-        {:ok, ~S({"sections":[{"name":"S1","question_type":"essay","count":5,"points_per_question":2}],"time_limit_minutes":null})}
+        {:ok,
+         ~S({"sections":[{"name":"S1","question_type":"essay","count":5,"points_per_question":2}],"time_limit_minutes":null})}
       end)
 
       assert {:ok, %{sections: [section]}} = FormatParser.parse("5 essay questions")
