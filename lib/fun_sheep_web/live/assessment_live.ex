@@ -92,6 +92,20 @@ defmodule FunSheepWeb.AssessmentLive do
   end
 
   defp restore_from_cache(socket, course_id, schedule, cached) do
+    # Always re-derive question_types from the current format_template so that:
+    # (a) stale cached states (from before question_types was added) get the
+    #     filter applied, and (b) if the teacher updates the format template the
+    #     next reconnect picks it up.
+    engine_state =
+      case cached.engine_state do
+        nil ->
+          nil
+
+        state ->
+          question_types = Engine.format_question_types(schedule.format_template)
+          Map.put(state, :question_types, question_types)
+      end
+
     socket
     |> assign(
       page_title: "Assessment: #{schedule.name}",
@@ -99,7 +113,7 @@ defmodule FunSheepWeb.AssessmentLive do
       schedule: schedule,
       billing_blocked: false,
       billing_stats: nil,
-      engine_state: cached.engine_state,
+      engine_state: engine_state,
       current_question: cached.current_question,
       current_question_stats: cached.current_question_stats,
       selected_answer: cached.selected_answer,

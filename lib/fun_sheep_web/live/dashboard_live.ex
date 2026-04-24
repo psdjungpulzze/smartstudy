@@ -210,11 +210,6 @@ defmodule FunSheepWeb.DashboardLive do
         />
       </div>
 
-      <%!-- ── Study Path (journey nodes) ── --%>
-      <div :if={@primary_test} class="animate-slide-up">
-        <.study_path test={@primary_test} />
-      </div>
-
       <%!-- ── Connected apps ── --%>
       <div class="animate-slide-up">
         <.connected_apps_card integrations={@integrations} />
@@ -260,14 +255,57 @@ defmodule FunSheepWeb.DashboardLive do
 
   defp focus_card(assigns) do
     days_left = Date.diff(assigns.test.test.test_date, Date.utc_today())
+    readiness_score = assigns.test.readiness
 
     readiness =
-      if assigns.test.readiness, do: round(assigns.test.readiness.aggregate_score), else: 0
+      if readiness_score, do: round(readiness_score.aggregate_score), else: 0
 
     urgency = urgency_level(days_left, readiness)
     course_id = assigns.test.test.course_id
     schedule_id = assigns.test.test.id
     attempts_count = Map.get(assigns.test, :attempts_count, 0)
+
+    assessment_done? =
+      FunSheep.Assessments.ReadinessCalculator.assessment_complete?(readiness_score)
+
+    aggregate = if readiness_score, do: readiness_score.aggregate_score, else: 0.0
+
+    all_mastered? =
+      assessment_done? and
+        FunSheep.Assessments.ReadinessCalculator.all_skills_mastered?(readiness_score)
+
+    has_format = assigns.test.test.format_template_id != nil
+
+    steps = [
+      %{
+        label: "Assessment",
+        desc: "Find your weak spots",
+        icon: "🧪",
+        done: assessment_done?,
+        path: ~p"/courses/#{course_id}/tests/#{schedule_id}/assess"
+      },
+      %{
+        label: "Practice",
+        desc: "Drill weak skills until you're ready",
+        icon: "🎯",
+        done: assessment_done? && aggregate >= 80,
+        path: ~p"/courses/#{course_id}/practice"
+      }
+    ]
+
+    format_step = %{
+      label: "Format Practice",
+      desc: "Simulate the real test",
+      icon: "📝",
+      done: all_mastered?,
+      path:
+        if(has_format,
+          do: ~p"/courses/#{course_id}/tests/#{schedule_id}/format-test",
+          else: ~p"/courses/#{course_id}/tests/#{schedule_id}/format"
+        )
+    }
+
+    next_idx = Enum.find_index(steps, fn s -> !s.done end) || length(steps)
 
     assigns =
       assigns
@@ -277,17 +315,16 @@ defmodule FunSheepWeb.DashboardLive do
       |> assign(:course_id, course_id)
       |> assign(:schedule_id, schedule_id)
       |> assign(:attempts_count, attempts_count)
+      |> assign(:steps, steps)
+      |> assign(:next_idx, next_idx)
+      |> assign(:format_step, format_step)
+      |> assign(:all_mastered?, all_mastered?)
 
     ~H"""
-    <div
-      phx-click="navigate_to_assess"
-      phx-value-course-id={@course_id}
-      phx-value-schedule-id={@schedule_id}
-      class={[
-        "rounded-2xl p-4 sm:p-5 shadow-lg relative overflow-hidden cursor-pointer transition-all hover:shadow-xl hover:scale-[1.01]",
-        urgency_gradient(@urgency)
-      ]}
-    >
+    <div class={[
+      "rounded-2xl p-4 sm:p-5 shadow-lg relative overflow-hidden",
+      urgency_gradient(@urgency)
+    ]}>
       <div class="absolute right-0 bottom-0 opacity-10 hidden sm:block">
         <svg width="140" height="100" viewBox="0 0 140 100">
           <polygon points="70,5 140,100 0,100" fill="white" />
@@ -296,7 +333,7 @@ defmodule FunSheepWeb.DashboardLive do
       </div>
 
       <div class="relative z-10">
-        <%!-- Mobile: days-left badge inline; Desktop: side-by-side --%>
+        <%!-- Course name + test name + days left --%>
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5 flex-wrap">
@@ -347,12 +384,85 @@ defmodule FunSheepWeb.DashboardLive do
           </p>
         </div>
 
-        <div class="flex items-center justify-between mt-2 sm:mt-3">
+        <%!-- Assessment + Practice steps --%>
+        <div class="mt-3 sm:mt-4 border-t border-white/20 pt-3 space-y-2">
+          <div :for={{step, idx} <- Enum.with_index(@steps)}>
+            <.link navigate={step.path} class="flex items-center gap-2.5 group">
+              <div class={[
+                "w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0",
+                cond do
+                  step.done -> "bg-white/25"
+                  idx == @next_idx -> "bg-white/20 border-2 border-white/60"
+                  true -> "bg-white/10"
+                end
+              ]}>
+                <span :if={step.done} class="text-white text-xs font-bold">✓</span>
+                <span :if={!step.done}>{step.icon}</span>
+              </div>
+              <div class={[
+                "flex-1 flex items-center justify-between rounded-xl px-3 py-2 transition-colors",
+                cond do
+                  idx == @next_idx ->
+                    "bg-white/20 border border-white/40 group-hover:bg-white/25"
+
+                  step.done ->
+                    "bg-white/10"
+
+                  true ->
+                    "bg-white/10 opacity-50"
+                end
+              ]}>
+                <div class="min-w-0">
+                  <p class={[
+                    "text-sm font-bold leading-tight",
+                    if(step.done || idx == @next_idx, do: "text-white", else: "text-white/60")
+                  ]}>
+                    {step.label}
+                  </p>
+                  <p class="text-xs text-white/50 mt-0.5 hidden sm:block">{step.desc}</p>
+                </div>
+                <span
+                  :if={idx == @next_idx && !step.done}
+                  class="bg-white text-[#4CD964] text-xs font-extrabold px-3 py-1 rounded-full shrink-0 ml-2 shadow-sm"
+                >
+                  START
+                </span>
+                <span :if={step.done} class="text-white/50 text-xs ml-2">✓</span>
+                <.icon
+                  :if={!step.done && idx != @next_idx}
+                  name="hero-lock-closed"
+                  class="w-3.5 h-3.5 text-white/30 shrink-0 ml-2"
+                />
+              </div>
+            </.link>
+          </div>
+        </div>
+
+        <%!-- Format Practice — smaller secondary row --%>
+        <.link
+          navigate={@format_step.path}
+          class="mt-2 flex items-center gap-2 px-1 py-1.5 group rounded-lg hover:bg-white/10 transition-colors"
+        >
+          <span class="text-sm opacity-70">{@format_step.icon}</span>
+          <span class={[
+            "text-xs font-medium",
+            if(@format_step.done, do: "text-white/50 line-through", else: "text-white/70")
+          ]}>
+            {@format_step.label}
+          </span>
+          <span class="text-xs text-white/35 hidden sm:block">· {@format_step.desc}</span>
+          <.icon
+            name="hero-chevron-right"
+            class="w-3.5 h-3.5 text-white/35 ml-auto group-hover:text-white/60 transition-colors"
+          />
+        </.link>
+
+        <%!-- Urgency message + action buttons --%>
+        <div class="flex items-center justify-between mt-3 pt-2 border-t border-white/20">
           <p class="text-xs font-medium text-white/80">
             {urgency_message(@urgency, @days_left, @readiness)}
           </p>
-          <%!-- Stop propagation so these buttons don't trigger the card's phx-click --%>
-          <div class="flex items-center gap-2" phx-click="noop" phx-value-stop="true">
+          <div class="flex items-center gap-2">
             <button
               type="button"
               phx-click={if @pinned?, do: "unpin_test", else: "pin_test"}
@@ -386,138 +496,6 @@ defmodule FunSheepWeb.DashboardLive do
               label="Share"
               class="bg-white/20 border-white/30 text-white hover:bg-white/30 hover:text-white"
             />
-          </div>
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  # ── Study Path: Duolingo-style journey nodes ─────────────────────────────
-
-  defp study_path(assigns) do
-    readiness_score = assigns.test.readiness
-
-    # A ReadinessScore struct is ALWAYS returned from latest_readiness/2 (even
-    # when the student has zero attempts — aggregate_score defaults to 0.0),
-    # so "has_readiness" alone can't distinguish "started" from "completed".
-    # Use assessment_complete? which checks that every in-scope skill has at
-    # least one attempt — the honest signal that the diagnostic has run.
-    assessment_done? =
-      FunSheep.Assessments.ReadinessCalculator.assessment_complete?(readiness_score)
-
-    aggregate = if readiness_score, do: readiness_score.aggregate_score, else: 0.0
-
-    all_mastered? =
-      assessment_done? and
-        FunSheep.Assessments.ReadinessCalculator.all_skills_mastered?(readiness_score)
-
-    has_format = assigns.test.test.format_template_id != nil
-    course_id = assigns.test.test.course_id
-    schedule_id = assigns.test.test.id
-
-    steps = [
-      %{
-        label: "Assessment",
-        desc: "Find your weak spots",
-        icon: "🧪",
-        done: assessment_done?,
-        path: ~p"/courses/#{course_id}/tests/#{schedule_id}/assess"
-      },
-      %{
-        label: "Practice",
-        desc: "Drill weak skills until you're ready",
-        icon: "🎯",
-        done: assessment_done? && aggregate >= 80,
-        path: ~p"/courses/#{course_id}/practice"
-      },
-      %{
-        label: "Format Practice",
-        desc: "Simulate the real test",
-        icon: "📝",
-        done: all_mastered?,
-        path:
-          if(has_format,
-            do: ~p"/courses/#{course_id}/tests/#{schedule_id}/format-test",
-            else: ~p"/courses/#{course_id}/tests/#{schedule_id}/format"
-          )
-      }
-    ]
-
-    # Find the next incomplete step
-    next_idx = Enum.find_index(steps, fn s -> !s.done end) || length(steps)
-
-    assigns =
-      assigns
-      |> assign(:steps, steps)
-      |> assign(:next_idx, next_idx)
-
-    ~H"""
-    <div>
-      <h2 class="text-sm font-extrabold text-gray-400 uppercase tracking-wider mb-3 sm:mb-4">
-        Your Study Path
-      </h2>
-
-      <div class="relative">
-        <%!-- Vertical line --%>
-        <div class="absolute left-5 sm:left-6 top-0 bottom-0 w-0.5 bg-gray-200"></div>
-
-        <div class="space-y-1">
-          <div :for={{step, idx} <- Enum.with_index(@steps)} class="relative">
-            <%!-- Node circle + step card --%>
-            <.link
-              navigate={step.path}
-              class="flex items-center gap-3 sm:gap-4 touch-target"
-            >
-              <div class={[
-                "w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-lg sm:text-xl shrink-0 relative z-10 border-2",
-                cond do
-                  step.done ->
-                    "bg-[#4CD964] border-[#4CD964]"
-
-                  idx == @next_idx ->
-                    "bg-white border-[#4CD964] ring-4 ring-green-100 animate-pulse-subtle"
-
-                  true ->
-                    "bg-gray-100 border-gray-200"
-                end
-              ]}>
-                <span :if={step.done} class="text-white text-base sm:text-lg">✓</span>
-                <span :if={!step.done}>{step.icon}</span>
-              </div>
-
-              <div class={[
-                "flex-1 rounded-2xl p-3 sm:p-4 transition-all min-w-0",
-                cond do
-                  idx == @next_idx -> "bg-white border-2 border-[#4CD964] shadow-md card-hover"
-                  step.done -> "bg-white border border-gray-100"
-                  true -> "bg-gray-50 border border-gray-100 opacity-60"
-                end
-              ]}>
-                <div class="flex items-center justify-between gap-2">
-                  <div class="min-w-0">
-                    <p class={[
-                      "font-bold text-sm",
-                      if(idx == @next_idx, do: "text-gray-900", else: "text-gray-600")
-                    ]}>
-                      {step.label}
-                    </p>
-                    <p class="text-xs text-gray-400 mt-0.5 hidden sm:block">{step.desc}</p>
-                  </div>
-                  <div
-                    :if={idx == @next_idx}
-                    class="bg-[#4CD964] text-white text-xs font-bold px-3 sm:px-4 py-1.5 sm:py-2 rounded-full shadow-md shrink-0"
-                  >
-                    START
-                  </div>
-                  <.icon
-                    :if={idx != @next_idx && !step.done}
-                    name="hero-lock-closed"
-                    class="w-4 h-4 text-gray-300 shrink-0"
-                  />
-                </div>
-              </div>
-            </.link>
           </div>
         </div>
       </div>

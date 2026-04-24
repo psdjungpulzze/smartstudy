@@ -380,7 +380,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           Generate #{count} NEW questions based on your knowledge of #{subject} at grade #{grade} level.
           Use the chapter/topic list above to guide what concepts to test.
           Create questions that a #{grade} grade student studying #{subject} would need to know.
-          Mix question types: multiple choice, true/false, and short answer.
+          Mix question types: multiple choice and short answer.
           Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
           Make questions specific and educational — not vague or trivial.
           """
@@ -389,7 +389,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           if context.material_text != "" do
             """
             Generate #{count} NEW questions based on the course material above.
-            Mix question types: multiple choice, true/false, and short answer.
+            Mix question types: multiple choice and short answer.
             Vary difficulty from easy to hard.
             """
           else
@@ -397,7 +397,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
             Generate #{count} NEW questions based on your knowledge of #{subject} at grade #{grade} level.
             Use the chapter/topic list above to guide what concepts to test.
             Create questions that a #{grade} grade student studying #{subject} would need to know.
-            Mix question types: multiple choice, true/false, and short answer.
+            Mix question types: multiple choice and short answer.
             Vary difficulty: roughly 30% easy, 40% medium, 30% hard.
             Make questions specific and educational — not vague or trivial.
             """
@@ -435,7 +435,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     IMPORTANT: Return your response as a JSON array of question objects. Each object must have:
     - "content": the question text
     - "answer": the correct answer (for MCQ use the letter like "A")
-    - "question_type": one of "multiple_choice", "true_false", "short_answer"
+    - "question_type": one of "multiple_choice", "short_answer" (use "true_false" only if the question is genuinely a true/false statement and the test format explicitly uses T/F questions)
     - "options": for multiple_choice, an object like {"A": "...", "B": "...", "C": "...", "D": "..."}
     - "difficulty": one of "easy", "medium", "hard"
     - "explanation": REQUIRED — 1–2 sentences explaining why the answer is correct, citing the concept or mechanism. Questions without a non-empty explanation will be rejected at insert time and never reach students (Phase 4 quality gate).
