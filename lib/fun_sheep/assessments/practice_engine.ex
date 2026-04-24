@@ -103,6 +103,14 @@ defmodule FunSheep.Assessments.PracticeEngine do
         is_correct
       )
 
+    # Phase 6 demand-driven refill. When the student drains the
+    # unattempted supply in the (chapter, difficulty) of the question
+    # they just answered, enqueue AI generation targeted at that exact
+    # tuple. Runs async so it doesn't slow the UI, and subsequent
+    # practice sessions benefit (questions are persisted to the shared
+    # bank — every student in the course gets the new :hard questions).
+    maybe_refill_supply(state, question_id)
+
     served_len = state.current_index + 1
     served = Enum.take(state.questions, served_len)
     remaining = max(length(state.questions) - served_len, 0)
@@ -180,6 +188,49 @@ defmodule FunSheep.Assessments.PracticeEngine do
       served_ids: MapSet.new(),
       previously_wrong_ids: MapSet.new()
     }
+  end
+
+  # Phase 6: low-supply threshold below which we proactively refill
+  # the bank for the (chapter, difficulty) the student just drained.
+  # Tuned low (5) because each refill fires a generation job that
+  # takes tens of seconds — we don't want to wait until the student
+  # hits :no_more in the assessment engine.
+  @refill_threshold 5
+  @refill_batch_size 15
+
+  defp maybe_refill_supply(state, question_id) do
+    case Enum.find(state.weak_pool ++ state.review_pool, &(&1.id == question_id)) do
+      nil ->
+        :ok
+
+      %{chapter_id: nil} ->
+        :ok
+
+      %{chapter_id: chapter_id, difficulty: difficulty} ->
+        supply =
+          Questions.unattempted_supply_for(
+            state.user_role_id,
+            state.course_id,
+            chapter_id,
+            difficulty
+          )
+
+        if supply < @refill_threshold do
+          FunSheep.Workers.AIQuestionGenerationWorker.enqueue(state.course_id,
+            chapter_id: chapter_id,
+            count: @refill_batch_size,
+            mode: "from_material",
+            difficulty: difficulty
+          )
+        end
+    end
+  rescue
+    # Supply check is best-effort; a DB or worker hiccup here must not
+    # break the in-flight practice session.
+    error ->
+      require Logger
+      Logger.warning("[PracticeEngine] refill check failed: #{inspect(error)}")
+      :ok
   end
 
   defp compose_session(weak_pool, review_pool, limit, ratio, deficits, exclude) do
