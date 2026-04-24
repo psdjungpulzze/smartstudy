@@ -76,7 +76,12 @@ config :fun_sheep, Oban,
        {"0 8 * * *", FunSheep.Workers.TOCEscalationWorker},
        # Every 15min — re-enqueue questions stuck at :pending after a
        # validation job was discarded (see StuckValidationSweeperWorker).
-       {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker}
+       {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker},
+       # Every 30min — recover discovered_sources stuck in scraping /
+       # failed / unrun-discovered (Phase 5 — April audit had 32/33
+       # sources stuck in non-terminal states, producing only 4 scraped
+       # questions).
+       {"*/30 * * * *", FunSheep.Workers.DiscoveredSourceSweeperWorker}
      ]}
   ],
   queues: [
