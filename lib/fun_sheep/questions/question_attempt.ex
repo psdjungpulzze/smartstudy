@@ -17,6 +17,7 @@ defmodule FunSheep.Questions.QuestionAttempt do
     field :is_correct, :boolean
     field :time_taken_seconds, :integer
     field :difficulty_at_attempt, :string
+    field :confidence, Ecto.Enum, values: [:dont_know, :not_sure, :i_know]
     field :score, :integer
     field :score_max, :integer, default: 10
     field :score_feedback, :string
@@ -36,6 +37,7 @@ defmodule FunSheep.Questions.QuestionAttempt do
       :is_correct,
       :time_taken_seconds,
       :difficulty_at_attempt,
+      :confidence,
       :user_role_id,
       :question_id,
       :score,

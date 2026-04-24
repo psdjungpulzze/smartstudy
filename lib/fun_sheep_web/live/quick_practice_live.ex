@@ -49,6 +49,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
         streak: streak_info.streak,
         session_streak: 0,
         show_tutorial: show_tutorial,
+        pending_is_correct: nil,
+        pending_answer: nil,
         # Tutor state
         tutor_open: false,
         tutor_session_id: nil,
@@ -131,11 +133,11 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   @impl true
   def handle_event("swipe", %{"direction" => "right"}, socket) do
-    handle_event("mark_known", %{}, socket)
+    handle_event("mark_i_know", %{}, socket)
   end
 
   def handle_event("swipe", %{"direction" => "left"}, socket) do
-    handle_event("mark_unknown", %{}, socket)
+    handle_event("mark_dont_know", %{}, socket)
   end
 
   def handle_event("swipe", %{"direction" => "up"}, socket) do
@@ -144,13 +146,15 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   # ── Button events (accessibility fallbacks) ──
 
-  def handle_event("mark_known", _params, socket) do
+  # ── Confidence-based flashcard handlers (I-17) ──
+  # These replace mark_known / mark_unknown with a 3-way confidence signal.
+
+  def handle_event("mark_i_know", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "known", true)
+      record_attempt(socket, question, "known", true, confidence: :i_know)
       new_state = QuickTestEngine.mark_known(state, question.id)
-      new_streak = socket.assigns.session_streak + 1
 
       socket =
         socket
@@ -161,7 +165,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
           feedback: nil,
           selected_answer: nil,
           show_answer: false,
-          session_streak: new_streak
+          session_streak: socket.assigns.session_streak + 1
         )
         |> reset_tutor()
         |> advance_to_next_card()
@@ -172,11 +176,11 @@ defmodule FunSheepWeb.QuickPracticeLive do
     end
   end
 
-  def handle_event("mark_unknown", _params, socket) do
+  def handle_event("mark_not_sure", _params, socket) do
     %{current_question: question, engine_state: state, stats: stats} = socket.assigns
 
     if question do
-      record_attempt(socket, question, "unknown", false)
+      record_attempt(socket, question, "not_sure", false, confidence: :not_sure)
       new_state = QuickTestEngine.mark_unknown(state, question.id)
 
       {:noreply,
@@ -184,6 +188,28 @@ defmodule FunSheepWeb.QuickPracticeLive do
          engine_state: new_state,
          card_phase: :reveal,
          show_answer: true,
+         feedback: nil,
+         stats: %{stats | incorrect: stats.incorrect + 1},
+         session_streak: 0
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("mark_dont_know", _params, socket) do
+    %{current_question: question, engine_state: state, stats: stats} = socket.assigns
+
+    if question do
+      record_attempt(socket, question, "dont_know", false, confidence: :dont_know)
+      new_state = QuickTestEngine.mark_unknown(state, question.id)
+
+      {:noreply,
+       assign(socket,
+         engine_state: new_state,
+         card_phase: :reveal,
+         show_answer: true,
+         feedback: nil,
          stats: %{stats | incorrect: stats.incorrect + 1},
          session_streak: 0
        )}
@@ -256,7 +282,6 @@ defmodule FunSheepWeb.QuickPracticeLive do
          )}
       else
         is_correct = check_answer(question, answer)
-        record_attempt(socket, question, answer, is_correct)
         new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
 
         new_stats =
@@ -269,16 +294,45 @@ defmodule FunSheepWeb.QuickPracticeLive do
             do: socket.assigns.session_streak + 1,
             else: 0
 
+        # Defer DB insert until confidence is selected (Phase 2 — collect confidence first)
         {:noreply,
          assign(socket,
            engine_state: new_state,
            stats: new_stats,
            feedback: %{is_correct: is_correct, correct_answer: question.answer, grade_result: nil},
+           pending_is_correct: is_correct,
+           pending_answer: answer,
            card_phase: :feedback,
            session_streak: new_streak
          )}
       end
     end
+  end
+
+  def handle_event("confidence_selected", %{"confidence" => confidence_str}, socket) do
+    %{current_question: question, pending_is_correct: is_correct, pending_answer: answer} =
+      socket.assigns
+
+    confidence = String.to_existing_atom(confidence_str)
+
+    if question && not is_nil(is_correct) do
+      record_attempt(socket, question, answer || "unknown", is_correct, confidence: confidence)
+    end
+
+    socket =
+      socket
+      |> assign(
+        card_phase: :question,
+        feedback: nil,
+        selected_answer: nil,
+        show_answer: false,
+        pending_is_correct: nil,
+        pending_answer: nil
+      )
+      |> reset_tutor()
+      |> advance_to_next_card()
+
+    {:noreply, socket}
   end
 
   def handle_event("next_card", _params, socket) do
@@ -344,10 +398,10 @@ defmodule FunSheepWeb.QuickPracticeLive do
         {:noreply, socket}
 
       phase == :question and key == "ArrowRight" ->
-        handle_event("mark_known", %{}, socket)
+        handle_event("mark_i_know", %{}, socket)
 
       phase == :question and key == "ArrowLeft" ->
-        handle_event("mark_unknown", %{}, socket)
+        handle_event("mark_dont_know", %{}, socket)
 
       phase == :question and key == "ArrowUp" ->
         handle_event("skip", %{}, socket)
@@ -355,7 +409,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
       phase == :question and key in [" ", "Enter"] ->
         handle_event("show_answer_input", %{}, socket)
 
-      phase in [:feedback, :reveal] and key in [" ", "Enter", "ArrowRight"] ->
+      phase == :reveal and key in [" ", "Enter", "ArrowRight"] ->
         handle_event("next_card", %{}, socket)
 
       phase == :answering and key == "Escape" ->
@@ -524,16 +578,20 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   defp check_answer(question, answer), do: FunSheep.Questions.Grading.correct?(question, answer)
 
-  defp record_attempt(socket, question, answer_given, is_correct, grade_result \\ nil) do
+  defp record_attempt(socket, question, answer_given, is_correct, opts \\ []) do
     user_role_id = socket.assigns.current_user["user_role_id"]
 
     if user_role_id do
+      confidence = Keyword.get(opts, :confidence)
+      grade_result = Keyword.get(opts, :grade_result)
+
       base_attrs = %{
         user_role_id: user_role_id,
         question_id: question.id,
         answer_given: answer_given,
         is_correct: is_correct,
-        difficulty_at_attempt: to_string(question.difficulty)
+        difficulty_at_attempt: to_string(question.difficulty),
+        confidence: confidence
       }
 
       attrs =
@@ -556,7 +614,7 @@ defmodule FunSheepWeb.QuickPracticeLive do
     %{current_question: question, selected_answer: answer, engine_state: state, stats: stats} =
       socket.assigns
 
-    record_attempt(socket, question, answer, is_correct, grade_result)
+    record_attempt(socket, question, answer, is_correct, grade_result: grade_result)
     new_state = QuickTestEngine.mark_answered(state, question.id, is_correct)
 
     new_stats =
@@ -1028,8 +1086,39 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </button>
             </div>
 
-            <%!-- Next button --%>
+            <%!-- Confidence buttons (feedback phase only — how well did you know it?) --%>
+            <div :if={@card_phase == :feedback} class="mt-1">
+              <p class="text-xs text-[#8E8E93] text-center mb-3 font-medium">
+                How well did you know this?
+              </p>
+              <div class="flex gap-2">
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="dont_know"
+                  class="flex-1 py-2.5 bg-gray-100 active:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors touch-target"
+                >
+                  I Don't Know
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="not_sure"
+                  class="flex-1 py-2.5 bg-yellow-50 active:bg-yellow-100 text-yellow-700 text-xs font-semibold rounded-full transition-colors touch-target"
+                >
+                  Not Sure
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="i_know"
+                  class="flex-1 py-2.5 bg-[#4CD964] active:bg-[#3DBF55] text-white text-xs font-bold rounded-full shadow-sm transition-colors touch-target"
+                >
+                  I Know
+                </button>
+              </div>
+            </div>
+
+            <%!-- Next button (reveal phase only — confidence already recorded at mark_not_sure/dont_know) --%>
             <button
+              :if={@card_phase == :reveal}
               phx-click="next_card"
               class="w-full py-3 bg-[#4CD964] active:bg-[#3DBF55] text-white font-bold rounded-full shadow-md touch-target transition-colors"
             >
@@ -1088,14 +1177,30 @@ defmodule FunSheepWeb.QuickPracticeLive do
           :if={@current_question && !@session_complete && @card_phase == :question}
           class="px-4 pb-4 pt-2 shrink-0 safe-area-bottom"
         >
-          <div class="flex items-center justify-center gap-4 max-w-sm mx-auto">
-            <%!-- Don't know (left swipe) --%>
+          <%!-- 3-confidence row: Don't Know | Tap to Answer | Not Sure | I Know | Skip --%>
+          <div class="flex items-center justify-center gap-3 max-w-sm mx-auto">
+            <%!-- I Don't Know --%>
             <button
-              phx-click="mark_unknown"
-              class="w-14 h-14 rounded-full bg-red-50 active:bg-red-100 flex items-center justify-center shadow-md transition-colors touch-target"
-              aria-label="Don't know"
+              phx-click="mark_dont_know"
+              class="flex flex-col items-center gap-1 touch-target"
+              aria-label="I don't know"
             >
-              <.icon name="hero-x-mark" class="w-7 h-7 text-[#FF3B30]" />
+              <span class="w-12 h-12 rounded-full bg-red-50 active:bg-red-100 flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-x-mark" class="w-6 h-6 text-[#FF3B30]" />
+              </span>
+              <span class="text-[9px] font-bold text-[#FF3B30] tracking-wide">NO IDEA</span>
+            </button>
+
+            <%!-- Not Sure --%>
+            <button
+              phx-click="mark_not_sure"
+              class="flex flex-col items-center gap-1 touch-target"
+              aria-label="Not sure"
+            >
+              <span class="w-12 h-12 rounded-full bg-yellow-50 active:bg-yellow-100 flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-question-mark-circle" class="w-6 h-6 text-yellow-500" />
+              </span>
+              <span class="text-[9px] font-bold text-yellow-600 tracking-wide">NOT SURE</span>
             </button>
 
             <%!-- Tap to Answer --%>
@@ -1107,25 +1212,30 @@ defmodule FunSheepWeb.QuickPracticeLive do
               <span class="w-16 h-16 rounded-full bg-[#007AFF] active:bg-[#0066DD] flex items-center justify-center shadow-lg transition-colors">
                 <.icon name="hero-cursor-arrow-rays" class="w-8 h-8 text-white" />
               </span>
-              <span class="text-[10px] font-bold text-[#007AFF] tracking-wide">TAP TO ANSWER</span>
+              <span class="text-[9px] font-bold text-[#007AFF] tracking-wide">ANSWER</span>
             </button>
 
-            <%!-- Know it (right swipe) --%>
+            <%!-- I Know --%>
             <button
-              phx-click="mark_known"
-              class="w-14 h-14 rounded-full bg-[#E8F8EB] active:bg-[#D0F0D8] flex items-center justify-center shadow-md transition-colors touch-target"
+              phx-click="mark_i_know"
+              class="flex flex-col items-center gap-1 touch-target"
               aria-label="I know this"
             >
-              <.icon name="hero-check" class="w-7 h-7 text-[#4CD964]" />
+              <span class="w-12 h-12 rounded-full bg-[#E8F8EB] active:bg-[#D0F0D8] flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-check" class="w-6 h-6 text-[#4CD964]" />
+              </span>
+              <span class="text-[9px] font-bold text-[#4CD964] tracking-wide">I KNOW</span>
             </button>
 
-            <%!-- Skip (up swipe) --%>
+            <%!-- Skip --%>
             <button
               phx-click="skip"
-              class="w-10 h-10 rounded-full bg-[#F5F5F7] active:bg-gray-200 flex items-center justify-center transition-colors touch-target"
+              class="flex flex-col items-center gap-1 touch-target"
               aria-label="Skip"
             >
-              <.icon name="hero-forward" class="w-5 h-5 text-[#8E8E93]" />
+              <span class="w-10 h-10 rounded-full bg-[#F5F5F7] active:bg-gray-200 flex items-center justify-center transition-colors">
+                <.icon name="hero-forward" class="w-5 h-5 text-[#8E8E93]" />
+              </span>
             </button>
           </div>
         </div>
@@ -1508,7 +1618,39 @@ defmodule FunSheepWeb.QuickPracticeLive do
               </button>
             </div>
 
+            <%!-- Confidence buttons (feedback phase only) --%>
+            <div :if={@card_phase == :feedback} class="mt-1">
+              <p class="text-sm text-[#8E8E93] text-center mb-3 font-medium">
+                How well did you know this?
+              </p>
+              <div class="flex gap-3">
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="dont_know"
+                  class="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-semibold rounded-full transition-colors"
+                >
+                  I Don't Know
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="not_sure"
+                  class="flex-1 py-3 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-sm font-semibold rounded-full transition-colors"
+                >
+                  Not Sure
+                </button>
+                <button
+                  phx-click="confidence_selected"
+                  phx-value-confidence="i_know"
+                  class="flex-1 py-3 bg-[#4CD964] hover:bg-[#3DBF55] text-white text-sm font-bold rounded-full shadow-sm transition-colors"
+                >
+                  I Know (→)
+                </button>
+              </div>
+            </div>
+
+            <%!-- Next button (reveal phase only) --%>
             <button
+              :if={@card_phase == :reveal}
               phx-click="next_card"
               class="w-full py-3 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-bold rounded-full shadow-md transition-colors"
             >
@@ -1567,16 +1709,28 @@ defmodule FunSheepWeb.QuickPracticeLive do
           :if={@current_question && !@session_complete && @card_phase == :question}
           class="w-full max-w-2xl mt-6 flex flex-col items-center gap-3"
         >
+          <%!-- 3-confidence row: I Don't Know | Not Sure | Answer | I Know | Skip --%>
           <div class="flex items-center justify-center gap-4">
             <button
-              phx-click="mark_unknown"
+              phx-click="mark_dont_know"
               class="flex flex-col items-center gap-1"
-              aria-label="Don't know"
+              aria-label="I don't know"
             >
               <span class="w-14 h-14 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center shadow-md transition-colors">
                 <.icon name="hero-x-mark" class="w-7 h-7 text-[#FF3B30]" />
               </span>
-              <span class="text-[10px] font-bold text-[#FF3B30] tracking-wide">LEARN (←)</span>
+              <span class="text-[10px] font-bold text-[#FF3B30] tracking-wide">NO IDEA (←)</span>
+            </button>
+
+            <button
+              phx-click="mark_not_sure"
+              class="flex flex-col items-center gap-1"
+              aria-label="Not sure"
+            >
+              <span class="w-12 h-12 rounded-full bg-yellow-50 hover:bg-yellow-100 flex items-center justify-center shadow-md transition-colors">
+                <.icon name="hero-question-mark-circle" class="w-6 h-6 text-yellow-500" />
+              </span>
+              <span class="text-[10px] font-bold text-yellow-600 tracking-wide">NOT SURE</span>
             </button>
 
             <button
@@ -1591,14 +1745,14 @@ defmodule FunSheepWeb.QuickPracticeLive do
             </button>
 
             <button
-              phx-click="mark_known"
+              phx-click="mark_i_know"
               class="flex flex-col items-center gap-1"
               aria-label="I know this"
             >
               <span class="w-14 h-14 rounded-full bg-[#E8F8EB] hover:bg-[#D0F0D8] flex items-center justify-center shadow-md transition-colors">
                 <.icon name="hero-check" class="w-7 h-7 text-[#4CD964]" />
               </span>
-              <span class="text-[10px] font-bold text-[#4CD964] tracking-wide">KNOW (→)</span>
+              <span class="text-[10px] font-bold text-[#4CD964] tracking-wide">I KNOW (→)</span>
             </button>
 
             <button
