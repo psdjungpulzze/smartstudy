@@ -24,7 +24,7 @@ defmodule FunSheep.Ebook.EpubParser do
 
   require Logger
 
-  import SweetXml, only: [sigil_x: 2, xpath: 2]
+  import SweetXml, only: [sigil_x: 2, xpath: 2, xpath: 3, xmap: 2]
 
   @doc """
   Extracts metadata, TOC, and spine text from an EPUB file at the given path.
@@ -186,7 +186,7 @@ defmodule FunSheep.Ebook.EpubParser do
 
   # ── TOC extraction ────────────────────────────────────────────────────────
 
-  defp extract_toc(entries, _opf_xml, manifest, opf_path) do
+  defp extract_toc(entries, opf_xml, manifest, opf_path) do
     opf_dir = Path.dirname(opf_path)
 
     # EPUB 3: look for item with properties="nav"
