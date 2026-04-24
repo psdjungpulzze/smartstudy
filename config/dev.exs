@@ -5,7 +5,7 @@ config :fun_sheep, FunSheep.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  port: 5434,
+  port: 5450,
   database: "fun_sheep_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
@@ -17,6 +17,8 @@ config :fun_sheep, FunSheep.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
+# Port 4040 is FunSheep's reserved dev port (block 4040–4049). Do not use
+# 4001–4007 — those are owned by the Interactor dev stack and will clash.
 config :fun_sheep, FunSheepWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.

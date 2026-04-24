@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: fun_sheep_dev
     ports:
-      - "5448:5432"
+      - "5450:5432"
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,7 +30,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: fun_sheep_test
     ports:
-      - "5449:5432"
+      - "5451:5432"
     tmpfs:
       - /var/lib/postgresql/data
 

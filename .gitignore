@@ -72,3 +72,6 @@ npm-debug.log
 .env.prod
 .env.credentials
 
+
+# Runtime pid files from dev-app.sh
+.dev-pids/

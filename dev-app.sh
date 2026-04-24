@@ -153,11 +153,33 @@ docker_status() {
 
 IW_DIR="$SCRIPT_DIR/interactor-workspace"
 
+# Port assignments for interactor-workspace services (see interactor-workspace/CLAUDE.md).
+iw_port_for() {
+  case "$1" in
+    account-server) echo 4001 ;;
+    interactor) echo 4002 ;;
+    service-knowledge-base) echo 4003 ;;
+    billing-server) echo 4004 ;;
+    user-knowledge-base) echo 4005 ;;
+    interactor-user-database) echo 4007 ;;
+    playwright-renderer) echo 3000 ;;
+    jsonata-service) echo 3002 ;;
+    *) echo "" ;;
+  esac
+}
+
 check_iw_services() {
+  # Explicit opt-out: someone else owns the interactor stack.
+  if [[ -n "${SKIP_IW_SERVICES:-}" ]]; then
+    echo -e "${BLUE}[iw-services]${NC} SKIP_IW_SERVICES set — not managing interactor services"
+    return 0
+  fi
+
   if [[ ! -f "$IW_DIR/dev-services.sh" ]]; then
     echo -e "${YELLOW}[iw-services]${NC} interactor-workspace not found, skipping"
     return 0
   fi
+
   local status_output
   status_output=$("$IW_DIR/dev-services.sh" status 2>/dev/null)
   local down_services=()
@@ -187,8 +209,40 @@ check_iw_services() {
     return 0
   fi
 
-  echo -e "${YELLOW}[iw-services]${NC} Down services: ${down_services[*]}"
+  # Auto-detect external ownership: if a "down" service's port is already held,
+  # another workspace is running it. Starting a duplicate would either fail to
+  # bind or, worse, risk the sibling workspace's `dev-services.sh stop` killing
+  # it later by port. Leave externally-held services alone.
+  local to_start=()
+  local externally_held=()
   for svc in "${down_services[@]}"; do
+    local port
+    port=$(iw_port_for "$svc")
+    if [[ -n "$port" ]]; then
+      local holder
+      holder=$(lsof -ti:"$port" 2>/dev/null | head -1)
+      if [[ -n "$holder" ]]; then
+        externally_held+=("$svc (port $port, PID $holder)")
+        continue
+      fi
+    fi
+    to_start+=("$svc")
+  done
+
+  if [[ ${#externally_held[@]} -gt 0 ]]; then
+    echo -e "${BLUE}[iw-services]${NC} Externally managed (port already held):"
+    for entry in "${externally_held[@]}"; do
+      echo "  • $entry"
+    done
+  fi
+
+  if [[ ${#to_start[@]} -eq 0 ]]; then
+    echo -e "${GREEN}[iw-services]${NC} Nothing to start (all down services are externally managed)"
+    return 0
+  fi
+
+  echo -e "${YELLOW}[iw-services]${NC} Starting locally: ${to_start[*]}"
+  for svc in "${to_start[@]}"; do
     echo -e "${BLUE}[iw-services]${NC} Starting $svc..."
     "$IW_DIR/dev-services.sh" start "$svc" 2>&1 | tail -3
   done
@@ -203,6 +257,48 @@ app_is_healthy() {
   local http_code
   http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$APP_PORT/" 2>/dev/null)
   [[ "$http_code" -ge 200 && "$http_code" -lt 500 ]]
+}
+
+# Headless-browser check: HTTP 200 is necessary but not sufficient. A Phoenix
+# process can stay alive while LiveView hangs, JS assets 404, or the page
+# renders as a blank white screen. Exit 0 only when the browser sees a real
+# login page with no JS errors. Requires node + playwright (in ./node_modules).
+visual_health_check() {
+  local check_script="$SCRIPT_DIR/scripts/check-ui.mjs"
+  local url="http://localhost:$APP_PORT"
+  local path="${CHECK_UI_PATH:-/auth/login}"
+  local selector="${CHECK_UI_SELECTOR:-#login-username}"
+
+  if [[ "${SKIP_VISUAL_CHECK:-}" == "1" ]]; then
+    echo -e "${BLUE}[visual-check]${NC} SKIP_VISUAL_CHECK=1 — skipping"
+    return 0
+  fi
+  if [[ ! -f "$check_script" ]]; then
+    echo -e "${YELLOW}[visual-check]${NC} $check_script not found, skipping"
+    return 0
+  fi
+  if ! command -v node &> /dev/null; then
+    echo -e "${YELLOW}[visual-check]${NC} node not installed, skipping (install node or set SKIP_VISUAL_CHECK=1)"
+    return 0
+  fi
+
+  echo -e "${BLUE}[visual-check]${NC} Rendering ${url}${path} in headless Chromium..."
+  local output rc
+  output=$(cd "$SCRIPT_DIR" && node "$check_script" "$url" "$path" "$selector" 2>&1)
+  rc=$?
+  if [[ $rc -eq 0 ]]; then
+    echo -e "${GREEN}[visual-check]${NC} $output"
+    return 0
+  fi
+
+  echo -e "${RED}[visual-check]${NC} $output"
+  case $rc in
+    3) echo -e "${RED}[visual-check]${NC} Chromium browser binary missing. Run: npx playwright install chromium" ;;
+    2) echo -e "${RED}[visual-check]${NC} Page loaded but JS errors were thrown — the UI is broken even though HTTP is 200." ;;
+    *) echo -e "${RED}[visual-check]${NC} App is up on $APP_PORT but the UI is not rendering correctly." ;;
+  esac
+  echo -e "${YELLOW}[visual-check]${NC} Tail logs: ./dev-app.sh logs"
+  return $rc
 }
 
 kill_app_process() {
@@ -230,6 +326,7 @@ start_app() {
     if kill -0 "$pid" 2>/dev/null; then
       if app_is_healthy; then
         echo -e "${GREEN}[fun-sheep]${NC} Already running and healthy (PID: $pid)"
+        visual_health_check || true
         return 0
       else
         echo -e "${YELLOW}[fun-sheep]${NC} Process alive (PID: $pid) but not responding — restarting..."
@@ -287,6 +384,10 @@ start_app() {
     fi
     if app_is_healthy; then
       echo -e "${GREEN}[fun-sheep]${NC} Started and healthy (PID: $pid) - Logs: $LOG_FILE"
+      # HTTP is up; now confirm the browser actually renders the UI. A non-zero
+      # return here is intentionally not fatal — caller keeps the server running
+      # so the user can investigate logs. Failure is logged in red by the check.
+      visual_health_check || true
       return 0
     fi
     sleep 2; elapsed=$((elapsed + 2))
@@ -450,8 +551,15 @@ case "$COMMAND" in
     run_setup
     ;;
 
+  check-ui)
+    echo -e "${BLUE}=== Visual UI Check ===${NC}"
+    echo ""
+    visual_health_check
+    exit $?
+    ;;
+
   *)
-    echo "Usage: $0 {start|stop|restart|status|logs|setup} [--wait]"
+    echo "Usage: $0 {start|stop|restart|status|logs|setup|check-ui} [--wait]"
     echo ""
     echo "Commands:"
     echo "  start    - Start Docker + app"
@@ -460,9 +568,16 @@ case "$COMMAND" in
     echo "  status   - Show status"
     echo "  logs     - Tail the app log"
     echo "  setup    - Create + migrate database + seeds"
+    echo "  check-ui - Render the login page in headless Chromium and report JS errors"
+    echo ""
+    echo "Env flags:"
+    echo "  SKIP_IW_SERVICES=1   Don't manage interactor-workspace services (treat as external)"
+    echo "  SKIP_VISUAL_CHECK=1  Skip the post-start Playwright UI check"
+    echo "  CHECK_UI_PATH        Path to visual-check (default /auth/login)"
+    echo "  CHECK_UI_SELECTOR    CSS selector to wait for (default #login-username)"
     echo ""
     echo "Components:"
-    echo "  Docker   PostgreSQL dev (:5448) + test (:5449)"
+    echo "  Docker   PostgreSQL dev (:5450) + test (:5451)"
     echo "  App      Fun Sheep (port $APP_PORT)"
     exit 1
     ;;
