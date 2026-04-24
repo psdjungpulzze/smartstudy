@@ -28,6 +28,24 @@ defmodule FunSheep.Questions.Question do
     field :metadata, :map, default: %{}
     field :explanation, :string
 
+    # Phase 1 unified provenance. Replaces the scattered combination of
+    # `is_generated`, `source_url`, `source_material_id`, and
+    # `metadata["source"]`. Those remain for one release while callers
+    # migrate, then drop in a follow-up.
+    field :source_type, Ecto.Enum, values: [:web_scraped, :user_uploaded, :ai_generated, :curated]
+
+    # For :ai_generated rows, the grounding strategy the worker used.
+    # Typical values: "from_curriculum", "from_material", "from_web_context".
+    # Free-form string so workers can introduce new modes without a
+    # migration. `nil` on non-AI rows.
+    field :generation_mode, :string
+
+    # List of grounding references that fed the generator/extractor prompt.
+    # Shape: %{"refs" => [%{"type" => "material"|"url"|"discovered_source",
+    #                       "id" => uuid_or_url}]}.
+    # Load-bearing for Phase 6 coverage audits and Phase 8 admin UI.
+    field :grounding_refs, :map, default: %{}
+
     field :validation_status, Ecto.Enum,
       values: [:pending, :passed, :needs_review, :failed],
       default: :pending
@@ -79,6 +97,9 @@ defmodule FunSheep.Questions.Question do
       :difficulty,
       :metadata,
       :explanation,
+      :source_type,
+      :generation_mode,
+      :grounding_refs,
       :validation_status,
       :validation_score,
       :validation_report,

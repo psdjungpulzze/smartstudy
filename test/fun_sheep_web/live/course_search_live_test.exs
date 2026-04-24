@@ -4,6 +4,7 @@ defmodule FunSheepWeb.CourseSearchLiveTest do
   import Phoenix.LiveViewTest
 
   alias FunSheep.Courses
+  alias FunSheep.ContentFixtures
 
   defp auth_conn(conn) do
     conn
@@ -14,6 +15,19 @@ defmodule FunSheepWeb.CourseSearchLiveTest do
         "role" => "student",
         "email" => "test@test.com",
         "display_name" => "Test Student"
+      }
+    })
+  end
+
+  defp auth_conn_with_role(conn, user_role) do
+    conn
+    |> init_test_session(%{
+      dev_user_id: user_role.id,
+      dev_user: %{
+        "id" => user_role.id,
+        "role" => "student",
+        "email" => user_role.email,
+        "display_name" => user_role.display_name
       }
     })
   end
@@ -72,6 +86,115 @@ defmodule FunSheepWeb.CourseSearchLiveTest do
 
       refute html =~ "No matches found"
       refute html =~ "Found"
+    end
+
+    test "schools are not loaded on initial mount (lazy load)", %{conn: conn} do
+      conn = auth_conn(conn)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      assert view |> element("select[name='school_id']") |> has_element?() == false
+    end
+
+    test "schools are loaded when search panel is opened", %{conn: conn} do
+      ContentFixtures.create_school()
+      conn = auth_conn(conn)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      html = render_click(view, "toggle_search")
+
+      assert html =~ "All Schools"
+      assert html =~ "Test School"
+    end
+
+    test "closing and reopening search panel does not reload schools", %{conn: conn} do
+      conn = auth_conn(conn)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      render_click(view, "toggle_search")
+      render_click(view, "toggle_search")
+      html = render_click(view, "toggle_search")
+
+      assert html =~ "All Schools"
+    end
+
+    test "toggle_course expands and collapses a course row", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+
+      {:ok, course} =
+        Courses.create_course(%{
+          name: "Biology 101",
+          subject: "Biology",
+          grade: "10",
+          created_by_id: user_role.id
+        })
+
+      conn = auth_conn_with_role(conn, user_role)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      html = render_click(view, "toggle_course", %{"id" => course.id})
+      assert html =~ "Schedule Test"
+      assert html =~ "Open Course"
+
+      html = render_click(view, "toggle_course", %{"id" => course.id})
+      refute html =~ "Schedule Test"
+    end
+
+    test "confirm_delete shows delete confirmation overlay", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+
+      {:ok, course} =
+        Courses.create_course(%{
+          name: "Chemistry 101",
+          subject: "Chemistry",
+          grade: "11",
+          created_by_id: user_role.id
+        })
+
+      conn = auth_conn_with_role(conn, user_role)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      html = render_click(view, "confirm_delete", %{"id" => course.id})
+      assert html =~ "This cannot be undone"
+    end
+
+    test "cancel_delete dismisses the confirmation overlay", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+
+      {:ok, course} =
+        Courses.create_course(%{
+          name: "Physics 101",
+          subject: "Physics",
+          grade: "12",
+          created_by_id: user_role.id
+        })
+
+      conn = auth_conn_with_role(conn, user_role)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      render_click(view, "confirm_delete", %{"id" => course.id})
+      html = render_click(view, "cancel_delete", %{})
+
+      refute html =~ "This cannot be undone"
+    end
+
+    test "delete_course removes the course from the list", %{conn: conn} do
+      user_role = ContentFixtures.create_user_role()
+
+      {:ok, course} =
+        Courses.create_course(%{
+          name: "History 101",
+          subject: "History",
+          grade: "9",
+          created_by_id: user_role.id
+        })
+
+      conn = auth_conn_with_role(conn, user_role)
+      {:ok, view, _html} = live(conn, ~p"/courses")
+
+      render_click(view, "confirm_delete", %{"id" => course.id})
+      html = render_click(view, "delete_course", %{"id" => course.id})
+
+      refute html =~ "History 101"
     end
   end
 end

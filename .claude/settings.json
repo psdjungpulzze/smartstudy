@@ -36,9 +36,6 @@
       "Write(.env.production)",
       "Write(**/credentials*)",
       "Write(**/secrets/**)",
-      "Read(.env)",
-      "Read(.env.local)",
-      "Read(.env.production)",
       "Bash(rm -rf /)",
       "Bash(rm -rf ~)",
       "Bash(sudo:*)"

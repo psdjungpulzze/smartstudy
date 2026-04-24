@@ -254,6 +254,15 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     end
   end
 
+  # Phase 5 signal: an SPA that returned shell HTML instead of hydrated
+  # content will pass the 200 status check but the stripped body will
+  # be tiny (< ~1500 bytes). That pattern was behind several of the
+  # April audit's "0 questions extracted" sources on Quizlet / Khan /
+  # CollegeBoard. Flag any renderer output below this threshold so
+  # admins can eyeball the debug HTML and decide whether it's a renderer
+  # timing issue or an anti-bot wall.
+  @renderer_small_output_bytes 1_500
+
   defp fetch_via_renderer(url) do
     renderer_url = renderer_base_url()
 
@@ -270,7 +279,18 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
            receive_timeout: 60_000
          ) do
       {:ok, %{status: 200, body: %{"content" => content}}} when is_binary(content) ->
-        {:ok, strip_html(content)}
+        stripped = strip_html(content)
+
+        if byte_size(stripped) < @renderer_small_output_bytes do
+          # Don't fail — the caller may still extract something from a
+          # short body — but emit a warning with size so the monitor
+          # can alert on a pattern of small renders from the same host.
+          Logger.warning(
+            "[Scraper] Renderer returned suspiciously small output (#{byte_size(stripped)} bytes) for #{url} — likely SPA shell or anti-bot wall"
+          )
+        end
+
+        {:ok, stripped}
 
       {:ok, %{status: status}} ->
         Logger.warning("[Scraper] Renderer returned status #{status} for #{url}")
@@ -307,17 +327,43 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
   # --- Question Extraction ---
 
   defp extract_questions_from_text(text, course, source) do
-    # First try regex-based extraction (fast, no API calls)
-    regex_questions = extract_with_regex(text, source)
+    # Phase 3: AI-first extraction via `FunSheep.Questions.Extractor`
+    # with pre-insert gates applied to every question. The April audit
+    # of the web path showed only 1/33 processed sources produced
+    # anything usable; most of the extraction either hallucinated stems
+    # from non-question content or matched partial HTML text that the
+    # old regex couldn't handle. The Extractor short-circuits on
+    # "this is not a question set" rather than trying to force matches.
+    ref = %{source_url: source.url, source_title: source.title}
 
-    # Then use AI to extract more questions from the remaining text
-    ai_questions = extract_with_ai(text, course, source)
+    ai_questions =
+      FunSheep.Questions.Extractor.extract(text,
+        subject: course.subject,
+        source: :web,
+        source_ref: ref,
+        grounding_refs: [%{"type" => "url", "id" => source.url}]
+      )
 
-    # Combine, deduplicate
-    (regex_questions ++ ai_questions)
-    |> Enum.uniq_by(fn q -> String.downcase(String.trim(q.content)) end)
-    |> Enum.reject(fn q -> String.length(q.content) < 15 end)
+    # Regex fallback ONLY when AI returned nothing. Legacy patterns
+    # kept for rigidly-formatted sources (Kaplan-style MCQ PDFs) that
+    # we've seen the AI mis-extract from. Regex output still passes
+    # through the Extractor's gates so the April-audit garbage patterns
+    # are blocked.
+    if ai_questions != [] do
+      ai_questions
+    else
+      (extract_with_regex(text, source) ++ extract_with_ai(text, course, source))
+      |> Enum.map(&legacy_to_gate_shape/1)
+      |> Enum.filter(&FunSheep.Questions.Extractor.accept_legacy?/1)
+      |> Enum.uniq_by(fn q -> String.downcase(String.trim(q.content)) end)
+    end
   end
+
+  # Coerce the legacy regex-extraction shape into the map the Extractor
+  # gates expect. The legacy code uses `:source_url`/`:source_title`
+  # top-level atoms; the gates don't care about those, only
+  # `:content`, `:answer`, `:question_type`, `:options`.
+  defp legacy_to_gate_shape(%{} = q), do: q
 
   defp extract_with_regex(text, source) do
     questions = []

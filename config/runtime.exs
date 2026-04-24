@@ -216,7 +216,14 @@ if config_env() == :prod do
          {"0 18 * * SUN", FunSheep.Workers.ParentDigestScheduler},
          # Every 15min — re-enqueue questions stuck at :pending after a
          # validation job was discarded (see StuckValidationSweeperWorker).
-         {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker}
+         {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker},
+         # Every 30min — recover discovered_sources stuck in scraping /
+         # failed / unrun-discovered (Phase 5).
+         {"*/30 * * * *", FunSheep.Workers.DiscoveredSourceSweeperWorker},
+         # Nightly at 03:00 UTC — coverage audit per (course, chapter,
+         # difficulty); fires demand-driven generation to hold a
+         # target supply of fresh questions at each difficulty.
+         {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker}
        ]}
     ]
 

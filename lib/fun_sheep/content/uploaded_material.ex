@@ -21,7 +21,22 @@ defmodule FunSheep.Content.UploadedMaterial do
     :other
   ]
 
+  # Phase 2 classifier output — superset of `@material_kinds` because the
+  # classifier can detect categories users can't or won't label.
+  # `:answer_key` is the load-bearing addition: an answer-key image
+  # mislabeled as `:textbook` produced 462 garbage questions in the
+  # mid-April prod audit.
+  @classified_kinds [
+    :question_bank,
+    :answer_key,
+    :knowledge_content,
+    :mixed,
+    :unusable,
+    :uncertain
+  ]
+
   def material_kinds, do: @material_kinds
+  def classified_kinds, do: @classified_kinds
 
   schema "uploaded_materials" do
     field :file_path, :string
@@ -65,6 +80,17 @@ defmodule FunSheep.Content.UploadedMaterial do
     field :toc_detected, :boolean, default: false
     field :completeness_checked_at, :utc_datetime
 
+    # Phase 2 AI classification. Separate from user-supplied
+    # `material_kind` so intent is preserved and admin can reconcile
+    # mismatches. Routing logic (extractor vs grounding vs skip) trusts
+    # `classified_kind` when confidence is high, falls back to
+    # `material_kind` when confidence is low or classification hasn't
+    # run yet.
+    field :classified_kind, Ecto.Enum, values: @classified_kinds
+    field :kind_confidence, :float
+    field :kind_classified_at, :utc_datetime
+    field :kind_classification_notes, :string
+
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :course, FunSheep.Courses.Course
 
@@ -97,6 +123,10 @@ defmodule FunSheep.Content.UploadedMaterial do
       :completeness_notes,
       :toc_detected,
       :completeness_checked_at,
+      :classified_kind,
+      :kind_confidence,
+      :kind_classified_at,
+      :kind_classification_notes,
       :user_role_id,
       :course_id
     ])
