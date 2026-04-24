@@ -59,6 +59,16 @@ config :fun_sheep, :onboarding_gate, false
 # OCR configuration - always mock in tests
 config :fun_sheep, :ocr_mock, true
 
+# AI client — tests use Mox mock; never hit real LLM APIs
+config :fun_sheep, :ai_client_impl, FunSheep.AI.ClientMock
+config :fun_sheep, :anthropic_api_key, "test-anthropic-key"
+config :fun_sheep, :openai_api_key, "test-openai-key"
+# Zero-delay backoff so retry tests don't sleep
+config :fun_sheep, :ai_backoff_base_ms, 0
+# Route Anthropic/OpenAI HTTP calls through Req.Test stubs in tests
+config :fun_sheep, :anthropic_req_opts, plug: {Req.Test, FunSheep.AI.Anthropic}
+config :fun_sheep, :openai_req_opts, plug: {Req.Test, FunSheep.AI.OpenAI}
+
 # Disable Oban in tests
 config :fun_sheep, Oban, testing: :inline
 
