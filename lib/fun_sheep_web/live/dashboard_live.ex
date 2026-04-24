@@ -299,9 +299,17 @@ defmodule FunSheepWeb.DashboardLive do
         <%!-- Mobile: days-left badge inline; Desktop: side-by-side --%>
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
-            <p class="text-xs font-bold text-white/70 uppercase tracking-wider truncate">
-              {if @test.test.course, do: @test.test.course.name, else: "Test Prep"}
-            </p>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <p class="text-xs font-bold text-white/70 uppercase tracking-wider truncate">
+                {if @test.test.course, do: @test.test.course.name, else: "Test Prep"}
+              </p>
+              <span
+                :if={@pinned?}
+                class="inline-flex items-center gap-1 text-[10px] font-extrabold bg-white/25 text-white px-2 py-0.5 rounded-full uppercase tracking-wider"
+              >
+                <.icon name="hero-star-solid" class="w-3 h-3" /> Focus
+              </span>
+            </div>
             <h3 class="text-lg sm:text-xl font-extrabold text-white mt-0.5 line-clamp-2">
               {@test.test.name}
             </h3>
@@ -346,25 +354,21 @@ defmodule FunSheepWeb.DashboardLive do
           <%!-- Stop propagation so these buttons don't trigger the card's phx-click --%>
           <div class="flex items-center gap-2" phx-click="noop" phx-value-stop="true">
             <button
-              :if={@pinned?}
               type="button"
-              phx-click="unpin_test"
-              class="bg-white/20 border border-white/30 text-white hover:bg-white/30 rounded-full p-1.5 sm:p-2 cursor-pointer transition-colors"
-              aria-label="Unpin as focus test"
-              title="Pinned as your focus — click to unpin"
-            >
-              <.icon name="hero-star-solid" class="w-4 h-4" />
-            </button>
-            <button
-              :if={not @pinned?}
-              type="button"
-              phx-click="pin_test"
+              phx-click={if @pinned?, do: "unpin_test", else: "pin_test"}
               phx-value-schedule-id={@schedule_id}
               class="bg-white/20 border border-white/30 text-white hover:bg-white/30 rounded-full p-1.5 sm:p-2 cursor-pointer transition-colors"
-              aria-label="Pin as focus test"
-              title="Pin as your focus test"
+              aria-label={if @pinned?, do: "Unpin as focus test", else: "Pin as focus test"}
+              title={
+                if @pinned?,
+                  do: "Pinned as your focus — click to unpin",
+                  else: "Pin as your focus test"
+              }
             >
-              <.icon name="hero-star" class="w-4 h-4" />
+              <.icon
+                name={if @pinned?, do: "hero-star-solid", else: "hero-star"}
+                class="w-4 h-4"
+              />
             </button>
             <.link
               navigate={~p"/courses/#{@course_id}/tests/#{@schedule_id}/edit"}

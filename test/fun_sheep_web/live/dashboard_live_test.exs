@@ -144,6 +144,8 @@ defmodule FunSheepWeb.DashboardLiveTest do
       # Near now appears in Other Tests section.
       assert html2 =~ "Near Test"
       assert html2 =~ "Other Tests"
+      # Pinned focus card shows a visible "Focus" badge (not just tooltip).
+      assert html2 =~ "Focus</span>" or html2 =~ "Focus\n"
     end
 
     test "unpin_test event reverts to nearest-deadline primary", %{conn: conn} do
