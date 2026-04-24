@@ -8,7 +8,13 @@ defmodule FunSheep.Questions do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Questions.{Question, QuestionAttempt, QuestionFigure, QuestionStats}
+  alias FunSheep.Questions.{
+    Question,
+    QuestionAttempt,
+    QuestionFeedbackVote,
+    QuestionFigure,
+    QuestionStats
+  }
 
   ## Questions
 
@@ -1232,5 +1238,113 @@ defmodule FunSheep.Questions do
 
   def with_figures(questions) when is_list(questions) do
     Repo.preload(questions, :figures)
+  end
+
+  ## Community Feedback
+
+  @doc """
+  Submits or updates a user's vote on a question.
+
+  Each user can cast exactly one vote per question. Re-calling with a different
+  vote direction replaces the previous vote and recomputes the quality score.
+  Passing `nil` for vote removes the vote entirely.
+
+  The optional `flag_reason` records *why* the user is dissatisfied — this
+  increments the separate flag_count which is weighted 5× in quality score.
+  """
+  def submit_question_feedback(user_role_id, question_id, vote, flag_reason \\ nil)
+      when vote in [:like, :dislike, nil] do
+    Repo.transaction(fn ->
+      existing =
+        Repo.get_by(QuestionFeedbackVote,
+          user_role_id: user_role_id,
+          question_id: question_id
+        )
+
+      result =
+        case {existing, vote} do
+          {nil, nil} ->
+            {:ok, nil}
+
+          {nil, _vote} ->
+            %QuestionFeedbackVote{}
+            |> QuestionFeedbackVote.changeset(%{
+              user_role_id: user_role_id,
+              question_id: question_id,
+              vote: vote,
+              flag_reason: flag_reason
+            })
+            |> Repo.insert()
+
+          {record, nil} ->
+            Repo.delete(record)
+
+          {record, _vote} ->
+            record
+            |> QuestionFeedbackVote.changeset(%{vote: vote, flag_reason: flag_reason})
+            |> Repo.update()
+        end
+
+      case result do
+        {:ok, _} ->
+          recompute_quality_score(question_id)
+          :ok
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  @doc "Returns the current user's vote for a question, or nil if none."
+  def get_user_question_vote(user_role_id, question_id) do
+    Repo.get_by(QuestionFeedbackVote,
+      user_role_id: user_role_id,
+      question_id: question_id
+    )
+  end
+
+  @doc """
+  Recomputes the quality_score and like/dislike/flag counts for a question
+  from the current vote records and updates question_stats in place.
+  """
+  def recompute_quality_score(question_id) do
+    votes =
+      from(v in QuestionFeedbackVote,
+        where: v.question_id == ^question_id,
+        select: {v.vote, v.flag_reason}
+      )
+      |> Repo.all()
+
+    likes = Enum.count(votes, fn {vote, _} -> vote == :like end)
+    dislikes = Enum.count(votes, fn {vote, _} -> vote == :dislike end)
+    flags = Enum.count(votes, fn {_, reason} -> not is_nil(reason) end)
+    quality = QuestionStats.compute_quality(likes, dislikes, flags)
+
+    stats = get_or_init_stats(question_id)
+
+    stats
+    |> QuestionStats.changeset(%{
+      like_count: likes,
+      dislike_count: dislikes,
+      flag_count: flags,
+      quality_score: quality
+    })
+    |> Repo.update()
+  end
+
+  defp get_or_init_stats(question_id) do
+    case Repo.get_by(QuestionStats, question_id: question_id) do
+      nil ->
+        {:ok, stats} =
+          %QuestionStats{}
+          |> QuestionStats.changeset(%{question_id: question_id})
+          |> Repo.insert()
+
+        stats
+
+      stats ->
+        stats
+    end
   end
 end
