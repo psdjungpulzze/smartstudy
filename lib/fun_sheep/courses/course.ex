@@ -28,6 +28,20 @@ defmodule FunSheep.Courses.Course do
     field :external_id, :string
     field :external_synced_at, :utc_datetime
 
+    # Premium catalog fields
+    # "public", "preview", "standard", "premium", "professional"
+    field :access_level, :string, default: "public"
+    field :is_premium_catalog, :boolean, default: false
+    # 'sat', 'act', 'ap', 'ib', 'hsc', 'clt', 'lsat', 'bar', 'gmat', 'mcat', 'gre'
+    field :catalog_test_type, :string
+    # 'mathematics', 'biology', 'english_language', etc.
+    field :catalog_subject, :string
+    # 'hl', 'sl', 'ab', 'bc', '1', '2', etc.
+    field :catalog_level, :string
+    field :published_at, :utc_datetime
+    field :published_by_id, :binary_id
+    field :sample_question_count, :integer, default: 10
+
     # A TOC rebase proposal waiting for approval. When non-nil, the course
     # has a candidate DiscoveredTOC that didn't auto-apply (material change
     # with risk to existing attempts). UI surfaces this as a banner to the
@@ -48,6 +62,8 @@ defmodule FunSheep.Courses.Course do
 
     timestamps(type: :utc_datetime)
   end
+
+  @access_levels ~w(public preview standard premium professional)
 
   @doc false
   def changeset(course, attrs) do
@@ -72,11 +88,40 @@ defmodule FunSheep.Courses.Course do
       :external_synced_at,
       :pending_toc_id,
       :pending_toc_proposed_by_id,
-      :pending_toc_proposed_at
+      :pending_toc_proposed_at,
+      :access_level,
+      :is_premium_catalog,
+      :catalog_test_type,
+      :catalog_subject,
+      :catalog_level,
+      :published_at,
+      :published_by_id,
+      :sample_question_count
     ])
     |> validate_required([:name, :subject, :grade])
+    |> validate_inclusion(:access_level, @access_levels)
+    |> validate_number(:sample_question_count, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:school_id)
     |> foreign_key_constraint(:pending_toc_id)
     |> foreign_key_constraint(:pending_toc_proposed_by_id)
+  end
+
+  @doc """
+  Changeset for updating premium catalog metadata.
+
+  Validates catalog-specific fields required when marking a course as a
+  premium catalog entry. `is_premium_catalog`, `catalog_test_type`, and
+  `access_level` are required when the course is being published to the
+  premium catalog.
+  """
+  def changeset_for_premium(course, attrs) do
+    course
+    |> changeset(attrs)
+    |> validate_required([:catalog_test_type, :access_level])
+    |> validate_inclusion(:access_level, @access_levels -- ["public"])
+    |> validate_number(:sample_question_count,
+      greater_than_or_equal_to: 0,
+      less_than_or_equal_to: 500
+    )
   end
 end
