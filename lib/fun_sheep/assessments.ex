@@ -201,7 +201,7 @@ defmodule FunSheep.Assessments do
   def get_test_schedule_with_course!(id) do
     TestSchedule
     |> Repo.get!(id)
-    |> Repo.preload(:course)
+    |> Repo.preload([:course, :format_template])
   end
 
   @doc """

@@ -41,7 +41,8 @@ defmodule FunSheep.Assessments.PracticeEngine do
         course_id,
         opts.chapter_id,
         opts.limit * 3,
-        chapter_ids: chapter_ids
+        chapter_ids: chapter_ids,
+        question_types: opts.question_types
       )
 
     if weak_pool == [] do
@@ -50,7 +51,8 @@ defmodule FunSheep.Assessments.PracticeEngine do
       review_pool =
         Questions.list_review_candidates(user_role_id, course_id,
           limit: opts.limit,
-          review_floor: opts.review_floor
+          review_floor: opts.review_floor,
+          question_types: opts.question_types
         )
 
       questions =
@@ -174,7 +176,8 @@ defmodule FunSheep.Assessments.PracticeEngine do
       review_floor: Map.get(opts, :review_floor, @default_review_floor),
       chapter_id: Map.get(opts, :chapter_id),
       chapter_ids: Map.get(opts, :chapter_ids),
-      test_schedule_id: Map.get(opts, :test_schedule_id)
+      test_schedule_id: Map.get(opts, :test_schedule_id),
+      question_types: Map.get(opts, :question_types, [])
     }
   end
 

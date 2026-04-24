@@ -55,13 +55,24 @@ defmodule FunSheepWeb.PracticeLive do
     case Assessments.get_test_schedule_with_course!(schedule_id) do
       %{} = schedule ->
         chapter_ids = ScopeReadiness.scope_chapter_ids(schedule)
-        {schedule, %{test_schedule_id: schedule.id, chapter_ids: chapter_ids}}
+        question_types = format_question_types(schedule.format_template)
+
+        {schedule,
+         %{
+           test_schedule_id: schedule.id,
+           chapter_ids: chapter_ids,
+           question_types: question_types
+         }}
     end
   rescue
     Ecto.NoResultsError -> {nil, %{}}
   end
 
   defp resolve_schedule_scope(_params), do: {nil, %{}}
+
+  defp format_question_types(format_template) do
+    FunSheep.Assessments.Engine.format_question_types(format_template)
+  end
 
   @impl true
   def handle_event("filter_chapter", %{"chapter_id" => chapter_id}, socket) do

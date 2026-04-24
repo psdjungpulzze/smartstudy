@@ -451,7 +451,18 @@ defmodule FunSheep.Questions do
     where(query, [q], q.question_type == ^type)
   end
 
+  defp maybe_filter_question_type(query, %{question_types: types})
+       when is_list(types) and types != [] do
+    where(query, [q], q.question_type in ^types)
+  end
+
   defp maybe_filter_question_type(query, _), do: query
+
+  defp maybe_filter_question_types_list(query, []), do: query
+
+  defp maybe_filter_question_types_list(query, types) when is_list(types) do
+    where(query, [q], q.question_type in ^types)
+  end
 
   def list_questions_by_chapter(chapter_id) do
     from(q in Question,
@@ -574,11 +585,13 @@ defmodule FunSheep.Questions do
   def list_weak_questions(user_role_id, course_id, chapter_id \\ nil, limit \\ 20, opts \\ []) do
     recent_ids = recently_attempted_question_ids(user_role_id, limit)
     chapter_ids = Keyword.get(opts, :chapter_ids, [])
+    question_types = Keyword.get(opts, :question_types, [])
 
     primary =
       weak_questions_query(user_role_id, course_id, chapter_id, limit,
         exclude: recent_ids,
-        chapter_ids: chapter_ids
+        chapter_ids: chapter_ids,
+        question_types: question_types
       )
       |> Repo.all()
 
@@ -591,7 +604,8 @@ defmodule FunSheep.Questions do
       backfill =
         weak_questions_query(user_role_id, course_id, chapter_id, shortfall,
           exclude: already_picked,
-          chapter_ids: chapter_ids
+          chapter_ids: chapter_ids,
+          question_types: question_types
         )
         |> Repo.all()
 
@@ -602,6 +616,7 @@ defmodule FunSheep.Questions do
   defp weak_questions_query(user_role_id, course_id, chapter_id, limit, opts) do
     exclude_ids = Keyword.get(opts, :exclude, [])
     chapter_ids = Keyword.get(opts, :chapter_ids, [])
+    question_types = Keyword.get(opts, :question_types, [])
 
     from(q in Question,
       join: qa in QuestionAttempt,
@@ -635,6 +650,7 @@ defmodule FunSheep.Questions do
     |> maybe_filter_chapter_for_practice(chapter_id)
     |> maybe_filter_chapter_ids(chapter_ids)
     |> maybe_exclude_question_ids(exclude_ids)
+    |> maybe_filter_question_types_list(question_types)
   end
 
   defp maybe_filter_chapter_for_practice(query, nil), do: query
@@ -723,6 +739,7 @@ defmodule FunSheep.Questions do
     limit = Keyword.get(opts, :limit, 20)
     review_floor = Keyword.get(opts, :review_floor, 0.3)
     exclude_ids = Keyword.get(opts, :exclude, [])
+    question_types = Keyword.get(opts, :question_types, [])
 
     deficits = skill_deficits(user_role_id, course_id)
 
@@ -761,6 +778,7 @@ defmodule FunSheep.Questions do
       |> tagged_for_adaptive()
       |> where([q], q.section_id in ^mastered_section_ids)
       |> maybe_exclude_question_ids(exclude_ids)
+      |> maybe_filter_question_types_list(question_types)
       |> join(:left, [q], la in subquery(last_attempt_by_section),
         on: la.section_id == q.section_id
       )

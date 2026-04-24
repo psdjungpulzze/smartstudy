@@ -35,6 +35,7 @@ defmodule FunSheep.Assessments.Engine do
 
   def start_assessment(test_schedule) do
     topics = extract_topics(test_schedule)
+    question_types = format_question_types(test_schedule.format_template)
 
     %{
       schedule_id: test_schedule.id,
@@ -47,8 +48,28 @@ defmodule FunSheep.Assessments.Engine do
       topic_attempts: %{},
       skill_states: %{},
       active_skill_id: nil,
-      status: :in_progress
+      status: :in_progress,
+      question_types: question_types
     }
+  end
+
+  @doc """
+  Returns question types to filter by for a given format template.
+
+  T/F is only included when the format template explicitly requires it.
+  When no format template (or no typed sections), defaults to all types
+  except true_false — schools almost never use T/F unless it's the stated
+  test format.
+  """
+  def format_question_types(format_template) do
+    types = extract_format_question_types(format_template)
+
+    if types == [] do
+      # No explicit format — exclude T/F by default
+      ["multiple_choice", "short_answer", "free_response"]
+    else
+      types
+    end
   end
 
   def next_question(state) do
@@ -95,7 +116,8 @@ defmodule FunSheep.Assessments.Engine do
                state.course_id,
                topic.id,
                state.target_difficulty,
-               attempts
+               attempts,
+               Map.get(state, :question_types, [])
              ) do
           {:ok, question} ->
             {:question, question, state}
@@ -131,7 +153,11 @@ defmodule FunSheep.Assessments.Engine do
 
   defp select_skill_targeted(state, section_id, skill, bounds) do
     attempted_ids = Enum.map(skill.attempts, & &1.question_id)
-    filters = %{chapter_id: skill.chapter_id, section_id: section_id}
+    question_types = Map.get(state, :question_types, [])
+
+    filters =
+      %{chapter_id: skill.chapter_id, section_id: section_id}
+      |> maybe_add_question_types(question_types)
 
     candidates =
       Questions.list_questions_with_stats(state.course_id, filters)
@@ -310,10 +336,11 @@ defmodule FunSheep.Assessments.Engine do
          course_id,
          chapter_id,
          target_difficulty,
-         previous_attempts
+         previous_attempts,
+         question_types
        ) do
     attempted_ids = Enum.map(previous_attempts, & &1.question_id)
-    filters = %{chapter_id: chapter_id}
+    filters = %{chapter_id: chapter_id} |> maybe_add_question_types(question_types)
 
     all_questions =
       Questions.list_questions_with_stats(course_id, filters)
@@ -361,4 +388,19 @@ defmodule FunSheep.Assessments.Engine do
     chapter_ids = get_in(schedule.scope, ["chapter_ids"]) || []
     Courses.list_chapters_by_ids(chapter_ids)
   end
+
+  defp extract_format_question_types(nil), do: []
+
+  defp extract_format_question_types(%{structure: structure}) when is_map(structure) do
+    structure
+    |> Map.get("sections", [])
+    |> Enum.map(& &1["question_type"])
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp extract_format_question_types(_), do: []
+
+  defp maybe_add_question_types(filters, []), do: filters
+  defp maybe_add_question_types(filters, types), do: Map.put(filters, :question_types, types)
 end
