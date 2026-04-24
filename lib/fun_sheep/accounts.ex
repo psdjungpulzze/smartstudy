@@ -347,15 +347,25 @@ defmodule FunSheep.Accounts do
          :ok <- check_relationship_match(sg, role) do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      sg
-      |> StudentGuardian.changeset(%{
-        guardian_id: guardian.id,
-        status: :active,
-        accepted_at: now,
-        invite_token: nil,
-        invite_token_expires_at: nil
-      })
-      |> Repo.update()
+      result =
+        sg
+        |> StudentGuardian.changeset(%{
+          guardian_id: guardian.id,
+          status: :active,
+          accepted_at: now,
+          invite_token: nil,
+          invite_token_expires_at: nil
+        })
+        |> Repo.update()
+
+      case result do
+        {:ok, updated_sg} ->
+          enqueue_referral_credit_check(updated_sg)
+          {:ok, updated_sg}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -375,10 +385,20 @@ defmodule FunSheep.Accounts do
         {:error, :not_found}
 
       %StudentGuardian{status: :pending} = sg ->
-        update_student_guardian(sg, %{
-          status: :active,
-          accepted_at: DateTime.utc_now() |> DateTime.truncate(:second)
-        })
+        result =
+          update_student_guardian(sg, %{
+            status: :active,
+            accepted_at: DateTime.utc_now() |> DateTime.truncate(:second)
+          })
+
+        case result do
+          {:ok, updated_sg} ->
+            enqueue_referral_credit_check(updated_sg)
+            {:ok, updated_sg}
+
+          error ->
+            error
+        end
 
       %StudentGuardian{} ->
         {:error, :not_pending}
@@ -573,4 +593,36 @@ defmodule FunSheep.Accounts do
       where: ilike(ur.email, ^pattern) or ilike(ur.display_name, ^pattern)
     )
   end
+
+  ## Onboarding
+
+  @doc """
+  Marks a student's onboarding as complete by setting `onboarding_completed_at`.
+  """
+  def complete_onboarding(%UserRole{} = user_role) do
+    user_role
+    |> Ecto.Changeset.change(
+      onboarding_completed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    )
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns true if the user_role has completed onboarding.
+  """
+  def onboarding_complete?(%UserRole{onboarding_completed_at: nil}), do: false
+  def onboarding_complete?(%UserRole{}), do: true
+
+  defp enqueue_referral_credit_check(%StudentGuardian{
+         id: sg_id,
+         guardian_id: guardian_id,
+         relationship_type: :teacher
+       })
+       when not is_nil(guardian_id) do
+    %{"teacher_user_role_id" => guardian_id, "student_guardian_id" => sg_id}
+    |> FunSheep.Workers.CreditReferralCheckWorker.new()
+    |> Oban.insert()
+  end
+
+  defp enqueue_referral_credit_check(_), do: :ok
 end

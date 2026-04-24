@@ -181,19 +181,20 @@ defmodule FunSheepWeb.PracticeLive do
 
       new_state = PracticeEngine.record_answer(state, question.id, answer, is_correct)
 
-      {:noreply,
-       assign(socket,
-         engine_state: new_state,
-         feedback: %{
-           is_correct: is_correct,
-           correct_answer: question.answer,
-           # Teacher-review fix #3: show the canonical explanation inline
-           # on wrong-answer feedback instead of gating learning behind a
-           # Tutor click. Presence is optional — the generator is supposed
-           # to always fill this, but legacy rows may be empty.
-           explanation: question.explanation
-         }
-       )}
+      socket =
+        assign(socket,
+          engine_state: new_state,
+          feedback: %{
+            is_correct: is_correct,
+            correct_answer: question.answer,
+            explanation: question.explanation
+          }
+        )
+
+      socket =
+        if is_correct, do: socket, else: push_event(socket, "play_sound", %{name: "sheep_wrong"})
+
+      {:noreply, socket}
     end
   end
 

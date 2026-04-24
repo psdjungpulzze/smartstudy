@@ -4,7 +4,7 @@ defmodule FunSheepWeb.LeaderboardLive do
   import FunSheepWeb.SheepMascot
 
   alias FunSheep.Gamification
-  alias FunSheep.Gamification.Achievement
+  alias FunSheep.Gamification.{Achievement, ShoutOut}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -22,6 +22,8 @@ defmodule FunSheepWeb.LeaderboardLive do
           {[], default_gamification(), [], 0, 0}
       end
 
+    shout_outs = Gamification.get_current_shout_outs()
+
     {:ok,
      assign(socket,
        page_title: "Flock",
@@ -30,12 +32,14 @@ defmodule FunSheepWeb.LeaderboardLive do
        gamification: gamification,
        flock: flock,
        my_rank: my_rank,
-       flock_size: flock_size
+       flock_size: flock_size,
+       shout_outs: shout_outs
      )}
   end
 
   @impl true
-  def handle_event("switch_tab", %{"tab" => tab}, socket) do
+  def handle_event("switch_tab", %{"tab" => tab}, socket)
+      when tab in ["leaderboard", "achievements", "shout_outs"] do
     {:noreply, assign(socket, :tab, String.to_existing_atom(tab))}
   end
 
@@ -59,7 +63,7 @@ defmodule FunSheepWeb.LeaderboardLive do
       </div>
 
       <%!-- Tab Selector --%>
-      <div class="flex gap-2 animate-slide-up">
+      <div class="flex gap-2 flex-wrap animate-slide-up">
         <button
           phx-click="switch_tab"
           phx-value-tab="leaderboard"
@@ -73,6 +77,13 @@ defmodule FunSheepWeb.LeaderboardLive do
           class={tab_class(@tab == :achievements)}
         >
           Badges
+        </button>
+        <button
+          phx-click="switch_tab"
+          phx-value-tab="shout_outs"
+          class={tab_class(@tab == :shout_outs)}
+        >
+          ✨ Shout Outs
         </button>
       </div>
 
@@ -205,6 +216,37 @@ defmodule FunSheepWeb.LeaderboardLive do
         </div>
       </div>
 
+      <%!-- ═══ Shout Outs Tab ═══ --%>
+      <div :if={@tab == :shout_outs} class="space-y-4 animate-slide-up">
+        <div>
+          <h2 class="text-sm font-extrabold text-gray-900">This Week's Stars</h2>
+          <p class="text-xs text-gray-500 mt-0.5">
+            Weekly spotlight · resets every Monday
+          </p>
+        </div>
+
+        <%!-- Empty state --%>
+        <div
+          :if={@shout_outs == []}
+          class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+        >
+          <p class="text-3xl mb-3">✨</p>
+          <p class="font-extrabold text-gray-900">No shout outs yet this week</p>
+          <p class="text-sm text-gray-500 mt-1">
+            Be the first to earn one!
+          </p>
+        </div>
+
+        <%!-- Shout out cards --%>
+        <div :if={@shout_outs != []} class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <.shout_out_card
+            :for={shout_out <- @shout_outs}
+            shout_out={shout_out}
+            current_user_role_id={@current_user["id"]}
+          />
+        </div>
+      </div>
+
       <%!-- ═══ Achievements Tab ═══ --%>
       <div :if={@tab == :achievements} class="space-y-4 animate-slide-up">
         <%!-- Stats Overview --%>
@@ -300,6 +342,62 @@ defmodule FunSheepWeb.LeaderboardLive do
             </div>
           </div>
         </div>
+      </div>
+    </div>
+    """
+  end
+
+  # ── Shout Out Card Component ─────────────────────────────────────────────
+
+  attr :shout_out, FunSheep.Gamification.ShoutOut, required: true
+  attr :current_user_role_id, :string, required: true
+
+  defp shout_out_card(assigns) do
+    info = ShoutOut.display_info(assigns.shout_out.category)
+    winner_name = get_in(assigns.shout_out.user_role, [Access.key(:display_name)]) || "Anonymous"
+    is_me = assigns.shout_out.user_role_id == assigns.current_user_role_id
+
+    assigns =
+      assigns
+      |> assign(:info, info)
+      |> assign(:winner_name, winner_name)
+      |> assign(:is_me, is_me)
+
+    ~H"""
+    <div class={[
+      "rounded-2xl p-4 border transition-all",
+      if(@is_me,
+        do: "bg-green-50 border-[#4CD964] ring-2 ring-[#4CD964] animate-pulse-once",
+        else: "bg-white border-gray-100"
+      )
+    ]}>
+      <%!-- Category icon + label row --%>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-2xl">{@info.icon}</span>
+        <span class="text-xs font-extrabold text-gray-500 uppercase tracking-wider">
+          {@info.label}
+        </span>
+      </div>
+
+      <%!-- Winner name --%>
+      <p class={[
+        "font-extrabold text-base truncate",
+        if(@is_me, do: "text-[#4CD964]", else: "text-gray-900")
+      ]}>
+        {if @is_me, do: "You", else: @winner_name}
+      </p>
+
+      <%!-- Metric value + unit --%>
+      <p class="text-sm text-gray-500 mt-0.5">
+        <span class="font-extrabold text-gray-700">{@shout_out.metric_value}</span>
+        {@info.unit}
+      </p>
+
+      <%!-- "That's you!" badge --%>
+      <div :if={@is_me} class="mt-2">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-[#4CD964] text-white shadow-sm">
+          That's you! 🎉
+        </span>
       </div>
     </div>
     """

@@ -231,7 +231,10 @@ if config_env() == :prod do
          # Nightly at 03:00 UTC — coverage audit per (course, chapter,
          # difficulty); fires demand-driven generation to hold a
          # target supply of fresh questions at each difficulty.
-         {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker}
+         {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker},
+         # Sunday 23:55 UTC — compute weekly shout out winners. Keep in
+         # sync with config/config.exs.
+         {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker}
        ]}
     ]
 

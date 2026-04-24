@@ -5,7 +5,17 @@ defmodule FunSheepWeb.DashboardLive do
 
   import FunSheepWeb.ShareButton
 
-  alias FunSheep.{Courses, Assessments, FixedTests, Gamification, Integrations, MemorySpan}
+  alias FunSheep.{
+    Accounts,
+    Courses,
+    Assessments,
+    Enrollments,
+    FixedTests,
+    Gamification,
+    Integrations,
+    MemorySpan
+  }
+
   alias FunSheep.Engagement.{SpacedRepetition, StudySessions}
 
   @impl true
@@ -17,8 +27,8 @@ defmodule FunSheepWeb.DashboardLive do
     end
 
     {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations,
-     pinned_id,
-     custom_assignments} =
+     pinned_id, custom_assignments, onboarding_complete,
+     enrolled_courses} =
       case Ecto.UUID.cast(user_role_id) do
         {:ok, _uuid} ->
           tests = Assessments.list_upcoming_schedules(user_role_id, 90)
@@ -45,12 +55,16 @@ defmodule FunSheepWeb.DashboardLive do
 
           custom_assignments = FixedTests.list_assignments_for_student(user_role_id)
 
+          user_role = Accounts.get_user_role!(user_role_id)
+          onboarding_done = Accounts.onboarding_complete?(user_role)
+          enrolled = Enrollments.list_for_student(user_role_id)
+
           {tests_with_readiness_and_spans, gam, count, review, daily, int, pinned,
-           custom_assignments}
+           custom_assignments, onboarding_done, enrolled}
 
         :error ->
           {[], default_gamification(), 0, default_review_stats(), default_daily_summary(), [],
-           nil, []}
+           nil, [], true, []}
       end
 
     # Build memory_spans map: course_id → span (for quick lookup in templates)
@@ -76,7 +90,9 @@ defmodule FunSheepWeb.DashboardLive do
         daily_summary: daily_summary,
         integrations: integrations,
         memory_spans: memory_spans,
-        custom_assignments: custom_assignments
+        custom_assignments: custom_assignments,
+        onboarding_complete: onboarding_complete,
+        enrolled_courses: enrolled_courses
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "dashboard",
@@ -222,6 +238,71 @@ defmodule FunSheepWeb.DashboardLive do
   def render(assigns) do
     ~H"""
     <div class="space-y-4 sm:space-y-6">
+      <%!-- ── Onboarding CTA (new students) ── --%>
+      <div :if={!@onboarding_complete} class="animate-slide-up">
+        <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-5 flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <p class="font-semibold text-gray-900 dark:text-white text-sm">
+              See courses at your school — takes 2 minutes
+            </p>
+            <p class="text-xs text-gray-500 mt-0.5">Pick your subjects and start practising today.</p>
+          </div>
+          <a
+            href="/onboarding/student"
+            class="shrink-0 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-4 py-2 rounded-full shadow-md transition-colors text-sm"
+          >
+            Get Started →
+          </a>
+        </div>
+      </div>
+
+      <%!-- ── Onboarding done but no enrolled courses ── --%>
+      <div :if={@onboarding_complete and @enrolled_courses == []} class="animate-slide-up">
+        <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-5 flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <p class="font-semibold text-gray-900 dark:text-white text-sm">
+              Add courses to get started
+            </p>
+            <p class="text-xs text-gray-500 mt-0.5">Browse available courses or create your own.</p>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <a
+              href="/courses"
+              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-3 py-2 rounded-full shadow-md transition-colors text-sm"
+            >
+              Browse courses at my school
+            </a>
+            <a
+              href="/courses/new"
+              class="border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium px-3 py-2 rounded-full transition-colors text-sm hover:border-[#4CD964]"
+            >
+              + Create a course
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <%!-- ── My Courses (enrolled) ── --%>
+      <div :if={@enrolled_courses != []} class="animate-slide-up">
+        <h2 class="text-sm font-extrabold text-gray-400 uppercase tracking-wider mb-3">
+          My Courses
+        </h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <a
+            :for={sc <- @enrolled_courses}
+            href={if sc.course, do: "/courses/#{sc.course.id}", else: "#"}
+            class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-sm p-4 hover:shadow-md transition-shadow border border-transparent hover:border-[#4CD964]"
+          >
+            <p class="font-semibold text-sm text-gray-900 dark:text-white truncate">
+              {if sc.course, do: sc.course.name, else: "Course"}
+            </p>
+            <p class="text-xs text-gray-500 mt-0.5">
+              {if sc.course, do: "#{sc.course.subject} · Grade #{sc.course.grade}", else: ""}
+            </p>
+          </a>
+        </div>
+      </div>
+
       <%!-- ── Greeting + Sheep ── --%>
       <div class="flex items-center justify-between gap-3 animate-slide-up">
         <div class="min-w-0">

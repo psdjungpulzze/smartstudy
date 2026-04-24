@@ -9,7 +9,7 @@ defmodule FunSheep.Gamification do
   import Ecto.Query, warn: false
   alias FunSheep.Repo
 
-  alias FunSheep.Gamification.{Streak, XpEvent, Achievement, FpEconomy}
+  alias FunSheep.Gamification.{Streak, XpEvent, Achievement, FpEconomy, ShoutOut}
 
   ## ── Streaks ──────────────────────────────────────────────────────────────
 
@@ -453,6 +453,145 @@ defmodule FunSheep.Gamification do
     )
     |> Repo.all()
   end
+
+  ## ── Shout Outs ───────────────────────────────────────────────────────────
+
+  @shout_out_categories ~w(most_xp most_tests_taken most_textbooks_uploaded most_tests_created longest_streak)a
+
+  @doc """
+  Returns the current week's shout out winners.
+
+  Looks up shout_outs where `period == period` and `period_start` equals the
+  Monday of the current week. Returns a list of `ShoutOut` structs with the
+  `user_role` preloaded.
+  """
+  def get_current_shout_outs(period \\ "weekly") do
+    week_start = current_week_start()
+
+    from(so in ShoutOut,
+      where: so.period == ^period and so.period_start == ^week_start,
+      preload: [:user_role],
+      order_by: so.category
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Computes shout out winners for the given period and stores them.
+
+  Called by `ComputeShoutOutsWorker` on Sunday night. Existing rows for the
+  same `(category, period, period_start)` are NOT deleted first — if you need
+  to recompute, delete old rows manually or via a migration.
+
+  Returns `{:ok, count}` where `count` is the number of new rows inserted.
+  """
+  def compute_and_store_shout_outs(period_start, period_end) do
+    results =
+      Enum.flat_map(@shout_out_categories, fn category ->
+        case compute_winner(category, period_start, period_end) do
+          nil ->
+            []
+
+          {user_role_id, value} ->
+            [
+              %{
+                category: to_string(category),
+                period: "weekly",
+                period_start: period_start,
+                period_end: period_end,
+                metric_value: value,
+                user_role_id: user_role_id
+              }
+            ]
+        end
+      end)
+
+    rows =
+      Enum.map(results, fn attrs ->
+        now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+        Map.merge(attrs, %{id: Ecto.UUID.generate(), inserted_at: now})
+      end)
+
+    {count, _} = Repo.insert_all(ShoutOut, rows)
+    {:ok, count}
+  end
+
+  defp current_week_start do
+    today = Date.utc_today()
+
+    case Date.day_of_week(today, :monday) do
+      1 -> today
+      n -> Date.add(today, -(n - 1))
+    end
+  end
+
+  defp compute_winner(:most_xp, period_start, period_end) do
+    start_dt = DateTime.new!(period_start, ~T[00:00:00], "Etc/UTC")
+    end_dt = DateTime.new!(period_end, ~T[00:00:00], "Etc/UTC")
+
+    from(x in XpEvent,
+      where: x.inserted_at >= ^start_dt and x.inserted_at < ^end_dt,
+      group_by: x.user_role_id,
+      select: {x.user_role_id, sum(x.amount)},
+      order_by: [desc: sum(x.amount)],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp compute_winner(:most_tests_taken, period_start, period_end) do
+    start_dt = DateTime.new!(period_start, ~T[00:00:00], "Etc/UTC")
+    end_dt = DateTime.new!(period_end, ~T[00:00:00], "Etc/UTC")
+
+    from(qa in FunSheep.Questions.QuestionAttempt,
+      where: qa.inserted_at >= ^start_dt and qa.inserted_at < ^end_dt,
+      group_by: qa.user_role_id,
+      select: {qa.user_role_id, count(qa.id)},
+      order_by: [desc: count(qa.id)],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp compute_winner(:most_textbooks_uploaded, period_start, period_end) do
+    start_dt = DateTime.new!(period_start, ~T[00:00:00], "Etc/UTC")
+    end_dt = DateTime.new!(period_end, ~T[00:00:00], "Etc/UTC")
+
+    from(m in FunSheep.Content.UploadedMaterial,
+      where:
+        m.inserted_at >= ^start_dt and m.inserted_at < ^end_dt and m.ocr_status == :completed,
+      group_by: m.user_role_id,
+      select: {m.user_role_id, count(m.id)},
+      order_by: [desc: count(m.id)],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp compute_winner(:most_tests_created, period_start, period_end) do
+    start_dt = DateTime.new!(period_start, ~T[00:00:00], "Etc/UTC")
+    end_dt = DateTime.new!(period_end, ~T[00:00:00], "Etc/UTC")
+
+    from(ts in FunSheep.Assessments.TestSchedule,
+      where: ts.inserted_at >= ^start_dt and ts.inserted_at < ^end_dt,
+      group_by: ts.user_role_id,
+      select: {ts.user_role_id, count(ts.id)},
+      order_by: [desc: count(ts.id)],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp compute_winner(:longest_streak, _period_start, _period_end) do
+    from(s in Streak,
+      order_by: [desc: s.current_streak],
+      select: {s.user_role_id, s.current_streak},
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp compute_winner(_, _, _), do: nil
 
   ## ── Leaderboard (Flock) ──────────────────────────────────────────────────
 

@@ -231,6 +231,12 @@ defmodule FunSheep.Assessments do
            |> TestSchedule.changeset(attrs)
            |> Repo.insert() do
       ensure_generation_queued(schedule)
+
+      # Award Wool Credits to the teacher who created this test.
+      %{"test_schedule_id" => schedule.id}
+      |> FunSheep.Workers.CreditTestCreatedWorker.new()
+      |> Oban.insert()
+
       {:ok, schedule}
     end
   end

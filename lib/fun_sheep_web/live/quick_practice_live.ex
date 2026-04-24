@@ -301,16 +301,27 @@ defmodule FunSheepWeb.QuickPracticeLive do
             else: 0
 
         # Defer DB insert until confidence is selected (Phase 2 — collect confidence first)
-        {:noreply,
-         assign(socket,
-           engine_state: new_state,
-           stats: new_stats,
-           feedback: %{is_correct: is_correct, correct_answer: question.answer, grade_result: nil},
-           pending_is_correct: is_correct,
-           pending_answer: answer,
-           card_phase: :feedback,
-           session_streak: new_streak
-         )}
+        socket =
+          assign(socket,
+            engine_state: new_state,
+            stats: new_stats,
+            feedback: %{
+              is_correct: is_correct,
+              correct_answer: question.answer,
+              grade_result: nil
+            },
+            pending_is_correct: is_correct,
+            pending_answer: answer,
+            card_phase: :feedback,
+            session_streak: new_streak
+          )
+
+        socket =
+          if is_correct,
+            do: socket,
+            else: push_event(socket, "play_sound", %{name: "sheep_wrong"})
+
+        {:noreply, socket}
       end
     end
   end

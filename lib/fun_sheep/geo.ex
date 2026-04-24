@@ -143,6 +143,18 @@ defmodule FunSheep.Geo do
   end
 
   @doc """
+  Search schools by a plain string query (convenience wrapper for onboarding).
+
+  Returns an empty list for queries shorter than 2 characters.
+  """
+  @spec search_schools(binary(), keyword()) :: [School.t()]
+  def search_schools(query, opts) when is_binary(query) and byte_size(query) >= 2 do
+    search_schools(Keyword.merge([query: query], opts))
+  end
+
+  def search_schools(query, _opts) when is_binary(query), do: []
+
+  @doc """
   Search schools for the profile-setup autocomplete.
 
   Filters by optional `state_id`/`country_id`, case-insensitive `query`

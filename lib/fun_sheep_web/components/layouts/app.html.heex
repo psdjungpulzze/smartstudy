@@ -267,3 +267,13 @@
     <% end %>
   </div>
 </nav>
+
+<%!-- Sound player — persists across LiveView navigations; plays audio on push_event --%>
+<div
+  id="sound-player"
+  phx-hook="SoundPlayer"
+  data-sounds-enabled="true"
+  class="hidden"
+  aria-hidden="true"
+>
+</div>

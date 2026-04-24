@@ -24,6 +24,7 @@ defmodule FunSheep.Accounts.UserRole do
     field :suspended_at, :utc_datetime
     field :last_login_at, :utc_datetime
     field :timezone, :string
+    field :onboarding_completed_at, :utc_datetime
 
     # Parent notification preferences (spec §8.1 / §8.2).
     field :digest_frequency, Ecto.Enum, values: [:weekly, :off], default: :weekly
@@ -61,6 +62,7 @@ defmodule FunSheep.Accounts.UserRole do
       :suspended_at,
       :last_login_at,
       :timezone,
+      :onboarding_completed_at,
       :digest_frequency,
       :alerts_skipped_days,
       :alerts_readiness_drop,

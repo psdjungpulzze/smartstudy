@@ -405,6 +405,42 @@ const Hooks = {
 
   SwipeCard: SwipeCardHook,
 
+  // ── Sound Player ──────────────────────────────────────────────────────────
+  // Listens for "play_sound" events pushed from LiveView and plays the named
+  // sound file from /sounds/<name>.<ext>. Silently swallows autoplay errors
+  // (browsers block audio before the first user gesture).
+  SoundPlayer: {
+    mounted() {
+      this._sounds = {}
+      this._enabled = this.el.dataset.soundsEnabled !== "false"
+      this.handleEvent("play_sound", ({ name }) => {
+        if (this._enabled) this._play(name)
+      })
+      // Unlock AudioContext on first user interaction (iOS/Android)
+      document.addEventListener("click", () => {
+        if (window._audioCtx) window._audioCtx.resume().catch(() => {})
+      }, { once: true })
+    },
+
+    updated() {
+      this._enabled = this.el.dataset.soundsEnabled !== "false"
+    },
+
+    _play(name) {
+      if (!this._sounds[name]) {
+        const ext = this._supportsOgg() ? "ogg" : "mp3"
+        this._sounds[name] = new Audio(`/sounds/${name}.${ext}`)
+        this._sounds[name].volume = 0.6
+      }
+      this._sounds[name].cloneNode().play().catch(() => {})
+    },
+
+    _supportsOgg() {
+      const a = document.createElement("audio")
+      return a.canPlayType("audio/ogg; codecs=vorbis") !== ""
+    },
+  },
+
   // ── Stripe Card Setup (Payment Method Collection) ──────────────────────
   // Mounts Stripe Elements for secure credit card input. Uses a SetupIntent
   // client_secret from data-client-secret to confirm the card setup, then

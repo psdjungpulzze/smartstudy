@@ -277,7 +277,7 @@ defmodule FunSheepWeb.LiveHelpers do
   # flows pass through freely so users aren't trapped. Disabled in test
   # (via :fun_sheep, :onboarding_gate) so live tests can hit feature
   # pages without first filling out a profile fixture.
-  @onboarding_exempt_paths ~w(/profile/setup /guardians /subscription)
+  @onboarding_exempt_paths ~w(/profile/setup /guardians /subscription /onboarding/student)
   defp gate_onboarding(_params, url, socket) do
     uri = URI.parse(url)
     path = uri.path || ""

@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.SubscriptionLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.Billing
+  alias FunSheep.{Billing, Credits}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -33,6 +33,8 @@ defmodule FunSheepWeb.SubscriptionLive do
         end
       end
 
+    pending_credits = Credits.get_balance(user_role_id)
+
     socket =
       socket
       |> assign(
@@ -48,6 +50,8 @@ defmodule FunSheepWeb.SubscriptionLive do
         checkout_loading: nil,
         show_add_card: false,
         setup_intent: nil,
+        pending_credits: pending_credits,
+        redeem_loading: false,
         # Flow A (§4.7) — when the parent arrives via the accept link,
         # the request is loaded here so checkout carries its metadata.
         practice_request: nil,
@@ -147,6 +151,36 @@ defmodule FunSheepWeb.SubscriptionLive do
     end
   end
 
+  def handle_event("redeem_credits", _params, socket) do
+    user_role_id = socket.assigns.user_role_id
+    credits = socket.assigns.pending_credits
+
+    case Credits.redeem_for_subscription(user_role_id, credits) do
+      {:ok, _sub} ->
+        stats = Billing.usage_stats(user_role_id)
+
+        {:noreply,
+         socket
+         |> assign(stats: stats, pending_credits: 0, redeem_loading: false)
+         |> put_flash(
+           :info,
+           "#{credits} Wool Credit#{if credits == 1, do: "", else: "s"} redeemed — enjoy your extended subscription!"
+         )}
+
+      {:error, :insufficient_balance} ->
+        {:noreply,
+         socket
+         |> assign(redeem_loading: false)
+         |> put_flash(:error, "Not enough credits to redeem.")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(redeem_loading: false)
+         |> put_flash(:error, "Unable to redeem credits. Please try again.")}
+    end
+  end
+
   def handle_event("show_add_card", _params, socket) do
     sub = socket.assigns.stats.subscription
     sub_id = sub.billing_subscription_id || "sub_mock_001"
@@ -231,6 +265,31 @@ defmodule FunSheepWeb.SubscriptionLive do
     <.teacher_free_message :if={@role in ["teacher", :teacher]} />
 
     <div :if={@role not in ["teacher", :teacher]} class="max-w-4xl mx-auto px-4 py-6">
+      <%!-- Wool Credits gift banner --%>
+      <div
+        :if={@pending_credits > 0}
+        class="mb-6 bg-[#E8F8EB] border border-[#4CD964]/40 rounded-2xl p-4 flex items-center justify-between gap-4"
+      >
+        <div>
+          <p class="text-sm font-semibold text-[#1C1C1E]">
+            🎁 You have {@pending_credits} Wool Credit{if @pending_credits == 1, do: "", else: "s"}!
+            Each is worth 1 free month of FunSheep.
+          </p>
+          <p class="text-xs text-[#8E8E93] mt-0.5">
+            Redeem now to unlock unlimited tests.
+          </p>
+        </div>
+        <button
+          phx-click="redeem_credits"
+          disabled={@redeem_loading}
+          class="shrink-0 bg-[#4CD964] hover:bg-[#3DBF55] disabled:opacity-40 text-white font-medium px-4 py-2 rounded-full shadow-md transition-colors text-sm"
+        >
+          {if @redeem_loading,
+            do: "Redeeming…",
+            else: "Redeem #{@pending_credits} credit#{if @pending_credits == 1, do: "", else: "s"} — unlock unlimited tests"}
+        </button>
+      </div>
+
       <%!-- §4.7 — When the parent arrives via an accept link, surface the
            "who pays" context at the top of the page. --%>
       <div

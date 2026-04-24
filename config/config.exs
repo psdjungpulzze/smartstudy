@@ -85,7 +85,10 @@ config :fun_sheep, Oban,
        # Nightly at 03:00 UTC — audit every ready course's
        # (chapter, difficulty) coverage and enqueue generation for
        # tuples below target. Phase 6 demand-driven supply loop.
-       {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker}
+       {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker},
+       # Sunday 23:55 UTC — compute weekly shout out winners so they are
+       # ready for the Monday leaderboard. Keep in sync with runtime.exs.
+       {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker}
      ]}
   ],
   queues: [

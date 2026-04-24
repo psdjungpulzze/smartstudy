@@ -63,6 +63,11 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
         # verified kind, not the user label (Phase 2 guardrail).
         FunSheep.Workers.MaterialClassificationWorker.enqueue(material_id)
 
+        # Award Wool Credits to the teacher who uploaded this material.
+        %{"uploaded_material_id" => material_id}
+        |> FunSheep.Workers.CreditMaterialUploadWorker.new()
+        |> Oban.insert()
+
         advance_course(course_id)
         :ok
 

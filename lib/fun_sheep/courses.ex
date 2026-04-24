@@ -145,6 +145,54 @@ defmodule FunSheep.Courses do
   end
 
   @doc """
+  Lists courses for a specific school and grade, with optional adjacent-grade
+  fallback (±1 grade). Used by the student onboarding wizard.
+  """
+  def list_courses_for_student(school_id, grade, opts \\ []) do
+    adjacent = Keyword.get(opts, :adjacent_grades, true)
+    limit = Keyword.get(opts, :limit, 50)
+
+    grade_list =
+      if adjacent do
+        nearby_grades(grade)
+      else
+        [grade]
+      end
+
+    from(c in Course,
+      where: c.school_id == ^school_id and c.grade in ^grade_list,
+      order_by: [asc: c.subject, asc: c.name],
+      limit: ^limit,
+      preload: [:chapters]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists courses by grade across all schools. Used as a fallback when the
+  student's school has no courses yet.
+  """
+  def list_courses_by_grade(grade, opts \\ []) do
+    adjacent = Keyword.get(opts, :adjacent_grades, true)
+    limit = Keyword.get(opts, :limit, 50)
+
+    grade_list =
+      if adjacent do
+        nearby_grades(grade)
+      else
+        [grade]
+      end
+
+    from(c in Course,
+      where: c.grade in ^grade_list,
+      order_by: [asc: c.subject, asc: c.name],
+      limit: ^limit,
+      preload: [:chapters]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Lists courses created by or associated with a user role.
   """
   def list_courses_for_user(nil), do: []
