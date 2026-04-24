@@ -2,10 +2,9 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
   @moduledoc """
   Oban worker that verifies whether an uploaded textbook is _complete_.
 
-  It reads the OCR text extracted from a `:textbook` material, asks the
-  configured Interactor AI assistant (`textbook_completeness`) to extract
-  the table of contents, and estimate how much of that TOC is actually
-  present in the file.
+  It reads the OCR text extracted from a `:textbook` material, calls the
+  LLM to extract the table of contents, and estimates how much of that
+  TOC is actually present in the file.
 
   The AI's response is parsed as JSON with this shape:
 
@@ -20,8 +19,8 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
   `completeness_score`, `completeness_notes`, `toc_detected`, and
   `completeness_checked_at`.
 
-  Per project policy we never fabricate a score. If the assistant is
-  unavailable, the response is unparseable, or OCR text is missing, the
+  Per project policy we never fabricate a score. If the LLM call
+  fails, the response is unparseable, or OCR text is missing, the
   worker logs the failure and leaves `completeness_score` as `nil` so the
   UI can flag the material honestly.
   """
@@ -30,7 +29,6 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
 
   alias FunSheep.{Content, Courses, Repo}
   alias FunSheep.Content.{OcrPage, UploadedMaterial}
-  alias FunSheep.Interactor.Agents
 
   import Ecto.Query
   require Logger
@@ -38,7 +36,31 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
   # Keep the prompt inside typical LLM context windows. 60k chars is roughly
   # 15k tokens — enough for a TOC and a generous sample of content.
   @max_chars 60_000
-  @assistant_name "textbook_completeness"
+
+  @system_prompt """
+  You are validating whether a piece of text represents a COMPLETE textbook.
+
+  Instructions:
+  1. Identify a table of contents (TOC) if present.
+  2. Estimate what fraction of the TOC chapters have real content (not just
+     an entry). A complete textbook has all listed chapters covered in the body.
+  3. Respond with ONLY a JSON object — no markdown, no commentary — with
+     these keys:
+       - "toc_detected": boolean. True if a TOC was found.
+       - "chapters": list of detected chapter titles (may be empty).
+       - "coverage_score": number between 0.0 and 1.0. 1.0 = every TOC
+         chapter has substantive content present; 0.0 = nothing matches.
+         If no TOC can be found, use your best judgement based on overall
+         structure (heading frequency, narrative completeness).
+       - "notes": short human-readable explanation (1–3 sentences).
+  """
+
+  @llm_opts %{
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1_024,
+    temperature: 0.0,
+    source: "textbook_completeness_worker"
+  }
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"material_id" => material_id}}) do
@@ -91,18 +113,15 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
       :ok
     else
       course = if material.course_id, do: Courses.get_course!(material.course_id), else: nil
-      prompt = build_prompt(material, course, text)
+      user_prompt = build_user_prompt(material, course, text)
 
-      case Agents.chat(@assistant_name, prompt, %{
-             source: "textbook_completeness_worker",
-             metadata: %{material_id: material.id}
-           }) do
+      case ai_client().call(@system_prompt, user_prompt, @llm_opts) do
         {:ok, response} ->
           persist_result(material, response)
 
         {:error, reason} ->
           Logger.error(
-            "[Completeness] Assistant call failed for material #{material.id}: #{inspect(reason)}"
+            "[Completeness] LLM call failed for material #{material.id}: #{inspect(reason)}"
           )
 
           {:ok, _} =
@@ -141,7 +160,7 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
 
       {:error, reason} ->
         Logger.error(
-          "[Completeness] Could not parse assistant response for #{material.id}: #{inspect(reason)}; raw=#{String.slice(response, 0, 500)}"
+          "[Completeness] Could not parse LLM response for #{material.id}: #{inspect(reason)}; raw=#{String.slice(response, 0, 500)}"
         )
 
         {:ok, _} =
@@ -179,7 +198,7 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
     head <> "\n\n---[truncated middle]---\n\n" <> tail
   end
 
-  defp build_prompt(material, course, text) do
+  defp build_user_prompt(material, course, text) do
     course_context =
       case course do
         nil -> "Unknown course."
@@ -187,25 +206,8 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
       end
 
     """
-    You are validating whether the following text represents a COMPLETE textbook.
-
     #{course_context}
     File name: #{material.file_name}
-
-    Instructions:
-    1. Identify a table of contents (TOC) if present.
-    2. Estimate what fraction of the TOC chapters have real content (not just
-       an entry). A complete textbook has all listed chapters covered in the
-       body.
-    3. Respond with ONLY a JSON object — no markdown, no commentary — with
-       these keys:
-         - "toc_detected": boolean. True if a TOC was found.
-         - "chapters": list of detected chapter titles (may be empty).
-         - "coverage_score": number between 0.0 and 1.0. 1.0 = every TOC
-           chapter has substantive content present; 0.0 = nothing matches.
-           If no TOC can be found, use your best judgement based on overall
-           structure (heading frequency, narrative completeness).
-         - "notes": short human-readable explanation (1–3 sentences).
 
     Text (possibly truncated):
     ---
@@ -274,9 +276,9 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
     )
   end
 
-  defp format_reason({:assistant_not_found, name}),
-    do: "assistant '#{name}' is not configured on Interactor"
-
   defp format_reason(:timeout), do: "the AI request timed out"
+  defp format_reason(:rate_limited), do: "the AI service is rate limited"
   defp format_reason(other), do: inspect(other)
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

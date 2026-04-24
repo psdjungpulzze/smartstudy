@@ -2,15 +2,14 @@ defmodule FunSheep.Questions.FreeformGrader do
   @moduledoc """
   AI-powered grader for `short_answer` and `free_response` question types.
 
-  Uses Interactor to evaluate whether a student's answer is semantically
-  correct, even when worded differently from the stored reference answer.
-  Falls back to exact string match if the AI call fails, so a grading
-  result is always returned.
+  Calls the LLM directly to evaluate whether a student's answer is
+  semantically correct, even when worded differently from the stored
+  reference answer. Falls back to exact string match if the AI call
+  fails, so a grading result is always returned.
   """
 
   @behaviour FunSheep.Interactor.AssistantSpec
 
-  alias FunSheep.Interactor.Agents
   alias FunSheep.Questions.Grading
 
   require Logger
@@ -24,6 +23,13 @@ defmodule FunSheep.Questions.FreeformGrader do
 
   Be generous with scientific equivalents and paraphrasing. Be strict about factual errors or answers that miss the core concept entirely.
   """
+
+  @llm_opts %{
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 256,
+    temperature: 0.1,
+    source: "freeform_grader"
+  }
 
   @impl FunSheep.Interactor.AssistantSpec
   def assistant_attrs do
@@ -43,19 +49,28 @@ defmodule FunSheep.Questions.FreeformGrader do
 
   Returns `{:ok, %{correct: boolean(), feedback: String.t() | nil}}`.
 
-  On any Interactor or parsing failure, falls back to exact string match
+  On any LLM or parsing failure, falls back to exact string match
   and returns `{:ok, %{correct: boolean(), feedback: nil}}`.
   """
   @spec grade(map() | struct(), String.t()) ::
           {:ok, %{correct: boolean(), feedback: String.t() | nil}}
   def grade(question, student_answer) do
-    with {:ok, _assistant_id} <- ensure_assistant(),
-         prompt <- build_prompt(question, student_answer),
-         {:ok, response_text} <-
-           Agents.chat(@assistant_name, prompt, %{source: "freeform_grader"}),
-         {:ok, result} <- parse_response(response_text) do
-      {:ok, result}
-    else
+    prompt = build_prompt(question, student_answer)
+
+    case ai_client().call(@system_prompt, prompt, @llm_opts) do
+      {:ok, response_text} ->
+        case parse_response(response_text) do
+          {:ok, result} ->
+            {:ok, result}
+
+          {:error, reason} ->
+            Logger.warning(
+              "[FreeformGrader] Failed to parse AI response, falling back to exact match: #{inspect(reason)}"
+            )
+
+            {:ok, %{correct: Grading.correct?(question, student_answer), feedback: nil}}
+        end
+
       {:error, reason} ->
         Logger.error(
           "[FreeformGrader] AI grading failed, falling back to exact match: #{inspect(reason)}"
@@ -63,10 +78,6 @@ defmodule FunSheep.Questions.FreeformGrader do
 
         {:ok, %{correct: Grading.correct?(question, student_answer), feedback: nil}}
     end
-  end
-
-  defp ensure_assistant do
-    Agents.resolve_or_create_assistant(assistant_attrs())
   end
 
   defp build_prompt(question, student_answer) do
@@ -114,4 +125,6 @@ defmodule FunSheep.Questions.FreeformGrader do
     |> String.replace(~r/\n?```$/, "")
     |> String.trim()
   end
+
+  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end
