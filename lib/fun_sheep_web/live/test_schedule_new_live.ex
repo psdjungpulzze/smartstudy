@@ -362,7 +362,9 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       <div class="bg-white rounded-2xl shadow-md p-8">
         <form phx-submit="save" phx-change="update_form" class="space-y-6">
           <div>
-            <label for="test-name" class="block text-sm font-medium text-[#1C1C1E] mb-2">Test Name</label>
+            <label for="test-name" class="block text-sm font-medium text-[#1C1C1E] mb-2">
+              Test Name
+            </label>
             <input
               id="test-name"
               type="text"
@@ -375,7 +377,9 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           </div>
 
           <div>
-            <label for="test-date" class="block text-sm font-medium text-[#1C1C1E] mb-2">Test Date</label>
+            <label for="test-date" class="block text-sm font-medium text-[#1C1C1E] mb-2">
+              Test Date
+            </label>
             <input
               id="test-date"
               type="date"
@@ -511,7 +515,7 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           <textarea
             name="format_description"
             rows="5"
-            placeholder={"e.g.\n20 MC (30 min)\nFRQ: 1 long - 7pts, 3 - 3pt questions (35 min)"}
+            placeholder="e.g.\n20 MC (30 min)\nFRQ: 1 long - 7pts, 3 - 3pt questions (35 min)"
             class="w-full px-4 py-3 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-2xl outline-none transition-colors text-sm font-mono resize-none"
           >{@format_description}</textarea>
         </form>

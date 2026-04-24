@@ -33,7 +33,11 @@ defmodule FunSheepWeb.AssessmentLive do
         socket =
           if cached.phase == :testing and is_nil(cached[:engine_state]) do
             state = Engine.start_assessment(schedule)
-            socket |> assign(engine_state: state) |> advance_to_next_question() |> save_state_to_cache()
+
+            socket
+            |> assign(engine_state: state)
+            |> advance_to_next_question()
+            |> save_state_to_cache()
           else
             socket
           end
@@ -53,7 +57,11 @@ defmodule FunSheepWeb.AssessmentLive do
               cond do
                 persisted.phase == :testing and is_nil(persisted[:engine_state]) ->
                   state = Engine.start_assessment(schedule)
-                  socket |> assign(engine_state: state) |> advance_to_next_question() |> save_state_to_cache()
+
+                  socket
+                  |> assign(engine_state: state)
+                  |> advance_to_next_question()
+                  |> save_state_to_cache()
 
                 persisted.phase == :testing and is_nil(persisted[:current_question]) ->
                   socket |> advance_to_next_question() |> save_state_to_cache()

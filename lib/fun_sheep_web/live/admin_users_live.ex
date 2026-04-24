@@ -183,7 +183,12 @@ defmodule FunSheepWeb.AdminUsersLive do
         stats = Billing.usage_stats(target.id)
         {:ok, sub} = Billing.get_or_create_subscription(target.id)
 
-        updated = %{editing | used: stats.total_tests, limit: stats.initial_limit, bonus: sub.bonus_free_tests || 0}
+        updated = %{
+          editing
+          | used: stats.total_tests,
+            limit: stats.initial_limit,
+            bonus: sub.bonus_free_tests || 0
+        }
 
         {:noreply,
          socket
@@ -462,11 +467,15 @@ defmodule FunSheepWeb.AdminUsersLive do
         <div class="bg-[#F5F5F7] rounded-xl p-3 text-sm text-[#1C1C1E] mb-4">
           Used <span class="font-semibold">{@editing.used}</span>
           of <span class="font-semibold">{@editing.limit}</span>
-          lifetime free lessons
-          <span class="text-[#8E8E93]">(50 base + {@editing.bonus} bonus)</span>
+          lifetime free lessons <span class="text-[#8E8E93]">(50 base + {@editing.bonus} bonus)</span>
         </div>
 
-        <.form for={%{}} phx-submit="save_subscription" phx-change="preview_subscription" class="space-y-4">
+        <.form
+          for={%{}}
+          phx-submit="save_subscription"
+          phx-change="preview_subscription"
+          class="space-y-4"
+        >
           <div>
             <label class="block text-sm font-medium text-[#1C1C1E] mb-2">Plan</label>
             <div class="flex gap-2">
