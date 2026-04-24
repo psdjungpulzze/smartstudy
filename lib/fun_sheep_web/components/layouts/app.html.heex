@@ -99,6 +99,78 @@
         <span class="text-[10px] text-amber-400 font-medium">FP</span>
       </button>
 
+      <%!-- Notification Bell --%>
+      <div class="relative" phx-click-away={JS.hide(to: "#notification-panel")}>
+        <button
+          type="button"
+          phx-click={JS.toggle(to: "#notification-panel")}
+          class="relative w-9 h-9 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors touch-target"
+          aria-label={"Notifications#{if (assigns[:notification_count] || 0) > 0, do: ": #{assigns[:notification_count]} unread", else: ""}"}
+        >
+          <.icon name="hero-bell" class="w-5 h-5" />
+          <%= if (assigns[:notification_count] || 0) > 0 do %>
+            <span class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[#FF3B30] text-white text-[10px] font-bold leading-4 text-center">
+              {min(assigns[:notification_count], 99)}
+            </span>
+          <% end %>
+        </button>
+
+        <%!-- Notification Panel Dropdown --%>
+        <div
+          id="notification-panel"
+          class="hidden absolute right-0 top-11 w-80 max-w-[calc(100vw-1rem)] bg-white rounded-2xl shadow-lg border border-gray-100 z-50 overflow-hidden"
+        >
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <span class="text-sm font-bold text-gray-900">Notifications</span>
+            <%= if (assigns[:notification_count] || 0) > 0 do %>
+              <button
+                type="button"
+                phx-click="mark_all_notifications_read"
+                class="text-xs text-[#4CD964] font-medium hover:underline"
+              >
+                Mark all read
+              </button>
+            <% end %>
+          </div>
+
+          <div class="max-h-96 overflow-y-auto">
+            <%= if Enum.empty?(assigns[:notifications] || []) do %>
+              <div class="flex flex-col items-center justify-center py-10 gap-2 text-gray-400">
+                <.icon name="hero-bell-slash" class="w-8 h-8" />
+                <span class="text-sm">No new notifications</span>
+              </div>
+            <% else %>
+              <%= for notif <- (assigns[:notifications] || []) do %>
+                <div
+                  class={[
+                    "flex items-start gap-3 px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer",
+                    if(is_nil(notif.read_at), do: "bg-green-50/40", else: "")
+                  ]}
+                  phx-click="mark_notification_read"
+                  phx-value-id={notif.id}
+                >
+                  <span class="text-lg leading-none mt-0.5 shrink-0">
+                    {notification_icon(notif.type)}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <%= if notif.title do %>
+                      <p class="text-xs font-semibold text-gray-900 truncate">{notif.title}</p>
+                    <% end %>
+                    <p class="text-xs text-gray-600 leading-snug">{notif.body}</p>
+                    <p class="text-[10px] text-gray-400 mt-1">
+                      {Calendar.strftime(notif.inserted_at, "%b %-d, %-I:%M %p")}
+                    </p>
+                  </div>
+                  <%= if is_nil(notif.read_at) do %>
+                    <span class="w-2 h-2 rounded-full bg-[#4CD964] shrink-0 mt-1.5"></span>
+                  <% end %>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      </div>
+
       <%!-- Avatar + Dropdown --%>
       <div class="relative" phx-click-away={JS.hide(to: "#profile-dropdown")}>
         <button

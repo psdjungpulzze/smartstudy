@@ -6,7 +6,7 @@ defmodule FunSheepWeb.LiveHelpers do
   import Phoenix.LiveView
   import Phoenix.Component
 
-  alias FunSheep.{Accounts, Learning, Tutorials}
+  alias FunSheep.{Accounts, Learning, Notifications, Tutorials}
 
   def on_mount(:require_auth, _params, session, socket) do
     case get_user_from_session(session) do
@@ -22,8 +22,10 @@ defmodule FunSheepWeb.LiveHelpers do
 
           {:halt, socket}
         else
-          {streak_count, total_xp, due_reviews} = load_gamification_stats(user["user_role_id"])
+          user_role_id = user["user_role_id"]
+          {streak_count, total_xp, due_reviews} = load_gamification_stats(user_role_id)
           profile_gaps = compute_profile_gaps(user)
+          {notifications, notification_count} = load_notifications(user_role_id)
 
           socket =
             socket
@@ -34,6 +36,8 @@ defmodule FunSheepWeb.LiveHelpers do
             |> assign(:total_xp, total_xp)
             |> assign(:due_reviews, due_reviews)
             |> assign(:profile_gaps, profile_gaps)
+            |> assign(:notifications, notifications)
+            |> assign(:notification_count, notification_count)
             |> assign(:streak_summary, nil)
             |> assign(:fp_summary, nil)
             |> assign(:impersonation, impersonation)
@@ -45,6 +49,16 @@ defmodule FunSheepWeb.LiveHelpers do
               :handle_event,
               &handle_gamification_event/3
             )
+            |> attach_hook(:notification_events, :handle_event, &handle_notification_event/3)
+            |> attach_hook(:notification_pubsub, :handle_info, &handle_notification_info/2)
+            |> then(fn s ->
+              if connected?(s) do
+                Phoenix.PubSub.subscribe(FunSheep.PubSub, Notifications.topic(user_role_id))
+                s
+              else
+                s
+              end
+            end)
             |> assign(:show_tutorial, false)
             |> assign(:tutorial_config, nil)
 
@@ -349,6 +363,51 @@ defmodule FunSheepWeb.LiveHelpers do
   end
 
   defp valid_uuid?(_), do: false
+
+  defp handle_notification_info({:new_notifications, new_notifs}, socket) do
+    existing = socket.assigns[:notifications] || []
+    merged = (new_notifs ++ existing) |> Enum.uniq_by(& &1.id) |> Enum.take(50)
+    {:halt, assign(socket, notifications: merged, notification_count: length(merged))}
+  end
+
+  defp handle_notification_info(_msg, socket), do: {:cont, socket}
+
+  defp handle_notification_event("mark_notification_read", %{"id" => id}, socket) do
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+
+    if valid_uuid?(user_role_id) and valid_uuid?(id) do
+      Notifications.mark_read(user_role_id, id)
+      {notifications, count} = load_notifications(user_role_id)
+      {:halt, assign(socket, notifications: notifications, notification_count: count)}
+    else
+      {:cont, socket}
+    end
+  end
+
+  defp handle_notification_event("mark_all_notifications_read", _params, socket) do
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+
+    if valid_uuid?(user_role_id) do
+      Notifications.mark_all_read(user_role_id)
+      {notifications, count} = load_notifications(user_role_id)
+      {:halt, assign(socket, notifications: notifications, notification_count: count)}
+    else
+      {:cont, socket}
+    end
+  end
+
+  defp handle_notification_event(_event, _params, socket), do: {:cont, socket}
+
+  defp load_notifications(user_role_id) do
+    case Ecto.UUID.cast(user_role_id || "") do
+      {:ok, _} ->
+        notifications = Notifications.list_in_app_unread(user_role_id)
+        {notifications, length(notifications)}
+
+      :error ->
+        {[], 0}
+    end
+  end
 
   defp load_gamification_stats(user_role_id) do
     case Ecto.UUID.cast(user_role_id) do

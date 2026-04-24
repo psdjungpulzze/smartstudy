@@ -91,7 +91,13 @@ config :fun_sheep, Oban,
        {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker},
        # Nightly at 03:30 UTC — mark courses with 0 attempts and
        # no quality update in 90+ days as dormant (visibility_state: "reduced").
-       {"30 3 * * *", FunSheep.Workers.MarkDormantContentWorker}
+       {"30 3 * * *", FunSheep.Workers.MarkDormantContentWorker},
+       # Every 2 hours — find students with an active streak who haven't
+       # studied today and nudge them before midnight resets their streak.
+       {"0 */2 * * *", FunSheep.Workers.StreakAtRiskWorker},
+       # Daily at 08:00 UTC — send T-3 and T-1 countdown alerts to students
+       # and their guardians for upcoming test schedules.
+       {"0 8 * * *", FunSheep.Workers.TestUpcomingWorker}
      ]}
   ],
   queues: [
