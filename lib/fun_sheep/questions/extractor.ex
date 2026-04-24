@@ -302,21 +302,5 @@ defmodule FunSheep.Questions.Extractor do
   defp answer_ok?(%{answer: a}) when is_binary(a) and a != "", do: true
   defp answer_ok?(_), do: false
 
-  @behaviour FunSheep.Interactor.AssistantSpec
-
-  @impl FunSheep.Interactor.AssistantSpec
-  def assistant_attrs do
-    %{
-      name: "question_extract",
-      description:
-        "Extracts practice questions from course material text or scraped web content. Returns a JSON array with stem, answer, options, difficulty, explanation. Skips answer keys, prose, and truncated fragments.",
-      system_prompt: @system_prompt,
-      llm_provider: "openai",
-      llm_model: "gpt-4o-mini",
-      llm_config: %{temperature: 0.1, max_tokens: 2000},
-      metadata: %{app: "funsheep", role: "question_extractor"}
-    }
-  end
-
   defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

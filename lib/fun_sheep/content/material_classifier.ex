@@ -209,27 +209,10 @@ defmodule FunSheep.Content.MaterialClassifier do
   defp normalize_confidence(c) when is_number(c) and c >= 0 and c <= 100, do: {:ok, c / 100.0}
   defp normalize_confidence(_), do: {:error, :bad_confidence}
 
-  @behaviour FunSheep.Interactor.AssistantSpec
-
   # Configurable impl so tests can stub the LLM round-trip.
   # Production resolves to `FunSheep.AI.Client`; tests set this
   # via `Application.put_env(:fun_sheep, :ai_client_impl, Mock)`.
   defp ai_client do
     Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
-  end
-
-  @impl FunSheep.Interactor.AssistantSpec
-  def assistant_attrs do
-    %{
-      name: "material_content_classifier",
-      description:
-        "Classifies uploaded course material (OCR text or scraped web content) into question_bank / answer_key / knowledge_content / mixed / unusable. Returns JSON with kind + confidence.",
-      system_prompt:
-        "You are a content classifier for an educational platform. Read the excerpt and decide the single best category. Be especially careful to distinguish answer_key (only letters/indices, no question stems) from question_bank — mis-routing an answer key as questions produces garbage content. When unsure, return lower confidence rather than guessing.",
-      llm_provider: "openai",
-      llm_model: "gpt-4o-mini",
-      llm_config: %{temperature: 0.0, max_tokens: 200},
-      metadata: %{app: "funsheep", role: "material_classifier"}
-    }
   end
 end

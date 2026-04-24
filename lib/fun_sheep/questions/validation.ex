@@ -181,30 +181,6 @@ defmodule FunSheep.Questions.Validation do
 
   defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 
-  @behaviour FunSheep.Interactor.AssistantSpec
-
-  @doc """
-  Configuration used to register the `question_quality_reviewer` assistant on
-  Interactor. Exposed for scripts/preflight checks.
-  """
-  @impl FunSheep.Interactor.AssistantSpec
-  def assistant_attrs do
-    %{
-      name: @assistant_name,
-      description:
-        "Validates generated questions across topic relevance, completeness, categorization, answer correctness, and explanation quality.",
-      system_prompt: @assistant_system_prompt,
-      llm_provider: "openai",
-      llm_model: "gpt-4o-mini",
-      # 2000 tokens truncated 5+ question verdicts mid-stream and produced
-      # bare `[` responses. 8000 fits a 5-question batch comfortably with
-      # full reasons + suggested explanations. Keep paired with the smaller
-      # batch size in QuestionValidationWorker.
-      llm_config: %{temperature: 0.1, max_tokens: 8000},
-      metadata: %{app: "funsheep", role: "question_validator"}
-    }
-  end
-
   # --- Prompt building ---
 
   defp load_course(course_id) do

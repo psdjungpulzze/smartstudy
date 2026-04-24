@@ -311,26 +311,5 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     )
   end
 
-  @behaviour FunSheep.Interactor.AssistantSpec
-
-  @doc """
-  Configuration used to register the `#{@assistant_name}` assistant on
-  Interactor. Exposed for scripts/preflight checks.
-  """
-  @impl FunSheep.Interactor.AssistantSpec
-  def assistant_attrs do
-    %{
-      name: @assistant_name,
-      description:
-        "Classifies a question into one of a chapter's existing sections (skill tag). Returns a JSON verdict with section_id and confidence.",
-      system_prompt:
-        "You are a curriculum skill tagger. Given a question and the list of sections in its chapter, pick the single best existing section. If nothing fits, return null and propose a name. Always return a low confidence when unsure.",
-      llm_provider: "openai",
-      llm_model: "gpt-4o-mini",
-      llm_config: %{temperature: 0.1, max_tokens: 400},
-      metadata: %{app: "funsheep", role: "question_classifier"}
-    }
-  end
-
   defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

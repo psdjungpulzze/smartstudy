@@ -36,22 +36,13 @@ fail() { echo "${RED}[fail]${NC} $*" >&2; exit 1; }
 ENV_FILE="$ROOT/.env.prod"
 AUTO_YES=0
 SKIP_GIT_CHECK=0
-SKIP_PROVISION=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes|-y)        AUTO_YES=1 ;;
     --env-file)      shift; ENV_FILE="$1" ;;
     --skip-git-check) SKIP_GIT_CHECK=1 ;;
-    # --skip-provision: bypass `mix funsheep.interactor.provision_assistants`.
-    # Use ONLY when the Interactor assistants API is returning 5xx on every
-    # call AND the assistants being registered are already live from a prior
-    # successful deploy (they are cached on the Cloud Run runtime via
-    # :persistent_term). The verify step that follows will still confirm all
-    # 6 names are resolvable before Cloud Run is touched. Do NOT use this to
-    # ship a newly-added AssistantSpec — that would leave the runtime without
-    # an assistant id and the worker would log :assistant_not_found forever.
-    --skip-provision) SKIP_PROVISION=1 ;;
+    --skip-provision) warn "--skip-provision is deprecated (provisioning removed); ignoring" ;;
     -h|--help)
       sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
@@ -113,36 +104,6 @@ set -a
 # shellcheck source=/dev/null
 source "$ENV_FILE"
 set +a
-
-# --- Provision Interactor assistants ------------------------------------
-# Every module implementing FunSheep.Interactor.AssistantSpec gets
-# resolve-or-create'd against the Interactor pointed at by the loaded env.
-# Idempotent: existing assistants resolve to their current id. Required
-# whenever an AssistantSpec is renamed or added — otherwise the verify
-# step below would fail, and at runtime the worker would log
-# `:assistant_not_found` for every call until a human clicked through
-# the Interactor admin UI.
-if [ "$SKIP_PROVISION" -eq 1 ]; then
-  warn "Skipping assistant provisioning (--skip-provision). Cloud Run runtime will resolve existing assistants from Interactor on first use."
-else
-  info "Provisioning Interactor assistants..."
-  mix funsheep.interactor.provision_assistants \
-    || fail "Assistant provisioning failed — fix the issues above before deploying. Pass --skip-provision if the assistants are already live and Interactor's provisioning API is down."
-fi
-
-# --- Verify Interactor configuration ------------------------------------
-# Runs only after provisioning so freshly-renamed assistants are already
-# present. Also checks JWKS reachability and OAuth token flow. Skipped
-# under --skip-provision because both calls share the same assistants
-# endpoint — if provision is skipped due to outage, verify is unreachable
-# too.
-if [ "$SKIP_PROVISION" -eq 1 ]; then
-  warn "Skipping Interactor verification (paired with --skip-provision)."
-else
-  info "Verifying Interactor configuration..."
-  "$ROOT/scripts/deploy/verify-interactor.sh" "$ENV_FILE" \
-    || fail "Interactor verification failed — fix the issues above before deploying."
-fi
 
 # --- gcloud checks -------------------------------------------------------
 command -v gcloud >/dev/null 2>&1 || fail "gcloud CLI not installed."
