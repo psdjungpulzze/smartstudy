@@ -74,7 +74,9 @@ defmodule FunSheep.Assessments.FormatParser do
     case ai_client().call(@system_prompt, format_text, @llm_opts) do
       {:ok, response} ->
         case decode_response(response) do
-          {:ok, parsed} -> {:ok, parsed}
+          {:ok, parsed} ->
+            {:ok, parsed}
+
           {:error, reason} ->
             Logger.error("[FormatParser] Failed to decode response: #{inspect(reason)}")
             {:error, reason}
