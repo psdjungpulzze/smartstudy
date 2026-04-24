@@ -29,6 +29,7 @@ defmodule FunSheepWeb.Components.AdminSidebar do
         %{label: "Users", path: "/admin/users", icon: "👥"},
         %{label: "Courses", path: "/admin/courses", icon: "📚"},
         %{label: "Materials", path: "/admin/materials", icon: "📖"},
+        %{label: "Source health", path: "/admin/source-health", icon: "📊"},
         %{label: "Question review", path: "/admin/questions/review", icon: "📝"},
         %{label: "Schools / geo", path: "/admin/geo", icon: "🌍"}
       ]
