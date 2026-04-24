@@ -438,6 +438,8 @@ defmodule FunSheepWeb.QuickPracticeLive do
 
   def handle_info({:tutor_response, _response}, socket), do: {:noreply, socket}
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   # ── Private helpers ──
 
   defp advance_to_next_card(socket) do

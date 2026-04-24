@@ -116,6 +116,8 @@ defmodule FunSheepWeb.FormatTestLive do
     end
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   @impl true
   def handle_event("select_answer", %{"answer" => answer}, socket) do
     {:noreply, assign(socket, selected_answer: answer)}

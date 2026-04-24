@@ -197,6 +197,8 @@ defmodule FunSheepWeb.StudyGuideLive do
     {:noreply, socket}
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   # --- Helpers ---
 
   defp find_question(sections, question_id) do

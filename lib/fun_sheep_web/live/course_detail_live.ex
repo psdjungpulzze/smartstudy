@@ -230,6 +230,21 @@ defmodule FunSheepWeb.CourseDetailLive do
      )}
   end
 
+  def handle_info({:questions_ready, _data}, socket) do
+    course = Courses.get_course_with_chapters!(socket.assigns.course.id)
+    question_count = Questions.count_questions_by_course(course.id)
+    validation_counts = Questions.count_by_validation_status(course.id)
+
+    {:noreply,
+     assign(socket,
+       course: course,
+       question_count: question_count,
+       validation_counts: validation_counts
+     )}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   # ── Processing events ──────────────────────────────────────────────────
 
   def handle_event("toc_approve", _params, socket) do

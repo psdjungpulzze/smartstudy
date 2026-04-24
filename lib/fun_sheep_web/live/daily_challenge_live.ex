@@ -71,27 +71,33 @@ defmodule FunSheepWeb.DailyChallengeLive do
       {:ok, attempt} ->
         questions =
           challenge.question_ids
-          |> Enum.map(&Questions.get_question!/1)
+          |> Enum.map(&Questions.get_question/1)
+          |> Enum.reject(&is_nil/1)
 
-        [first | _rest] = questions
-        timer_ref = Process.send_after(self(), :tick, 1_000)
+        case questions do
+          [] ->
+            {:noreply, put_flash(socket, :error, "Challenge questions are not available right now. Please try again later.")}
 
-        socket =
-          socket
-          |> assign(
-            phase: :question,
-            attempt: attempt,
-            questions: questions,
-            current_question: first,
-            current_index: 0,
-            selected_answer: nil,
-            feedback: nil,
-            answers: [],
-            elapsed_seconds: 0,
-            timer_ref: timer_ref
-          )
+          [first | _rest] ->
+            timer_ref = Process.send_after(self(), :tick, 1_000)
 
-        {:noreply, socket}
+            socket =
+              socket
+              |> assign(
+                phase: :question,
+                attempt: attempt,
+                questions: questions,
+                current_question: first,
+                current_index: 0,
+                selected_answer: nil,
+                feedback: nil,
+                answers: [],
+                elapsed_seconds: 0,
+                timer_ref: timer_ref
+              )
+
+            {:noreply, socket}
+        end
 
       {:error, :already_attempted} ->
         {:noreply, put_flash(socket, :error, "You've already completed today's challenge!")}
@@ -172,6 +178,8 @@ defmodule FunSheepWeb.DailyChallengeLive do
       {:noreply, socket}
     end
   end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   # ── Private Helpers ─────────────────────────────────────────────────────────
 

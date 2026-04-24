@@ -218,6 +218,8 @@ defmodule FunSheepWeb.TestFormatLive do
     end
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   # ── Render ────────────────────────────────────────────────────────────────
 
   @impl true

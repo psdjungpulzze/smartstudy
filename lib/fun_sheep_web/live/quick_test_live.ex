@@ -365,6 +365,8 @@ defmodule FunSheepWeb.QuickTestLive do
     {:noreply, socket}
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   defp ensure_tutor_session(socket) do
     if socket.assigns.tutor_session_id do
       socket
