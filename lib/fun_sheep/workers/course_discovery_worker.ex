@@ -10,7 +10,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
   triggers question extraction.
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 2
+  use Oban.Worker, queue: :course_setup, max_attempts: 2
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Courses.{Chapter, Section}

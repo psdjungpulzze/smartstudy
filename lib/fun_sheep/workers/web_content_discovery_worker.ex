@@ -16,7 +16,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
   processed by the WebQuestionScraperWorker.
   """
 
-  use Oban.Worker, queue: :ai, max_attempts: 2
+  use Oban.Worker, queue: :course_setup, max_attempts: 2
 
   alias FunSheep.{Content, Courses}
 

@@ -111,6 +111,11 @@ defmodule FunSheep.Assessments.ReadinessSkillScoringTest do
   end
 
   test "sections with zero attempts are :insufficient_data", ctx do
+    # Each section needs at least one question to be practicable (appear in
+    # skill_scores). Without questions the section lands in empty_section_ids.
+    _q1 = mk_question(ctx.course, ctx.chapter, ctx.sec_strong, :medium, "s0-zero-att")
+    _q2 = mk_question(ctx.course, ctx.chapter, ctx.sec_weak, :medium, "w0-zero-att")
+
     result = ReadinessCalculator.calculate(ctx.user_role.id, ctx.schedule)
     assert result.skill_scores[ctx.sec_strong.id].status == :insufficient_data
     assert result.skill_scores[ctx.sec_weak.id].status == :insufficient_data

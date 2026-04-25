@@ -126,7 +126,11 @@ config :fun_sheep, Oban,
     notifications: 2,
     # EPUB extraction and TOC import. Concurrency of 5 matches the expected
     # throughput of EbookExtractWorker (CPU + ZIP parse, no Vision calls).
-    ebook: 5
+    ebook: 5,
+    # Dedicated queue for new-course setup (WebContentDiscovery + CourseDiscovery).
+    # Isolated from :ai so a generation backlog can't delay new-course setup
+    # (2026-04-24 incident: 1741 generation jobs buried a CourseDiscoveryWorker).
+    course_setup: 2
   ]
 
 # Interactor integration (billing, auth, agents)

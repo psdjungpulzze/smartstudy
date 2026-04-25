@@ -181,8 +181,13 @@ if config_env() == :prod do
   # ai_validation=3 is its own dedicated queue (2026-04-22 incident: generation
   # was saturating :ai with thousands of jobs, starving the validator on the
   # shared queue and freezing the UI).
+  # course_setup=2: WebContentDiscoveryWorker + CourseDiscoveryWorker run here
+  # so a generation backlog on :ai can never delay new-course setup
+  # (2026-04-24 incident: 1741 generation/classification jobs buried a
+  # CourseDiscoveryWorker job and left the course spinning for hours).
   # POOL_SIZE on the worker container must be >= sum of these queues
-  # (default=10 + ocr=8 + ai=2 + ai_validation=3 + pdf_ocr=3 + ingest=1 = 27)
+  # (default=10 + ocr=8 + ai=2 + ai_validation=3 + pdf_ocr=3 + ingest=1
+  #  + integrations=3 + notifications=2 + ebook=5 + course_setup=2 = 39)
   # plus headroom for Lifeline/Pruner plugins and Oban's internal Peer/Notifier.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
@@ -195,7 +200,8 @@ if config_env() == :prod do
         ingest: 1,
         integrations: 3,
         notifications: 2,
-        ebook: 5
+        ebook: 5,
+        course_setup: 2
       ]
     else
       false
