@@ -90,7 +90,7 @@ defmodule FunSheepWeb.CourseSearchLive do
       "school_id" => params["school_id"] || ""
     }
 
-    results = Courses.search_courses(filters)
+    results = Courses.search_courses(filters, socket.assigns.current_user["id"])
 
     {:noreply,
      assign(socket,
