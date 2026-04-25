@@ -91,6 +91,7 @@ defmodule FunSheepWeb.Router do
 
       live "/integrations", IntegrationsLive, :index
 
+      live "/catalog", CatalogLive, :index
       live "/courses", CourseSearchLive, :index
       live "/courses/new", CourseNewLive, :new
       live "/courses/:id/edit", CourseNewLive, :edit
@@ -177,6 +178,7 @@ defmodule FunSheepWeb.Router do
       live "/users", AdminUsersLive, :index
       live "/users/:id", AdminUserDetailLive, :show
       live "/courses", AdminCoursesLive, :index
+      live "/courses/:id/sections", AdminCourseSectionsLive, :index
       live "/materials", AdminMaterialsLive, :index
       live "/source-health", AdminSourceHealthLive, :index
       live "/questions/review", AdminQuestionReviewLive, :index
