@@ -301,16 +301,30 @@ defmodule FunSheepWeb.QuickPracticeLive do
             else: 0
 
         # Defer DB insert until confidence is selected (Phase 2 — collect confidence first)
-        {:noreply,
-         assign(socket,
-           engine_state: new_state,
-           stats: new_stats,
-           feedback: %{is_correct: is_correct, correct_answer: question.answer, grade_result: nil},
-           pending_is_correct: is_correct,
-           pending_answer: answer,
-           card_phase: :feedback,
-           session_streak: new_streak
-         )}
+        socket =
+          socket
+          |> assign(
+            engine_state: new_state,
+            stats: new_stats,
+            feedback: %{
+              is_correct: is_correct,
+              correct_answer: question.answer,
+              grade_result: nil
+            },
+            pending_is_correct: is_correct,
+            pending_answer: answer,
+            card_phase: :feedback,
+            session_streak: new_streak
+          )
+
+        socket =
+          if is_correct do
+            push_event(socket, "confetti_burst", %{})
+          else
+            push_event(socket, "play_sound", %{name: "sheep_wrong"})
+          end
+
+        {:noreply, socket}
       end
     end
   end
@@ -791,13 +805,25 @@ defmodule FunSheepWeb.QuickPracticeLive do
           </span>
         </div>
 
-        <%!-- Progress bar --%>
+        <%!-- Progress bar with walking sheep mascot --%>
         <div :if={!@session_complete} class="px-4 shrink-0">
-          <div class="w-full bg-gray-200 rounded-full h-1">
+          <div
+            id="quick-practice-progress-bar"
+            phx-hook="SheepProgressBar"
+            data-readiness={progress_pct(@question_number, @total_questions)}
+            class="relative w-full bg-gray-200 rounded-full h-2 overflow-visible"
+          >
             <div
-              class="bg-[#4CD964] h-1 rounded-full transition-all duration-300"
+              class="bg-[#4CD964] h-2 rounded-full transition-all duration-300"
               style={"width: #{progress_pct(@question_number, @total_questions)}%"}
             />
+            <div
+              data-sheep
+              class="absolute top-1/2 -translate-y-1/2 pointer-events-none"
+              style="will-change: transform; position: absolute;"
+            >
+              <FunSheepWeb.SheepMascot.sheep_icon size="sm" state="walk" />
+            </div>
           </div>
         </div>
 
@@ -985,7 +1011,9 @@ defmodule FunSheepWeb.QuickPracticeLive do
               @current_question && !@session_complete && @card_phase in [:feedback, :reveal] &&
                 !@grading
             }
-            class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5"
+            id="quick-practice-confetti"
+            phx-hook="ConfettiBurst"
+            class="relative w-full max-w-sm bg-white rounded-2xl shadow-lg p-5 overflow-hidden"
           >
             <%!-- Result banner --%>
             <div

@@ -14,7 +14,7 @@ defmodule FunSheepWeb.AuthController do
   def root(conn, _params) do
     case get_session(conn, :current_user) do
       nil -> redirect(conn, to: ~p"/auth/login")
-      user -> redirect(conn, to: redirect_path_for_role(user["role"]))
+      user -> redirect(conn, to: redirect_path_for_user(user))
     end
   end
 
@@ -69,7 +69,7 @@ defmodule FunSheepWeb.AuthController do
           |> put_session(:user_token, tokens["access_token"])
           |> put_session(:refresh_token, tokens["refresh_token"])
           |> put_session(:current_user, user)
-          |> redirect(to: redirect_path_for_role(user["role"]))
+          |> redirect(to: redirect_path_for_user(user))
 
         {:error, reason} ->
           Logger.error("OAuth token exchange failed: #{inspect(reason)}")
@@ -102,7 +102,7 @@ defmodule FunSheepWeb.AuthController do
     conn
     |> put_session(:user_token, token)
     |> put_session(:current_user, user)
-    |> redirect(to: redirect_path_for_role(user["role"]))
+    |> redirect(to: redirect_path_for_user(user))
   end
 
   def logout(conn, _params) do
@@ -243,6 +243,23 @@ defmodule FunSheepWeb.AuthController do
   defp redirect_path_for_role("teacher"), do: "/teacher"
   defp redirect_path_for_role("admin"), do: "/admin"
   defp redirect_path_for_role(_), do: "/dashboard"
+
+  defp redirect_path_for_user(%{"role" => "student", "user_role_id" => id})
+       when is_binary(id) and id != "" do
+    case FunSheep.Accounts.get_user_role(id) do
+      %FunSheep.Accounts.UserRole{} = user_role ->
+        if FunSheep.Accounts.onboarding_complete?(user_role) do
+          "/dashboard"
+        else
+          "/onboarding/student"
+        end
+
+      _ ->
+        "/dashboard"
+    end
+  end
+
+  defp redirect_path_for_user(%{"role" => role}), do: redirect_path_for_role(role)
 
   defp callback_url(_conn) do
     FunSheepWeb.Endpoint.url() <> "/auth/callback"

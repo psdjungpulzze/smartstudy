@@ -8,7 +8,7 @@ defmodule FunSheep.Courses do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Courses.{Course, Chapter, Section, Textbook}
+  alias FunSheep.Courses.{Course, Chapter, CourseEnrollment, Section, Textbook}
 
   ## Courses
 
@@ -142,6 +142,54 @@ defmodule FunSheep.Courses do
     else
       @grade_order
     end
+  end
+
+  @doc """
+  Lists courses for a specific school and grade, with optional adjacent-grade
+  fallback (±1 grade). Used by the student onboarding wizard.
+  """
+  def list_courses_for_student(school_id, grade, opts \\ []) do
+    adjacent = Keyword.get(opts, :adjacent_grades, true)
+    limit = Keyword.get(opts, :limit, 50)
+
+    grade_list =
+      if adjacent do
+        nearby_grades(grade)
+      else
+        [grade]
+      end
+
+    from(c in Course,
+      where: c.school_id == ^school_id and c.grade in ^grade_list,
+      order_by: [asc: c.subject, asc: c.name],
+      limit: ^limit,
+      preload: [:chapters]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists courses by grade across all schools. Used as a fallback when the
+  student's school has no courses yet.
+  """
+  def list_courses_by_grade(grade, opts \\ []) do
+    adjacent = Keyword.get(opts, :adjacent_grades, true)
+    limit = Keyword.get(opts, :limit, 50)
+
+    grade_list =
+      if adjacent do
+        nearby_grades(grade)
+      else
+        [grade]
+      end
+
+    from(c in Course,
+      where: c.grade in ^grade_list,
+      order_by: [asc: c.subject, asc: c.name],
+      limit: ^limit,
+      preload: [:chapters]
+    )
+    |> Repo.all()
   end
 
   @doc """
@@ -838,5 +886,163 @@ defmodule FunSheep.Courses do
     )
     |> Repo.one()
     |> Kernel.+(1)
+  end
+
+  ## Premium catalog access control
+
+  # Maps access level names to numeric ranks for comparison.
+  # Higher rank = more restrictive (requires higher plan tier).
+  @access_level_ranks %{
+    "public" => 0,
+    "preview" => 1,
+    "standard" => 2,
+    "premium" => 3,
+    "professional" => 4
+  }
+
+  # Maps plan names to the maximum access level rank they unlock.
+  @plan_access_levels %{
+    "free" => 0,
+    "monthly" => 2,
+    "annual" => 2,
+    "premium_monthly" => 3,
+    "premium_annual" => 4,
+    "professional_monthly" => 4,
+    "professional_annual" => 4
+  }
+
+  @doc """
+  Checks whether a user role has access to a given course.
+
+  Returns `:ok` if access is granted, `{:error, :requires_subscription}` if the
+  user needs a higher subscription tier.
+
+  Access logic (in order):
+  1. Public and preview courses are always accessible.
+  2. A valid (non-expired) enrollment grants access regardless of subscription.
+  3. The user's active subscription plan rank must meet or exceed the course's
+     access level rank.
+  """
+  @spec can_access_course?(binary(), binary()) :: :ok | {:error, :requires_subscription}
+  def can_access_course?(user_role_id, course_id) do
+    course = get_course!(course_id)
+
+    cond do
+      course.access_level == "public" ->
+        :ok
+
+      course.access_level == "preview" ->
+        :ok
+
+      true ->
+        enrollment = get_enrollment(user_role_id, course_id)
+
+        enrollment_valid? =
+          not is_nil(enrollment) and
+            (is_nil(enrollment.access_expires_at) or
+               DateTime.compare(enrollment.access_expires_at, DateTime.utc_now()) == :gt)
+
+        if enrollment_valid? do
+          :ok
+        else
+          check_subscription_access(user_role_id, course)
+        end
+    end
+  end
+
+  @doc """
+  Gets the enrollment record for a user and course, or nil if none exists.
+  """
+  @spec get_enrollment(binary(), binary()) :: CourseEnrollment.t() | nil
+  def get_enrollment(user_role_id, course_id) do
+    Repo.get_by(CourseEnrollment, user_role_id: user_role_id, course_id: course_id)
+  end
+
+  @doc """
+  Enrolls a user in a course with the given access type.
+
+  Options:
+    * `:expires_at` - `DateTime` when access expires (nil = permanent)
+    * `:purchase_reference` - optional reference string (e.g. Stripe charge ID)
+
+  Returns `{:ok, enrollment}` or `{:error, changeset}`. Uses `on_conflict: :nothing`
+  so duplicate enrollments are silently ignored (idempotent).
+  """
+  @spec enroll_in_course(binary(), binary(), String.t(), keyword()) ::
+          {:ok, CourseEnrollment.t()} | {:error, Ecto.Changeset.t()}
+  def enroll_in_course(user_role_id, course_id, access_type, opts \\ []) do
+    expires_at = Keyword.get(opts, :expires_at)
+    purchase_reference = Keyword.get(opts, :purchase_reference)
+
+    %CourseEnrollment{}
+    |> CourseEnrollment.changeset(%{
+      user_role_id: user_role_id,
+      course_id: course_id,
+      access_type: access_type,
+      access_granted_at: DateTime.utc_now() |> DateTime.truncate(:second),
+      access_expires_at: expires_at,
+      purchase_reference: purchase_reference
+    })
+    |> Repo.insert(on_conflict: :nothing, returning: true)
+  end
+
+  @doc """
+  Lists all published premium catalog courses, optionally filtered by test type.
+
+  Only returns courses where `is_premium_catalog == true` and `published_at` is
+  set (i.e. the course has been explicitly published by an admin). Never returns
+  unpublished drafts.
+
+  Options:
+    * `:test_type` - filter to a specific test type (e.g. "sat", "ap")
+  """
+  @spec list_premium_catalog(keyword()) :: [Course.t()]
+  def list_premium_catalog(filters \\ []) do
+    from(c in Course,
+      where: c.is_premium_catalog == true and not is_nil(c.published_at),
+      order_by: [asc: c.catalog_test_type, asc: c.name]
+    )
+    |> maybe_filter_by_test_type(filters[:test_type])
+    |> Repo.all()
+  end
+
+  @doc """
+  Publishes a course to the premium catalog.
+
+  Sets `published_at` and `published_by_id`. The course must already have
+  `is_premium_catalog == true` and relevant catalog fields set.
+
+  Returns `{:ok, course}` or `{:error, changeset}`.
+  """
+  @spec publish_course(binary(), binary()) :: {:ok, Course.t()} | {:error, Ecto.Changeset.t()}
+  def publish_course(course_id, admin_user_role_id) do
+    course = get_course!(course_id)
+
+    course
+    |> Course.changeset(%{
+      published_at: DateTime.utc_now() |> DateTime.truncate(:second),
+      published_by_id: admin_user_role_id
+    })
+    |> Repo.update()
+  end
+
+  defp check_subscription_access(user_role_id, course) do
+    subscription = FunSheep.Billing.get_subscription(user_role_id)
+    plan = if subscription, do: subscription.plan || "free", else: "free"
+    plan_rank = Map.get(@plan_access_levels, to_string(plan), 0)
+    course_rank = Map.get(@access_level_ranks, course.access_level, 99)
+
+    if plan_rank >= course_rank do
+      :ok
+    else
+      {:error, :requires_subscription}
+    end
+  end
+
+  defp maybe_filter_by_test_type(query, nil), do: query
+  defp maybe_filter_by_test_type(query, ""), do: query
+
+  defp maybe_filter_by_test_type(query, test_type) do
+    where(query, [c], c.catalog_test_type == ^test_type)
   end
 end

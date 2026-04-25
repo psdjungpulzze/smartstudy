@@ -399,11 +399,169 @@ const SwipeCardHook = {
   },
 }
 
+// ── SheepProgressBar Hook ───────────────────────────────────────────────────
+// Positions a sheep icon at the leading edge of a readiness progress bar and
+// switches its walk/run animation class based on the readiness percentage.
+const SheepProgressBarHook = {
+  mounted() {
+    this.updateSheep()
+    this.handleEvent("readiness_updated", () => this.updateSheep())
+  },
+  updated() {
+    this.updateSheep()
+  },
+  updateSheep() {
+    const readiness = parseFloat(this.el.dataset.readiness || "0")
+    const sheep = this.el.querySelector("[data-sheep]")
+    if (!sheep) return
+
+    // Position sheep at leading edge of bar
+    const barWidth = this.el.offsetWidth
+    const sheepWidth = sheep.offsetWidth
+    const sheepLeft = Math.min((readiness / 100) * barWidth - sheepWidth / 2, barWidth - sheepWidth)
+    sheep.style.left = `${Math.max(0, sheepLeft)}px`
+
+    // Switch animation class based on readiness band
+    sheep.classList.remove("sheep-walk-slow", "sheep-walk-normal", "sheep-trot", "sheep-run")
+    if (readiness <= 15) {
+      sheep.classList.add("sheep-walk-slow")
+    } else if (readiness <= 49) {
+      sheep.classList.add("sheep-walk-normal")
+    } else if (readiness <= 79) {
+      sheep.classList.add("sheep-trot")
+    } else {
+      sheep.classList.add("sheep-run")
+    }
+  }
+}
+
+// ── CountUp Hook ─────────────────────────────────────────────────────────────
+// Animates a numeric display counting up to the target value with easeOutCubic.
+const CountUpHook = {
+  mounted() {
+    this.animateCount()
+  },
+  updated() {
+    this.animateCount()
+  },
+  animateCount() {
+    const target = parseFloat(this.el.dataset.target || this.el.textContent)
+    const duration = parseInt(this.el.dataset.duration || "1000")
+    const start = parseFloat(this.el.dataset.from || "0")
+    const startTime = performance.now()
+
+    const easeOutCubic = t => 1 - Math.pow(1 - t, 3)
+
+    const step = (now) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const current = start + (target - start) * easeOutCubic(progress)
+      this.el.textContent = Math.round(current).toLocaleString()
+      if (progress < 1) {
+        requestAnimationFrame(step)
+      } else {
+        this.el.textContent = Math.round(target).toLocaleString()
+      }
+    }
+    requestAnimationFrame(step)
+  }
+}
+
+// ── ConfettiBurst Hook ────────────────────────────────────────────────────────
+// Spawns 20 confetti dots falling from the top of the container on "confetti_burst"
+// LiveView push event. Dots are created as absolutely-positioned children and
+// removed after their CSS animation completes.
+const ConfettiBurstHook = {
+  mounted() {
+    this.handleEvent("confetti_burst", () => this.burst())
+  },
+  burst() {
+    const colors = ["#4CD964", "#FFD700", "#FF6B6B", "#4ECDC4", "#A78BFA"]
+    const container = this.el
+    for (let i = 0; i < 20; i++) {
+      const dot = document.createElement("div")
+      dot.style.cssText = `
+        position: absolute;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: ${colors[i % colors.length]};
+        left: ${Math.random() * 100}%;
+        top: 0;
+        pointer-events: none;
+        animation: confetti-fall ${0.8 + Math.random() * 0.4}s ease-in forwards;
+        animation-delay: ${Math.random() * 0.3}s;
+      `
+      container.appendChild(dot)
+      setTimeout(() => dot.remove(), 1500)
+    }
+  }
+}
+
+// ── SheepIdlePersonality Hook ─────────────────────────────────────────────────
+// Randomly triggers the sheep-ear-flick animation on the logo every 20–30 seconds
+// to give the mascot an idle "alive" feel.
+const SheepIdlePersonalityHook = {
+  mounted() {
+    this.scheduleNextIdle()
+  },
+  destroyed() {
+    clearTimeout(this.timer)
+  },
+  scheduleNextIdle() {
+    const delay = 20000 + Math.random() * 10000 // 20–30 seconds
+    this.timer = setTimeout(() => {
+      this.el.classList.add("sheep-ear-flick")
+      setTimeout(() => this.el.classList.remove("sheep-ear-flick"), 1000)
+      this.scheduleNextIdle()
+    }, delay)
+  }
+}
+
 // Custom hooks
 const Hooks = {
   ...colocatedHooks,
 
   SwipeCard: SwipeCardHook,
+  SheepProgressBar: SheepProgressBarHook,
+  CountUp: CountUpHook,
+  ConfettiBurst: ConfettiBurstHook,
+  SheepIdlePersonality: SheepIdlePersonalityHook,
+
+  // ── Sound Player ──────────────────────────────────────────────────────────
+  // Listens for "play_sound" events pushed from LiveView and plays the named
+  // sound file from /sounds/<name>.<ext>. Silently swallows autoplay errors
+  // (browsers block audio before the first user gesture).
+  SoundPlayer: {
+    mounted() {
+      this._sounds = {}
+      this._enabled = this.el.dataset.soundsEnabled !== "false"
+      this.handleEvent("play_sound", ({ name }) => {
+        if (this._enabled) this._play(name)
+      })
+      // Unlock AudioContext on first user interaction (iOS/Android)
+      document.addEventListener("click", () => {
+        if (window._audioCtx) window._audioCtx.resume().catch(() => {})
+      }, { once: true })
+    },
+
+    updated() {
+      this._enabled = this.el.dataset.soundsEnabled !== "false"
+    },
+
+    _play(name) {
+      if (!this._sounds[name]) {
+        const ext = this._supportsOgg() ? "ogg" : "mp3"
+        this._sounds[name] = new Audio(`/sounds/${name}.${ext}`)
+        this._sounds[name].volume = 0.6
+      }
+      this._sounds[name].cloneNode().play().catch(() => {})
+    },
+
+    _supportsOgg() {
+      const a = document.createElement("audio")
+      return a.canPlayType("audio/ogg; codecs=vorbis") !== ""
+    },
+  },
 
   // ── Stripe Card Setup (Payment Method Collection) ──────────────────────
   // Mounts Stripe Elements for secure credit card input. Uses a SetupIntent
@@ -657,7 +815,7 @@ const Hooks = {
         const input = document.createElement("input")
         input.type = "file"
         input.multiple = true
-        input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv"
+        input.accept = ".pdf,.epub,.jpg,.jpeg,.png,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.csv"
 
         input.addEventListener("change", () => {
           this._startUpload(Array.from(input.files), {})

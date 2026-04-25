@@ -280,6 +280,12 @@ defmodule FunSheep.Workers.PdfOcrPollerWorker do
     FunSheep.Workers.MaterialRelevanceWorker.enqueue(material_id)
     FunSheep.Workers.TextbookCompletenessWorker.enqueue(material_id)
     FunSheep.Workers.MaterialClassificationWorker.enqueue(material_id)
+
+    # Award Wool Credits to the teacher who uploaded this material.
+    %{"uploaded_material_id" => material_id}
+    |> FunSheep.Workers.CreditMaterialUploadWorker.new()
+    |> Oban.insert()
+
     advance_course(course_id)
   end
 

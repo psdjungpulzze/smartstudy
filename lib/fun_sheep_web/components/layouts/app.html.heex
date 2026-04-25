@@ -28,7 +28,12 @@
   <div class="max-w-5xl mx-auto h-full flex items-center justify-between px-3 sm:px-4">
     <%!-- Left: Logo --%>
     <a href="/dashboard" class="flex items-center gap-2 shrink-0 touch-target">
-      <span class="text-2xl">🐑</span>
+      <span
+        id="nav-sheep-logo"
+        phx-hook="SheepIdlePersonality"
+        class="text-2xl inline-block"
+        aria-hidden="true"
+      >🐑</span>
       <span class="font-extrabold text-gray-900 text-lg tracking-tight hidden sm:inline">
         Fun Sheep
       </span>
@@ -267,3 +272,13 @@
     <% end %>
   </div>
 </nav>
+
+<%!-- Sound player — persists across LiveView navigations; plays audio on push_event --%>
+<div
+  id="sound-player"
+  phx-hook="SoundPlayer"
+  data-sounds-enabled="true"
+  class="hidden"
+  aria-hidden="true"
+>
+</div>

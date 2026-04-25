@@ -80,6 +80,9 @@ defmodule FunSheepWeb.Router do
       live "/onboarding/parent", ParentOnboardingLive, :index
       live "/claim/:code", ClaimCodeLive, :show
 
+      # Flow A (§5.1) — student onboarding
+      live "/onboarding/student", StudentOnboardingLive, :index
+
       # Flow C (§6.2) — teacher onboarding
       live "/onboarding/teacher", TeacherOnboardingLive, :index
 

@@ -28,6 +28,9 @@ defmodule FunSheep.Billing.Subscription do
     # lifetime cap. Used to comp users (support requests, beta feedback,
     # influencer accounts) without deleting usage history.
     field :bonus_free_tests, :integer, default: 0
+    # List of catalog access tokens granted by this subscription.
+    # Reserved for future premium catalog tier gating.
+    field :catalog_access, {:array, :string}, default: []
 
     belongs_to :user_role, FunSheep.Accounts.UserRole
 
@@ -56,6 +59,7 @@ defmodule FunSheep.Billing.Subscription do
       :cancelled_at,
       :metadata,
       :bonus_free_tests,
+      :catalog_access,
       :paid_by_user_role_id,
       :origin_practice_request_id
     ])

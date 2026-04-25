@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.TeacherDashboardLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Accounts, Assessments}
+  alias FunSheep.{Accounts, Assessments, Credits}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,6 +21,17 @@ defmodule FunSheepWeb.TeacherDashboardLive do
           {user_role.id, students}
       end
 
+    {credits_balance, credit_progress, credit_ledger} =
+      if user_role_id do
+        {
+          Credits.get_balance(user_role_id),
+          Credits.credit_progress(user_role_id),
+          Credits.list_ledger(user_role_id, limit: 10)
+        }
+      else
+        {0, nil, []}
+      end
+
     socket =
       socket
       |> assign(
@@ -30,7 +41,17 @@ defmodule FunSheepWeb.TeacherDashboardLive do
         sort_by: :name,
         sort_dir: :asc,
         expanded_student_id: nil,
-        expanded_concepts: []
+        expanded_concepts: [],
+        credits_balance: credits_balance,
+        credit_progress: credit_progress,
+        credit_ledger: credit_ledger,
+        give_credit_open: false,
+        give_credit_search: "",
+        give_credit_results: [],
+        give_credit_recipient: nil,
+        give_credit_note: "",
+        give_credit_error: nil,
+        give_credit_success: nil
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "teacher_dashboard",
@@ -83,6 +104,82 @@ defmodule FunSheepWeb.TeacherDashboardLive do
       student = Enum.find(socket.assigns.students, &(&1.id == student_id))
       concepts = if student && student.test_schedule_id, do: load_concepts(student), else: []
       {:noreply, assign(socket, expanded_student_id: student_id, expanded_concepts: concepts)}
+    end
+  end
+
+  def handle_event("toggle_give_credit", _params, socket) do
+    {:noreply,
+     assign(socket,
+       give_credit_open: !socket.assigns.give_credit_open,
+       give_credit_search: "",
+       give_credit_results: [],
+       give_credit_recipient: nil,
+       give_credit_error: nil,
+       give_credit_success: nil
+     )}
+  end
+
+  def handle_event("search_recipients", %{"query" => query}, socket) do
+    results =
+      if String.length(query) >= 2 do
+        Accounts.list_users_for_admin(search: query, limit: 5)
+      else
+        []
+      end
+
+    {:noreply, assign(socket, give_credit_search: query, give_credit_results: results)}
+  end
+
+  def handle_event("select_recipient", %{"id" => recipient_id}, socket) do
+    recipient = Accounts.get_user_role!(recipient_id)
+
+    {:noreply,
+     assign(socket,
+       give_credit_recipient: recipient,
+       give_credit_results: [],
+       give_credit_search: recipient.display_name || recipient.email
+     )}
+  end
+
+  def handle_event("give_credit_submit", %{"note" => note}, socket) do
+    from_id = socket.assigns.user_role_id
+    recipient = socket.assigns.give_credit_recipient
+    balance = socket.assigns.credits_balance
+
+    cond do
+      is_nil(recipient) ->
+        {:noreply, assign(socket, give_credit_error: "Please select a recipient.")}
+
+      balance < 1 ->
+        {:noreply, assign(socket, give_credit_error: "You don't have enough credits.")}
+
+      true ->
+        case Credits.transfer_credits(from_id, recipient.id, 1, note) do
+          {:ok, _transfer} ->
+            new_balance = Credits.get_balance(from_id)
+            new_ledger = Credits.list_ledger(from_id, limit: 10)
+
+            {:noreply,
+             assign(socket,
+               credits_balance: new_balance,
+               credit_ledger: new_ledger,
+               give_credit_open: false,
+               give_credit_recipient: nil,
+               give_credit_search: "",
+               give_credit_note: "",
+               give_credit_error: nil,
+               give_credit_success: "1 credit given to #{recipient.display_name || recipient.email}!"
+             )}
+
+          {:error, :insufficient_balance} ->
+            {:noreply, assign(socket, give_credit_error: "Insufficient balance.")}
+
+          {:error, :invalid_recipient} ->
+            {:noreply, assign(socket, give_credit_error: "That recipient is not available.")}
+
+          {:error, _} ->
+            {:noreply, assign(socket, give_credit_error: "Something went wrong. Please try again.")}
+        end
     end
   end
 
@@ -425,6 +522,160 @@ defmodule FunSheepWeb.TeacherDashboardLive do
           </table>
         </div>
       <% end %>
+
+      <%!-- Wool Credits Card --%>
+      <div class="bg-white rounded-2xl shadow-md p-6 mt-8">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-[#1C1C1E] flex items-center gap-2">
+            🧶 Wool Credits
+          </h2>
+          <span class="text-2xl font-bold text-[#4CD964]">
+            {@credits_balance} {if @credits_balance == 1, do: "credit", else: "credits"}
+          </span>
+        </div>
+
+        <%= if @give_credit_success do %>
+          <div class="bg-[#E8F8EB] border border-[#4CD964] rounded-xl p-3 mb-4 text-sm text-[#1C1C1E]">
+            {@give_credit_success}
+          </div>
+        <% end %>
+
+        <%!-- Progress toward next credit --%>
+        <%= if @credit_progress do %>
+          <div class="mb-4">
+            <p class="text-xs font-semibold text-[#8E8E93] uppercase tracking-wide mb-3">
+              Progress toward next credit
+            </p>
+            <div class="space-y-3">
+              <%!-- Students progress --%>
+              <div>
+                <div class="flex justify-between text-xs text-[#8E8E93] mb-1">
+                  <span>Students</span>
+                  <span>{@credit_progress.students.batch_progress}/10</span>
+                </div>
+                <div class="w-full bg-[#F5F5F7] rounded-full h-2">
+                  <div
+                    class="bg-[#4CD964] h-2 rounded-full transition-all"
+                    style={"width: #{min(100, @credit_progress.students.batch_progress * 10)}%"}
+                  >
+                  </div>
+                </div>
+              </div>
+              <%!-- Materials progress --%>
+              <div>
+                <div class="flex justify-between text-xs text-[#8E8E93] mb-1">
+                  <span>Materials uploaded</span>
+                  <span>{@credit_progress.materials.quarter_units}/4 quarter-units</span>
+                </div>
+                <div class="w-full bg-[#F5F5F7] rounded-full h-2">
+                  <div
+                    class="bg-[#4CD964] h-2 rounded-full transition-all"
+                    style={"width: #{min(100, @credit_progress.materials.quarter_units * 25)}%"}
+                  >
+                  </div>
+                </div>
+              </div>
+              <%!-- Tests progress --%>
+              <div>
+                <div class="flex justify-between text-xs text-[#8E8E93] mb-1">
+                  <span>Tests created</span>
+                  <span>{@credit_progress.tests.quarter_units}/4 quarter-units</span>
+                </div>
+                <div class="w-full bg-[#F5F5F7] rounded-full h-2">
+                  <div
+                    class="bg-[#4CD964] h-2 rounded-full transition-all"
+                    style={"width: #{min(100, @credit_progress.tests.quarter_units * 25)}%"}
+                  >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
+        <%!-- Give a credit --%>
+        <div class="border-t border-[#E5E5EA] pt-4 mb-4">
+          <button
+            class="text-sm font-medium text-[#4CD964] hover:text-[#3DBF55] transition-colors"
+            phx-click="toggle_give_credit"
+          >
+            {if @give_credit_open, do: "Cancel", else: "Give a credit to someone"}
+          </button>
+
+          <%= if @give_credit_open do %>
+            <div class="mt-3 space-y-3">
+              <%= if @give_credit_error do %>
+                <p class="text-xs text-[#FF3B30]">{@give_credit_error}</p>
+              <% end %>
+              <div class="relative">
+                <input
+                  type="text"
+                  value={@give_credit_search}
+                  phx-keyup="search_recipients"
+                  phx-value-query={@give_credit_search}
+                  placeholder="Search by name or email..."
+                  class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none text-sm transition-colors"
+                />
+                <%= if @give_credit_results != [] do %>
+                  <div class="absolute z-10 w-full bg-white border border-[#E5E5EA] rounded-xl shadow-lg mt-1 py-1">
+                    <button
+                      :for={r <- @give_credit_results}
+                      type="button"
+                      class="w-full text-left px-4 py-2 text-sm text-[#1C1C1E] hover:bg-[#F5F5F7] transition-colors"
+                      phx-click="select_recipient"
+                      phx-value-id={r.id}
+                    >
+                      {r.display_name || r.email}
+                      <span class="text-xs text-[#8E8E93] ml-1">{r.email}</span>
+                    </button>
+                  </div>
+                <% end %>
+              </div>
+
+              <%= if @give_credit_recipient do %>
+                <p class="text-xs text-[#8E8E93]">
+                  Sending to: <strong class="text-[#1C1C1E]">{@give_credit_recipient.display_name || @give_credit_recipient.email}</strong>
+                </p>
+              <% end %>
+
+              <form phx-submit="give_credit_submit" class="flex gap-2">
+                <input
+                  type="text"
+                  name="note"
+                  placeholder="Add a note (optional)"
+                  class="flex-1 px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] rounded-full outline-none text-sm transition-colors"
+                />
+                <button
+                  type="submit"
+                  disabled={@credits_balance < 1 or is_nil(@give_credit_recipient)}
+                  class="bg-[#4CD964] hover:bg-[#3DBF55] disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium px-4 py-2 rounded-full shadow-md transition-colors text-sm"
+                >
+                  Give 1 credit
+                </button>
+              </form>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Recent activity --%>
+        <div>
+          <p class="text-xs font-semibold text-[#8E8E93] uppercase tracking-wide mb-3">
+            Recent activity
+          </p>
+          <%= if @credit_ledger == [] do %>
+            <p class="text-sm text-[#8E8E93]">No activity yet. Earn credits by growing your classroom!</p>
+          <% else %>
+            <ul class="space-y-2">
+              <li :for={entry <- @credit_ledger} class="flex items-center justify-between text-sm">
+                <span class="text-[#1C1C1E]">{ledger_source_label(entry)}</span>
+                <span class={"font-semibold #{if entry.delta > 0, do: "text-[#4CD964]", else: "text-[#FF3B30]"}"}>
+                  {if entry.delta > 0, do: "+"}{ div(entry.delta, 4) != 0 && "#{div(entry.delta, 4)} credit" || "#{rem(abs(entry.delta), 4)}/4 unit"}
+                </span>
+              </li>
+            </ul>
+          <% end %>
+        </div>
+      </div>
     </div>
     """
   end
@@ -432,4 +683,13 @@ defmodule FunSheepWeb.TeacherDashboardLive do
   defp readiness_badge_colors(score) when score > 70, do: {"text-[#4CD964]", "bg-[#E8F8EB]"}
   defp readiness_badge_colors(score) when score >= 40, do: {"text-[#FF9500]", "bg-[#FFF8E1]"}
   defp readiness_badge_colors(_), do: {"text-[#FF3B30]", "bg-[#FFE5E3]"}
+
+  defp ledger_source_label(%{source: "referral"}), do: "Students joined"
+  defp ledger_source_label(%{source: "material_upload"}), do: "Material uploaded"
+  defp ledger_source_label(%{source: "test_created"}), do: "Test created"
+  defp ledger_source_label(%{source: "transfer_out"}), do: "→ Given to someone"
+  defp ledger_source_label(%{source: "transfer_in"}), do: "← Received credit"
+  defp ledger_source_label(%{source: "redemption"}), do: "Redeemed for subscription"
+  defp ledger_source_label(%{source: "admin_grant"}), do: "Admin grant"
+  defp ledger_source_label(_), do: "Credit activity"
 end

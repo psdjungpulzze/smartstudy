@@ -31,6 +31,7 @@ Plans are ordered by impact for a high school student preparing for finals.
 | 17 | Peer Sharing — student↔student and parent↔parent | Social & Growth | [ROADMAP/funsheep-peer-sharing.md](ROADMAP/funsheep-peer-sharing.md) | Planning |
 | 18 | Flock Shout Outs + Teacher Credit economy (Wool Credits) | Social & Growth | [ROADMAP/flock-shout-outs-and-credits.md](ROADMAP/flock-shout-outs-and-credits.md) | Planning |
 | 19 | Teacher Credit System — canonical implementation spec | Social & Growth | [ROADMAP/funsheep-teacher-credit-system.md](ROADMAP/funsheep-teacher-credit-system.md) | Planning |
+| 22 | Social Friends & Followers — follow graph, school directory, peer invites, course sharing, viral loops | Social & Growth | [ROADMAP/funsheep-social-friends-strategy.md](ROADMAP/funsheep-social-friends-strategy.md) | Planning |
 | 20 | Subscription Purchase Flows (Flow A student-ask, B parent-initiated, C teacher-initiated) | Monetization | [ROADMAP/funsheep-subscription-flows.md](ROADMAP/funsheep-subscription-flows.md) | Planning |
 | 21 | Premium Courses & Standardized Test Prep (SAT, ACT, AP, IB, LSAT, Bar, GMAT, MCAT) | Monetization | [ROADMAP/funsheep-premium-courses-and-tests.md](ROADMAP/funsheep-premium-courses-and-tests.md) | Planning |
 

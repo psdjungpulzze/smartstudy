@@ -61,6 +61,48 @@ defmodule FunSheepWeb.LiveHelpers do
     end
   end
 
+  @doc """
+  Guards course LiveViews that require premium access.
+
+  When `course_id` is present in params, checks `FunSheep.Courses.can_access_course?/2`
+  and redirects unauthenticated or under-subscribed users to the subscription page.
+
+  When `course_id` is absent (course loaded later in mount), this hook is a no-op —
+  the LiveView is responsible for calling `can_access_course?/2` during `mount/3`.
+
+  ## Usage in router
+
+      live_session :authenticated,
+        on_mount: [
+          {FunSheepWeb.LiveHelpers, :require_auth},
+          {FunSheepWeb.LiveHelpers, :check_course_access}
+        ] do
+        live "/courses/:course_id/practice", CoursePracticeLive
+      end
+  """
+  def on_mount(:check_course_access, %{"course_id" => course_id} = _params, _session, socket) do
+    user_role_id = get_in(socket.assigns, [:current_user, "user_role_id"])
+
+    case FunSheep.Courses.can_access_course?(user_role_id, course_id) do
+      :ok ->
+        {:cont, socket}
+
+      {:error, :requires_subscription} ->
+        socket =
+          socket
+          |> put_flash(
+            :info,
+            "This course requires a subscription. Upgrade to access premium content."
+          )
+          |> redirect(to: "/subscription?context=course&course_id=#{course_id}")
+
+        {:halt, socket}
+    end
+  end
+
+  # No course_id in params — allow through; the LiveView handles access itself.
+  def on_mount(:check_course_access, _params, _session, socket), do: {:cont, socket}
+
   def on_mount(:require_admin, _params, session, socket) do
     case get_user_from_session(session) do
       {:ok, %{"role" => "admin"} = user} ->
@@ -277,7 +319,7 @@ defmodule FunSheepWeb.LiveHelpers do
   # flows pass through freely so users aren't trapped. Disabled in test
   # (via :fun_sheep, :onboarding_gate) so live tests can hit feature
   # pages without first filling out a profile fixture.
-  @onboarding_exempt_paths ~w(/profile/setup /guardians /subscription)
+  @onboarding_exempt_paths ~w(/profile/setup /guardians /subscription /onboarding/student)
   defp gate_onboarding(_params, url, socket) do
     uri = URI.parse(url)
     path = uri.path || ""

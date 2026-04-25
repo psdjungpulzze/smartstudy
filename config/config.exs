@@ -85,7 +85,13 @@ config :fun_sheep, Oban,
        # Nightly at 03:00 UTC — audit every ready course's
        # (chapter, difficulty) coverage and enqueue generation for
        # tuples below target. Phase 6 demand-driven supply loop.
-       {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker}
+       {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker},
+       # Sunday 23:55 UTC — compute weekly shout out winners so they are
+       # ready for the Monday leaderboard. Keep in sync with runtime.exs.
+       {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker},
+       # Nightly at 03:30 UTC — mark courses with 0 attempts and
+       # no quality update in 90+ days as dormant (visibility_state: "reduced").
+       {"30 3 * * *", FunSheep.Workers.MarkDormantContentWorker}
      ]}
   ],
   queues: [
@@ -111,7 +117,10 @@ config :fun_sheep, Oban,
     integrations: 3,
     # Parent notifications (weekly digest, opt-in alerts — spec §8). Swoosh
     # is I/O-bound and the digest fan-out is roughly one job per family.
-    notifications: 2
+    notifications: 2,
+    # EPUB extraction and TOC import. Concurrency of 5 matches the expected
+    # throughput of EbookExtractWorker (CPU + ZIP parse, no Vision calls).
+    ebook: 5
   ]
 
 # Interactor integration (billing, auth, agents)

@@ -26,6 +26,7 @@ Plans are tracked in `docs/ROADMAP/`. Statuses reflect the current state of the 
 | [PLANNED] | Comprehension & Grouped Question Formats | [funsheep-comprehension-and-grouped-questions.md](ROADMAP/funsheep-comprehension-and-grouped-questions.md) |
 | [PLANNED] | eBook Format Support (EPUB, MOBI, AZW3) | [funsheep-ebook-format-support.md](ROADMAP/funsheep-ebook-format-support.md) |
 | [PLANNED] | Flock Shout Outs & Teacher Credits | [flock-shout-outs-and-credits.md](ROADMAP/flock-shout-outs-and-credits.md) |
+| [PLANNED] | Social Friends & Followers (follow graph, school directory, invites, course sharing) | [funsheep-social-friends-strategy.md](ROADMAP/funsheep-social-friends-strategy.md) |
 | [PLANNED] | Fun Animations (Sheep Mascot) | [funsheep-fun-animations.md](ROADMAP/funsheep-fun-animations.md) |
 | [PLANNED] | Premium Courses & Standardized Test Prep | [funsheep-premium-courses-and-tests.md](ROADMAP/funsheep-premium-courses-and-tests.md) |
 | [PLANNED] | School Course Catalog & One-Click Enrollment | [funsheep-school-course-catalog.md](ROADMAP/funsheep-school-course-catalog.md) |

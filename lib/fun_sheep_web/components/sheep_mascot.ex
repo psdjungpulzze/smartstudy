@@ -63,6 +63,120 @@ defmodule FunSheepWeb.SheepMascot do
     """
   end
 
+  @doc """
+  Renders an animated sheep icon for use in progress bars and compact UI.
+
+  ## Attributes
+    - size: "sm" | "md" | "lg" | "xl" (default: "md")
+    - state: "walk" | "run" | "leap" | "idle" | "happy" | "sad" (default: "idle")
+    - class: additional CSS classes
+  """
+  attr :size, :string, default: "md"
+  attr :state, :string, default: "idle"
+  attr :class, :string, default: ""
+
+  def sheep_icon(assigns) do
+    ~H"""
+    <div
+      class={[
+        "sheep-icon inline-flex items-center justify-center",
+        sheep_icon_size_class(@size),
+        sheep_icon_animation_class(@state),
+        @class
+      ]}
+      style="will-change: transform;"
+    >
+      <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+        <%!-- Wool body --%>
+        <ellipse cx="20" cy="20" rx="14" ry="11" fill="#f0f0f0" stroke="#d0d0d0" stroke-width="1" />
+        <%!-- Head --%>
+        <circle cx="30" cy="16" r="6" fill="#e8e8e8" stroke="#d0d0d0" stroke-width="1" />
+        <%!-- Eyes --%>
+        <circle
+          cx="31"
+          cy="15"
+          r="1"
+          fill="#333"
+          class={if @state == "idle", do: "sheep-idle-blink", else: ""}
+        />
+        <circle cx="28" cy="15" r="1" fill="#333" />
+        <%!-- Nose --%>
+        <ellipse cx="31" cy="18" rx="1.5" ry="1" fill="#ffb3b3" />
+        <%!-- Ears --%>
+        <ellipse
+          cx="34"
+          cy="12"
+          rx="2"
+          ry="3"
+          fill="#e8e8e8"
+          stroke="#d0d0d0"
+          stroke-width="0.5"
+          class={if @state == "idle", do: "origin-bottom sheep-ear-flick", else: ""}
+        />
+        <%!-- Legs --%>
+        <rect
+          x="11"
+          y="28"
+          width="3"
+          height="7"
+          rx="1.5"
+          fill="#e8e8e8"
+          stroke="#d0d0d0"
+          stroke-width="0.5"
+        />
+        <rect
+          x="15"
+          y="29"
+          width="3"
+          height="6"
+          rx="1.5"
+          fill="#e8e8e8"
+          stroke="#d0d0d0"
+          stroke-width="0.5"
+        />
+        <rect
+          x="21"
+          y="29"
+          width="3"
+          height="6"
+          rx="1.5"
+          fill="#e8e8e8"
+          stroke="#d0d0d0"
+          stroke-width="0.5"
+        />
+        <rect
+          x="25"
+          y="28"
+          width="3"
+          height="7"
+          rx="1.5"
+          fill="#e8e8e8"
+          stroke="#d0d0d0"
+          stroke-width="0.5"
+        />
+        <%!-- State-specific extras --%>
+        <%= if @state == "happy" do %>
+          <text x="4" y="10" font-size="8" opacity="0.8">✨</text>
+        <% end %>
+        <%= if @state == "sad" do %>
+          <ellipse cx="32" cy="20" rx="1" ry="1.5" fill="#88ccff" opacity="0.7" />
+        <% end %>
+      </svg>
+    </div>
+    """
+  end
+
+  defp sheep_icon_size_class("sm"), do: "w-6 h-6"
+  defp sheep_icon_size_class("md"), do: "w-10 h-10"
+  defp sheep_icon_size_class("lg"), do: "w-16 h-16"
+  defp sheep_icon_size_class("xl"), do: "w-24 h-24"
+  defp sheep_icon_size_class(_), do: "w-10 h-10"
+
+  defp sheep_icon_animation_class("walk"), do: "sheep-walk-normal"
+  defp sheep_icon_animation_class("run"), do: "sheep-run"
+  defp sheep_icon_animation_class("leap"), do: "sheep-leap"
+  defp sheep_icon_animation_class(_), do: ""
+
   # ── Size mapping ──────────────────────────────────────────────────────────
 
   defp size_to_class("xs"), do: "w-8 h-8"

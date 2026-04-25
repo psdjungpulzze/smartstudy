@@ -211,15 +211,20 @@ defmodule FunSheepWeb.QuickTestLive do
           else: Content.list_videos_for_section(question.section_id)
 
       # Defer DB insert until confidence is selected
-      {:noreply,
-       assign(socket,
-         engine_state: new_state,
-         stats: new_stats,
-         feedback: %{is_correct: is_correct, correct_answer: question.answer},
-         pending_is_correct: is_correct,
-         pending_answer: answer,
-         current_question_videos: videos
-       )}
+      socket =
+        assign(socket,
+          engine_state: new_state,
+          stats: new_stats,
+          feedback: %{is_correct: is_correct, correct_answer: question.answer},
+          pending_is_correct: is_correct,
+          pending_answer: answer,
+          current_question_videos: videos
+        )
+
+      socket =
+        if is_correct, do: socket, else: push_event(socket, "play_sound", %{name: "sheep_wrong"})
+
+      {:noreply, socket}
     end
   end
 
