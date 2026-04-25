@@ -1701,6 +1701,9 @@ defmodule FunSheepWeb.CourseDetailLive do
               @sources_count > 0 ->
                 "Found #{@sources_count} sources (textbooks, question banks, practice tests)"
 
+              @step1_state == :done ->
+                "Search complete — proceeding with available materials"
+
               @step1_state == :active ->
                 "Searching textbooks, question banks, and practice tests..."
 
