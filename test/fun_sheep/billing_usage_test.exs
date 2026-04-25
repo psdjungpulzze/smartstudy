@@ -66,7 +66,7 @@ defmodule FunSheep.BillingUsageTest do
   describe "weekly_usage/1" do
     test "returns zeros with current time for a fresh student" do
       s = create_student()
-      %{used: 0, limit: 20, remaining: 20, resets_at: resets_at} = Billing.weekly_usage(s.id)
+      %{used: 0, limit: 50, remaining: 50, resets_at: resets_at} = Billing.weekly_usage(s.id)
       assert %DateTime{} = resets_at
     end
 
@@ -86,13 +86,13 @@ defmodule FunSheep.BillingUsageTest do
         |> Repo.update!()
       end
 
-      assert %{used: 3, remaining: 17} = Billing.weekly_usage(s.id)
+      assert %{used: 3, remaining: 47} = Billing.weekly_usage(s.id)
     end
 
     test "resets_at reflects when the oldest weekly test ages out, when at/over limit" do
       s = create_student()
-      # Record 20 tests
-      record_tests(s.id, 20)
+      # Record 50 tests (at the weekly limit)
+      record_tests(s.id, 50)
 
       %{resets_at: resets_at} = Billing.weekly_usage(s.id)
       # Oldest test was just inserted, so resets_at ~= now + 7d
@@ -105,47 +105,47 @@ defmodule FunSheep.BillingUsageTest do
       s = create_student()
       assert Billing.usage_state(s.id) == :fresh
 
-      record_tests(s.id, 9)
-      # 9/20 = 45%
+      record_tests(s.id, 24)
+      # 24/50 = 48%
       assert Billing.usage_state(s.id) == :fresh
     end
 
     test ":warming at 50% up to but not including 70%" do
       s = create_student()
-      record_tests(s.id, 10)
-      # 10/20 = 50%
+      record_tests(s.id, 25)
+      # 25/50 = 50%
       assert Billing.usage_state(s.id) == :warming
 
-      record_tests(s.id, 3)
-      # 13/20 = 65%
+      record_tests(s.id, 8)
+      # 33/50 = 66%
       assert Billing.usage_state(s.id) == :warming
     end
 
     test ":nudge at 70% up to but not including 85%" do
       s = create_student()
-      record_tests(s.id, 14)
-      # 14/20 = 70%
+      record_tests(s.id, 35)
+      # 35/50 = 70%
       assert Billing.usage_state(s.id) == :nudge
 
-      record_tests(s.id, 2)
-      # 16/20 = 80%
+      record_tests(s.id, 5)
+      # 40/50 = 80%
       assert Billing.usage_state(s.id) == :nudge
     end
 
     test ":ask at 85% up to but not including 100%" do
       s = create_student()
-      record_tests(s.id, 17)
-      # 17/20 = 85% — the Ask-card trigger per §4.3
+      record_tests(s.id, 43)
+      # 43/50 = 86% — the Ask-card trigger per §4.3
       assert Billing.usage_state(s.id) == :ask
 
-      record_tests(s.id, 2)
-      # 19/20 = 95%
+      record_tests(s.id, 5)
+      # 48/50 = 96%
       assert Billing.usage_state(s.id) == :ask
     end
 
     test ":hardwall at 100%" do
       s = create_student()
-      record_tests(s.id, 20)
+      record_tests(s.id, 50)
       assert Billing.usage_state(s.id) == :hardwall
     end
 
@@ -158,7 +158,7 @@ defmodule FunSheep.BillingUsageTest do
         |> Repo.insert()
 
       # Even at hardwall count, paid takes precedence.
-      record_tests(s.id, 20)
+      record_tests(s.id, 50)
       assert Billing.usage_state(s.id) == :paid
     end
 
@@ -174,15 +174,15 @@ defmodule FunSheep.BillingUsageTest do
       assert Billing.can_start_test?(s.id)
     end
 
-    test "true when at 19/20 (ask) — still allowed the last slot" do
+    test "true when at 49/50 (ask) — still allowed the last slot" do
       s = create_student()
-      record_tests(s.id, 19)
+      record_tests(s.id, 49)
       assert Billing.can_start_test?(s.id)
     end
 
     test "false at hardwall" do
       s = create_student()
-      record_tests(s.id, 20)
+      record_tests(s.id, 50)
       refute Billing.can_start_test?(s.id)
     end
 
