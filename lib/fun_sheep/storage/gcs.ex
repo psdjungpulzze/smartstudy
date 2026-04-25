@@ -207,7 +207,7 @@ defmodule FunSheep.Storage.GCS do
         Keyword.get(opts, :headers, [])
 
     req_opts =
-      [method: method, url: url, headers: headers, decode_body: false]
+      [method: method, url: url, headers: headers, decode_body: false, finch: FunSheep.Finch]
       |> maybe_put(:body, Keyword.get(opts, :body))
 
     Req.request(req_opts)

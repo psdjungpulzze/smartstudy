@@ -475,7 +475,8 @@ defmodule FunSheepWeb.CourseDetailLive do
        course: course,
        show_upload: false,
        upload_batch_id: Ecto.UUID.generate(),
-       upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0}
+       upload_progress: %{completed: 0, failed: 0, total: 0, in_flight: 0},
+       textbook_status: Courses.textbook_status(course.id)
      )}
   end
 
