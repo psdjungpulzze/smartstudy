@@ -15,6 +15,11 @@ defmodule FunSheep.Assessments.ReadinessTest do
         course_id: course.id
       })
 
+    # Create a section so ReadinessCalculator can resolve chapter_ids via
+    # Courses.list_sections_by_chapters/1.
+    {:ok, _section} =
+      FunSheep.Courses.create_section(%{name: "Section 1", position: 1, chapter_id: chapter.id})
+
     {:ok, schedule} =
       Assessments.create_test_schedule(%{
         name: "Midterm",

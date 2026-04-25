@@ -41,6 +41,18 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
   end
 
   describe "calculate/2" do
+    # Each chapter needs at least one section so ReadinessCalculator can resolve
+    # chapter_ids via Courses.list_sections_by_chapters/1.
+    setup %{chapter1: ch1, chapter2: ch2} do
+      {:ok, _} =
+        FunSheep.Courses.create_section(%{name: "S", position: 1, chapter_id: ch1.id})
+
+      {:ok, _} =
+        FunSheep.Courses.create_section(%{name: "S", position: 1, chapter_id: ch2.id})
+
+      :ok
+    end
+
     test "returns 0 with no attempts", %{user_role: ur, schedule: schedule} do
       result = ReadinessCalculator.calculate(ur.id, schedule)
 
@@ -185,7 +197,7 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
           chapter_id: ch1.id
         })
 
-      {:ok, _section2} =
+      {:ok, section2} =
         FunSheep.Courses.create_section(%{
           name: "S2",
           position: 2,
@@ -202,6 +214,19 @@ defmodule FunSheep.Assessments.ReadinessCalculatorTest do
           course_id: course.id,
           chapter_id: ch1.id,
           section_id: section1.id
+        })
+
+      # section2 also has a question — making it practicable — but no attempts yet.
+      {:ok, _q2} =
+        FunSheep.Questions.create_question(%{
+          validation_status: :passed,
+          content: "Q2",
+          answer: "B",
+          question_type: :short_answer,
+          difficulty: :easy,
+          course_id: course.id,
+          chapter_id: ch1.id,
+          section_id: section2.id
         })
 
       FunSheep.Questions.create_question_attempt(%{
