@@ -109,7 +109,7 @@ defmodule FunSheepWeb.UserProfileLive do
         <%!-- Action buttons --%>
         <div class="flex gap-2 mt-4">
           <button
-            :if={@follow_state in [:none, :followed_by]}
+            :if={@follow_state in [:none, :not_following, :followed_by]}
             phx-click="follow"
             class="flex-1 py-2 rounded-full text-sm font-bold bg-[#4CD964] text-white hover:bg-[#3DBF55] transition-colors shadow-md"
           >
