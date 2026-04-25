@@ -17,7 +17,7 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
 
   use Oban.Worker, queue: :pdf_ocr, max_attempts: 3
 
-  alias FunSheep.{Content, Storage}
+  alias FunSheep.{Content, Courses, Notifications, Storage}
   alias FunSheep.Content.UploadedMaterial
   alias FunSheep.OCR.{GoogleVision, PdfSplitter}
   alias FunSheep.Storage.GCS
@@ -35,21 +35,34 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
   @vision_batch_size 20
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"material_id" => material_id}}) do
+  def perform(%Oban.Job{args: %{"material_id" => material_id}, attempt: attempt, max_attempts: max} = _job) do
     material = Content.get_uploaded_material!(material_id)
 
-    cond do
-      material.ocr_status == :completed ->
-        {:ok, :already_completed}
+    result =
+      cond do
+        material.ocr_status == :completed ->
+          {:ok, :already_completed}
 
-      already_dispatched?(material) ->
-        # Chunks already submitted on a prior attempt. Just re-enqueue pollers
-        # in case they got lost (e.g. Oban pruned them) and exit.
-        reenqueue_pollers(material)
-        {:ok, :already_dispatched}
+        already_dispatched?(material) ->
+          # Chunks already submitted on a prior attempt. Just re-enqueue pollers
+          # in case they got lost (e.g. Oban pruned them) and exit.
+          reenqueue_pollers(material)
+          {:ok, :already_dispatched}
 
-      true ->
-        do_dispatch(material)
+        true ->
+          do_dispatch(material)
+      end
+
+    # On final failed attempt, advance the course counter and notify the teacher
+    # so the course doesn't hang forever at "Processing uploaded materials…".
+    case result do
+      {:error, _reason} when attempt >= max ->
+        Logger.error("[PDF OCR] Exhausted #{max} attempts for material #{material_id}, advancing course")
+        advance_course_on_failure(material)
+        :ok
+
+      other ->
+        other
     end
   end
 
@@ -242,6 +255,67 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
     case Application.get_env(:fun_sheep, :storage_backend) do
       FunSheep.Storage.GCS -> GCS.bucket_name()
       _ -> "local"
+    end
+  end
+
+  # Called when the dispatch worker exhausts all retries. Increments the
+  # course OCR counter so the course can still advance (rather than hanging
+  # at "Processing uploaded materials…" forever), and notifies the teacher.
+  defp advance_course_on_failure(material) do
+    course_id = material.course_id
+    {new_count, total} = Courses.increment_ocr_completed(course_id)
+
+    Phoenix.PubSub.broadcast(
+      FunSheep.PubSub,
+      "course:#{course_id}",
+      {:processing_update, %{ocr_completed: new_count, ocr_total: total}}
+    )
+
+    if new_count >= total do
+      course = Courses.get_course!(course_id)
+      failed_count = Courses.count_failed_materials(course_id)
+
+      if failed_count >= total do
+        # All materials failed — mark course as failed and notify teacher
+        Courses.update_course(course, %{
+          processing_status: "failed",
+          processing_step: "OCR failed for all #{total} uploaded files. Please check your files and reprocess."
+        })
+
+        notify_teacher(course, :all_failed)
+      else
+        # Some succeeded — advance to extraction if discovery is also done
+        notify_teacher(course, :some_failed)
+        metadata = course.metadata || %{}
+
+        if metadata["discovery_complete"] == true do
+          Courses.advance_to_extraction(course_id)
+        end
+      end
+    end
+  end
+
+  defp notify_teacher(course, reason) do
+    with user_role_id when not is_nil(user_role_id) <- course.created_by_id do
+      {title, body} =
+        case reason do
+          :all_failed ->
+            {"Course setup failed",
+             "We couldn't process the uploaded files for \"#{course.name}\". Please check your files and try reprocessing."}
+
+          :some_failed ->
+            {"Some files couldn't be processed",
+             "One or more files for \"#{course.name}\" failed to process. The course will continue with the files that succeeded."}
+        end
+
+      Notifications.enqueue(user_role_id,
+        type: :course_processing_failed,
+        title: title,
+        body: body,
+        priority: 1,
+        channels: [:in_app, :push],
+        payload: %{"course_id" => course.id}
+      )
     end
   end
 end

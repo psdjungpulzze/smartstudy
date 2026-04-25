@@ -634,6 +634,17 @@ defmodule FunSheep.Courses do
     {elem(result, 0), elem(result, 1)}
   end
 
+  @doc "Returns the count of materials with ocr_status = :failed for a course."
+  def count_failed_materials(course_id) do
+    alias FunSheep.Content.UploadedMaterial
+
+    from(m in UploadedMaterial,
+      where: m.course_id == ^course_id and m.ocr_status == :failed,
+      select: count(m.id)
+    )
+    |> Repo.one()
+  end
+
   @doc "Returns the IDs of materials that have completed OCR for a course."
   def list_completed_material_ids(course_id) do
     alias FunSheep.Content.UploadedMaterial

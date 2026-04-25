@@ -30,6 +30,8 @@ defmodule FunSheep.Notifications.Notification do
     class_digest
     student_at_risk
     daily_habit_nudge
+    course_ready
+    course_processing_failed
   )a
 
   @channels ~w(push email in_app sms)a

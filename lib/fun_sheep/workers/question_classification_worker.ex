@@ -22,6 +22,7 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
     ]
 
   alias FunSheep.{Courses, Repo}
+  alias FunSheep.Courses.Course
   alias FunSheep.Questions.Question
 
   import Ecto.Query
@@ -57,14 +58,22 @@ defmodule FunSheep.Workers.QuestionClassificationWorker do
       Logger.info("[QClassify] No uncategorized questions for args=#{inspect(args)}")
       :ok
     else
-      Logger.info("[QClassify] Classifying #{length(questions)} questions")
+      course_id = hd(questions).course_id
+      course = Repo.get(Course, course_id)
 
-      Enum.each(questions, fn q ->
-        sections = Courses.list_sections_by_chapter(q.chapter_id)
-        classify_one(q, sections)
-      end)
+      if course && course.processing_status == "cancelled" do
+        Logger.info("[QClassify] Skipped cancelled course #{course_id}")
+        :ok
+      else
+        Logger.info("[QClassify] Classifying #{length(questions)} questions")
 
-      :ok
+        Enum.each(questions, fn q ->
+          sections = Courses.list_sections_by_chapter(q.chapter_id)
+          classify_one(q, sections)
+        end)
+
+        :ok
+      end
     end
   end
 
