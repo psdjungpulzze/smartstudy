@@ -32,6 +32,22 @@ defmodule FunSheep.Accounts.UserRole do
     field :alerts_readiness_drop, :boolean, default: false
     field :alerts_goal_achieved, :boolean, default: true
 
+    # Extended notification preferences (Phase 1 — alerts system).
+    field :push_enabled, :boolean, default: true
+    field :notification_frequency, Ecto.Enum,
+      values: [:off, :light, :standard, :all],
+      default: :standard
+
+    field :notification_quiet_start, :integer, default: 21
+    field :notification_quiet_end, :integer, default: 8
+
+    # Per-type alert opt-outs.
+    field :alerts_streak, :boolean, default: true
+    field :alerts_friend_activity, :boolean, default: true
+    field :alerts_test_upcoming, :boolean, default: true
+    field :alerts_student_at_risk, :boolean, default: true
+    field :alerts_class_digest, :boolean, default: true
+
     belongs_to :school, FunSheep.Geo.School
     belongs_to :pinned_test_schedule, FunSheep.Assessments.TestSchedule
 
@@ -67,6 +83,15 @@ defmodule FunSheep.Accounts.UserRole do
       :alerts_skipped_days,
       :alerts_readiness_drop,
       :alerts_goal_achieved,
+      :push_enabled,
+      :notification_frequency,
+      :notification_quiet_start,
+      :notification_quiet_end,
+      :alerts_streak,
+      :alerts_friend_activity,
+      :alerts_test_upcoming,
+      :alerts_student_at_risk,
+      :alerts_class_digest,
       :pinned_test_schedule_id
     ])
     |> validate_required([:interactor_user_id, :role, :email])
