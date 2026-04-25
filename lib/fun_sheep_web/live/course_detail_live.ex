@@ -1440,9 +1440,9 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
-      <%!-- Process button --%>
+      <%!-- Process button — hidden when course is already actively processing --%>
       <div
-        :if={@has_pending && !@uploading}
+        :if={@has_pending && !@uploading && @course.processing_status not in ["processing", "extracting", "validating"]}
         class="flex items-center justify-between pt-3 border-t border-[#F5F5F7]"
       >
         <p class="text-xs text-[#8E8E93]">
