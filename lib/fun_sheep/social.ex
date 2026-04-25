@@ -23,20 +23,24 @@ defmodule FunSheep.Social do
   Idempotent: if the relationship already exists, returns the existing record.
   """
   def follow(follower_id, following_id, source \\ "manual") do
-    case Repo.get_by(Follow, follower_id: follower_id, following_id: following_id) do
-      %Follow{} = existing ->
-        {:ok, existing}
+    if blocked?(follower_id, following_id) do
+      {:error, :blocked}
+    else
+      case Repo.get_by(Follow, follower_id: follower_id, following_id: following_id) do
+        %Follow{} = existing ->
+          {:ok, existing}
 
-      nil ->
-        %Follow{}
-        |> Follow.changeset(%{
-          follower_id: follower_id,
-          following_id: following_id,
-          source: source,
-          status: "active"
-        })
-        |> Repo.insert()
-        |> tap_award_first_follow_badges(follower_id, following_id)
+        nil ->
+          %Follow{}
+          |> Follow.changeset(%{
+            follower_id: follower_id,
+            following_id: following_id,
+            source: source,
+            status: "active"
+          })
+          |> Repo.insert()
+          |> tap_award_first_follow_badges(follower_id, following_id)
+      end
     end
   end
 
@@ -98,6 +102,26 @@ defmodule FunSheep.Social do
 
   ## ── Queries ──────────────────────────────────────────────────────────────
 
+  @doc "Returns true if `follower_id` follows `following_id`."
+  def following?(follower_id, following_id) do
+    Repo.exists?(
+      from(f in Follow,
+        where: f.follower_id == ^follower_id and f.following_id == ^following_id
+      )
+    )
+  end
+
+  @doc "Returns true if either party has blocked the other."
+  def blocked?(user_a_id, user_b_id) do
+    Repo.exists?(
+      from(b in Block,
+        where:
+          (b.blocker_id == ^user_a_id and b.blocked_id == ^user_b_id) or
+            (b.blocker_id == ^user_b_id and b.blocked_id == ^user_a_id)
+      )
+    )
+  end
+
   @doc "Returns list of user_role_ids that `user_id` follows (active + muted)."
   def following_ids(user_id) do
     Repo.all(
@@ -142,34 +166,38 @@ defmodule FunSheep.Social do
   - `:blocked` — either party has blocked the other
   """
   def follow_state(viewer_id, subject_id) do
-    blocked = Repo.exists?(
-      from(b in Block,
-        where:
-          (b.blocker_id == ^viewer_id and b.blocked_id == ^subject_id) or
-            (b.blocker_id == ^subject_id and b.blocked_id == ^viewer_id)
-      )
-    )
-
-    if blocked do
-      :blocked
+    if viewer_id == subject_id do
+      :self
     else
-      viewer_follows = Repo.exists?(
-        from(f in Follow,
-          where: f.follower_id == ^viewer_id and f.following_id == ^subject_id
+      blocked = Repo.exists?(
+        from(b in Block,
+          where:
+            (b.blocker_id == ^viewer_id and b.blocked_id == ^subject_id) or
+              (b.blocker_id == ^subject_id and b.blocked_id == ^viewer_id)
         )
       )
 
-      subject_follows = Repo.exists?(
-        from(f in Follow,
-          where: f.follower_id == ^subject_id and f.following_id == ^viewer_id
+      if blocked do
+        :blocked
+      else
+        viewer_follows = Repo.exists?(
+          from(f in Follow,
+            where: f.follower_id == ^viewer_id and f.following_id == ^subject_id
+          )
         )
-      )
 
-      cond do
-        viewer_follows and subject_follows -> :mutual
-        viewer_follows -> :following
-        subject_follows -> :followed_by
-        true -> :none
+        subject_follows = Repo.exists?(
+          from(f in Follow,
+            where: f.follower_id == ^subject_id and f.following_id == ^viewer_id
+          )
+        )
+
+        cond do
+          viewer_follows and subject_follows -> :mutual
+          viewer_follows -> :following
+          subject_follows -> :followed_by
+          true -> :not_following
+        end
       end
     end
   end
@@ -284,16 +312,24 @@ defmodule FunSheep.Social do
     end
   end
 
-  @doc "Total number of students at the given school."
-  def school_peer_count(school_id) when is_nil(school_id), do: 0
+  @doc "Total number of student peers at the same school as `user_role_id`."
+  def school_peer_count(user_role_id) do
+    case Repo.get(UserRole, user_role_id) do
+      nil ->
+        0
 
-  def school_peer_count(school_id) do
-    Repo.one(
-      from(ur in UserRole,
-        where: ur.school_id == ^school_id and ur.role == :student,
-        select: count(ur.id)
-      )
-    )
+      %UserRole{school_id: nil} ->
+        0
+
+      %UserRole{school_id: school_id} ->
+        Repo.one(
+          from(ur in UserRole,
+            where:
+              ur.school_id == ^school_id and ur.role == :student and ur.id != ^user_role_id,
+            select: count(ur.id)
+          )
+        )
+    end
   end
 
   ## ── Flock with social ────────────────────────────────────────────────────
