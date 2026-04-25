@@ -51,7 +51,7 @@ defmodule FunSheepWeb.TestFormatLiveTest do
 
       assert html =~ "Test Format"
       assert html =~ "Midterm"
-      assert html =~ "Define Test Sections"
+      assert html =~ "Structured Sections"
     end
 
     test "can add a section", %{conn: conn, user_role: ur, schedule: schedule} do

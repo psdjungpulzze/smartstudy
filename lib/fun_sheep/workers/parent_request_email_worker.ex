@@ -38,7 +38,13 @@ defmodule FunSheep.Workers.ParentRequestEmailWorker do
   def schedule_send(%Request{} = request) do
     request = Repo.preload(request, [:guardian, :student])
     tz = resolve_timezone(request)
-    scheduled_at = next_send_time(DateTime.utc_now(), tz)
+
+    scheduled_at =
+      if quiet_hours_enabled?() do
+        next_send_time(DateTime.utc_now(), tz)
+      else
+        DateTime.utc_now()
+      end
 
     %{request_id: request.id}
     |> __MODULE__.new(scheduled_at: scheduled_at)
@@ -57,7 +63,7 @@ defmodule FunSheep.Workers.ParentRequestEmailWorker do
         request = Repo.preload(request, [:guardian, :student])
         tz = resolve_timezone(request)
 
-        if in_quiet_hours?(DateTime.utc_now(), tz) do
+        if quiet_hours_enabled?() and in_quiet_hours?(DateTime.utc_now(), tz) do
           # Safety net: the initial schedule should already avoid this,
           # but if the worker fires inside quiet hours (timezone change,
           # clock skew, retry after failure), snooze to the next window.
@@ -188,5 +194,9 @@ defmodule FunSheep.Workers.ParentRequestEmailWorker do
       {:ok, utc} -> utc
       _ -> dt
     end
+  end
+
+  defp quiet_hours_enabled? do
+    Application.get_env(:fun_sheep, :quiet_hours_enabled, true)
   end
 end

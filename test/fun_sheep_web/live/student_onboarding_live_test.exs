@@ -115,7 +115,7 @@ defmodule FunSheepWeb.StudentOnboardingLiveTest do
 
       html = render(view)
       assert html =~ "Find your school"
-      assert html =~ "Step 2 of 4"
+      assert html =~ "Step 2 of 5"
     end
   end
 
@@ -135,7 +135,7 @@ defmodule FunSheepWeb.StudentOnboardingLiveTest do
       view |> element("button[phx-click='step2_skip']") |> render_click()
 
       html = render(view)
-      assert html =~ "Step 3 of 4"
+      assert html =~ "Step 3 of 5"
     end
 
     test "step2_next advances to step 3", %{conn: conn} do
@@ -145,7 +145,7 @@ defmodule FunSheepWeb.StudentOnboardingLiveTest do
 
       view |> element("button[phx-click='step2_next']") |> render_click()
 
-      assert render(view) =~ "Step 3 of 4"
+      assert render(view) =~ "Step 3 of 5"
     end
   end
 
@@ -194,8 +194,10 @@ defmodule FunSheepWeb.StudentOnboardingLiveTest do
       view |> element("button[phx-click='step1_next']") |> render_click()
       # Step 2
       view |> element("button[phx-click='step2_skip']") |> render_click()
-      # Step 3 — no courses, click dashboard CTA
+      # Step 3 — no courses, click continue
       view |> element("button[phx-click='step3_continue']") |> render_click()
+      # Step 4 — follow classmates screen, click done
+      view |> element("button[phx-click='step4_done']") |> render_click()
 
       html = render(view)
       assert html =~ "You're all set" or html =~ "Start Practicing"

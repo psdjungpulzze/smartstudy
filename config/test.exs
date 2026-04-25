@@ -90,3 +90,7 @@ config :phoenix,
 # sandboxed DB write is immediately visible and teardown is clean.
 config :fun_with_flags, :cache, enabled: false
 config :fun_with_flags, :cache_bust_notifications, enabled: false
+
+# Disable quiet-hours enforcement in tests so email delivery assertions
+# don't depend on what UTC hour the CI machine happens to run at.
+config :fun_sheep, :quiet_hours_enabled, false

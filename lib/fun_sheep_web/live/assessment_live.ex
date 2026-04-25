@@ -1032,7 +1032,7 @@ defmodule FunSheepWeb.AssessmentLive do
             </p>
             <p
               :if={
-                !@feedback.is_correct and @feedback[:ai_feedback] and is_nil(@feedback[:grade_result])
+                !@feedback.is_correct and not is_nil(@feedback[:ai_feedback]) and is_nil(@feedback[:grade_result])
               }
               class="text-sm text-[#8E8E93] mt-1"
             >

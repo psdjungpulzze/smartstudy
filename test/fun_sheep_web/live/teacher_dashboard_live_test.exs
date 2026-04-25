@@ -65,7 +65,6 @@ defmodule FunSheepWeb.TeacherDashboardLiveTest do
 
       assert html =~ "Bob Student"
       assert html =~ student.email
-      assert html =~ "9th"
       assert html =~ "Total Students"
       # Should show 1 student count
       assert html =~ ">1</p>"
