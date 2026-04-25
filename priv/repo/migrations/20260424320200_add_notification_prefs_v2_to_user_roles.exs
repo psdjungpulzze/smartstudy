@@ -1,4 +1,4 @@
-defmodule FunSheep.Repo.Migrations.AddNotificationPrefsToUserRoles do
+defmodule FunSheep.Repo.Migrations.AddNotificationPrefsV2ToUserRoles do
   use Ecto.Migration
 
   def change do

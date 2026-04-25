@@ -83,6 +83,58 @@ defmodule FunSheep.Notifications.NotificationPreferenceTest do
       assert changeset.errors[:quiet_start]
     end
 
+    test "rejects quiet_end outside 0-23", %{student: s} do
+      assert {:error, changeset} =
+               Notifications.upsert_preference(%{
+                 user_role_id: s.id,
+                 channel: :in_app,
+                 enabled: true,
+                 frequency_tier: :standard,
+                 quiet_end: 24
+               })
+
+      assert changeset.errors[:quiet_end]
+    end
+
+    test "rejects preferred_hour outside 0-23", %{student: s} do
+      assert {:error, changeset} =
+               Notifications.upsert_preference(%{
+                 user_role_id: s.id,
+                 channel: :push,
+                 enabled: true,
+                 frequency_tier: :standard,
+                 preferred_hour: -1
+               })
+
+      assert changeset.errors[:preferred_hour]
+    end
+
+    test "accepts preferred_hour within 0-23", %{student: s} do
+      assert {:ok, pref} =
+               Notifications.upsert_preference(%{
+                 user_role_id: s.id,
+                 channel: :push,
+                 enabled: true,
+                 frequency_tier: :standard,
+                 preferred_hour: 9
+               })
+
+      assert pref.preferred_hour == 9
+    end
+
+    test "accepts all valid frequency tiers", %{student: s} do
+      for {tier, i} <- Enum.with_index([:off, :light, :standard, :all]) do
+        assert {:ok, _} =
+                 Notifications.upsert_preference(%{
+                   user_role_id: s.id,
+                   channel: :push,
+                   notification_type: "type_#{i}",
+                   enabled: true,
+                   frequency_tier: tier
+                 })
+      end
+    end
+
     test "enforces uniqueness on (user_role_id, channel, notification_type)", %{student: s} do
       {:ok, _} =
         Notifications.upsert_preference(%{

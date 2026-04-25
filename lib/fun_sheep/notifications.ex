@@ -404,22 +404,10 @@ defmodule FunSheep.Notifications do
 
     if type_str do
       # Try type-specific row first, fall back to channel default.
-      Repo.get_by(NotificationPreference,
-        user_role_id: user_role_id,
-        channel: channel_str,
-        notification_type: type_str
-      ) ||
-        Repo.get_by(NotificationPreference,
-          user_role_id: user_role_id,
-          channel: channel_str,
-          notification_type: nil
-        )
+      find_preference(user_role_id, channel_str, type_str) ||
+        find_preference(user_role_id, channel_str, nil)
     else
-      Repo.get_by(NotificationPreference,
-        user_role_id: user_role_id,
-        channel: channel_str,
-        notification_type: nil
-      )
+      find_preference(user_role_id, channel_str, nil)
     end
   end
 
@@ -434,13 +422,10 @@ defmodule FunSheep.Notifications do
     user_role_id = Map.get(attrs, :user_role_id) || Map.get(attrs, "user_role_id")
     channel = Map.get(attrs, :channel) || Map.get(attrs, "channel")
     notification_type = Map.get(attrs, :notification_type) || Map.get(attrs, "notification_type")
+    channel_str = to_string(channel)
+    type_str = notification_type && to_string(notification_type)
 
-    existing =
-      Repo.get_by(NotificationPreference,
-        user_role_id: user_role_id,
-        channel: to_string(channel),
-        notification_type: notification_type && to_string(notification_type)
-      )
+    existing = find_preference(user_role_id, channel_str, type_str)
 
     changeset =
       (existing || %NotificationPreference{})
@@ -451,6 +436,26 @@ defmodule FunSheep.Notifications do
     else
       Repo.insert(changeset)
     end
+  end
+
+  defp find_preference(user_role_id, channel_str, nil) do
+    from(p in NotificationPreference,
+      where:
+        p.user_role_id == ^user_role_id and
+          p.channel == ^channel_str and
+          is_nil(p.notification_type)
+    )
+    |> Repo.one()
+  end
+
+  defp find_preference(user_role_id, channel_str, type_str) do
+    from(p in NotificationPreference,
+      where:
+        p.user_role_id == ^user_role_id and
+          p.channel == ^channel_str and
+          p.notification_type == ^type_str
+    )
+    |> Repo.one()
   end
 
   ## ── PubSub ────────────────────────────────────────────────────────────────

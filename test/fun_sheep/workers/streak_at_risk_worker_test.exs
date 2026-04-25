@@ -108,4 +108,43 @@ defmodule FunSheep.Workers.StreakAtRiskWorkerTest do
 
     assert push_count == 0
   end
+
+  test "perform/1 skips a student who is in their quiet hours" do
+    student = make_at_risk_student()
+
+    h = DateTime.utc_now().hour
+    {qs, qe} = if h < 23, do: {0, 23}, else: {23, 0}
+
+    Repo.update_all(
+      from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^student.id),
+      set: [notification_quiet_start: qs, notification_quiet_end: qe]
+    )
+
+    assert :ok = perform_job(StreakAtRiskWorker, %{})
+
+    count =
+      from(n in Notification, where: n.user_role_id == ^student.id)
+      |> Repo.aggregate(:count)
+
+    assert count == 0
+  end
+
+  test "perform/1 does not alert a student with notification_frequency=:off" do
+    student = make_at_risk_student()
+
+    Repo.update_all(
+      from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^student.id),
+      set: [notification_frequency: :off]
+    )
+
+    assert :ok = perform_job(StreakAtRiskWorker, %{})
+
+    count =
+      from(n in Notification,
+        where: n.user_role_id == ^student.id and n.channel == :push
+      )
+      |> Repo.aggregate(:count)
+
+    assert count == 0
+  end
 end

@@ -89,4 +89,49 @@ defmodule FunSheep.Workers.TestUpcomingWorkerTest do
 
     assert count == 0
   end
+
+  test "perform/1 does not alert a student with alerts_test_upcoming=false" do
+    student = ContentFixtures.create_user_role(%{role: :student})
+
+    Repo.update_all(
+      from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^student.id),
+      set: [alerts_test_upcoming: false]
+    )
+
+    _schedule = create_test_schedule(student, 3)
+
+    assert :ok = perform_job(TestUpcomingWorker, %{})
+
+    count =
+      from(n in Notification,
+        where: n.user_role_id == ^student.id and n.type == :test_upcoming_3d
+      )
+      |> Repo.aggregate(:count)
+
+    assert count == 0
+  end
+
+  test "perform/1 does not send guardian alert when guardian has alerts_test_upcoming=false" do
+    student = ContentFixtures.create_user_role(%{role: :student})
+    parent = ContentFixtures.create_user_role(%{role: :parent})
+    {:ok, sg} = Accounts.invite_guardian(parent.id, student.email, :parent)
+    {:ok, _} = Accounts.accept_guardian_invite(sg.id)
+
+    Repo.update_all(
+      from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^parent.id),
+      set: [alerts_test_upcoming: false]
+    )
+
+    _schedule = create_test_schedule(student, 3)
+
+    assert :ok = perform_job(TestUpcomingWorker, %{})
+
+    parent_count =
+      from(n in Notification,
+        where: n.user_role_id == ^parent.id and n.type == :test_upcoming_3d
+      )
+      |> Repo.aggregate(:count)
+
+    assert parent_count == 0
+  end
 end

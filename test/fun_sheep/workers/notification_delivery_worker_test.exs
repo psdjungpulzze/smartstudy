@@ -135,4 +135,61 @@ defmodule FunSheep.Workers.NotificationDeliveryWorkerTest do
       assert updated.status == :sent
     end
   end
+
+  describe "perform/1 — SMS channel" do
+    test "marks sms notifications as :failed immediately" do
+      student = create_student()
+      notif = enqueue_notification!(student, :sms)
+
+      assert :ok = perform_job(NotificationDeliveryWorker, %{"notification_id" => notif.id})
+
+      updated = Repo.get!(Notification, notif.id)
+      assert updated.status == :failed
+    end
+  end
+
+
+  describe "perform/1 — quiet hours" do
+    defp quiet_student_with_token do
+      h = DateTime.utc_now().hour
+      # Build a quiet window that is guaranteed to cover the current UTC hour:
+      # same-day window [0, 23) covers hours 0-22; if h == 23, use overnight window [23, 0).
+      {qs, qe} = if h < 23, do: {0, 23}, else: {23, 0}
+
+      student =
+        create_student(%{
+          push_enabled: true,
+          notification_frequency: :standard,
+          notification_quiet_start: qs,
+          notification_quiet_end: qe
+        })
+
+      # Register a push token so the non-quiet path would send
+      {:ok, _} = Notifications.upsert_push_token(student.id, "quiet_token_#{student.id}", :ios)
+      student
+    end
+
+    test "skips push delivery during quiet hours (status stays :pending)" do
+      student = quiet_student_with_token()
+      notif = enqueue_notification!(student, :push)
+
+      assert :ok = perform_job(NotificationDeliveryWorker, %{"notification_id" => notif.id})
+
+      updated = Repo.get!(Notification, notif.id)
+      assert updated.status == :pending
+    end
+
+    test "skips email delivery during quiet hours (status stays :pending)" do
+      h = DateTime.utc_now().hour
+      {qs, qe} = if h < 23, do: {0, 23}, else: {23, 0}
+
+      student = create_student(%{notification_quiet_start: qs, notification_quiet_end: qe})
+      notif = enqueue_notification!(student, :email)
+
+      assert :ok = perform_job(NotificationDeliveryWorker, %{"notification_id" => notif.id})
+
+      updated = Repo.get!(Notification, notif.id)
+      assert updated.status == :pending
+    end
+  end
 end

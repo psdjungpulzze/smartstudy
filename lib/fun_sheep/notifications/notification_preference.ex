@@ -54,5 +54,8 @@ defmodule FunSheep.Notifications.NotificationPreference do
     |> unique_constraint([:user_role_id, :channel, :notification_type],
       name: :notification_preferences_user_channel_type_index
     )
+    |> unique_constraint([:user_role_id, :channel],
+      name: :notification_preferences_user_channel_null_type_index
+    )
   end
 end

@@ -44,8 +44,17 @@ defmodule FunSheep.Repo.Migrations.CreateNotificationPreferences do
     end
 
     # Enforce one preference row per (user, channel, type) combination.
+    # Two indexes are needed because PostgreSQL treats NULL != NULL in a standard
+    # unique index, which would allow multiple channel-default rows (type IS NULL).
     create unique_index(:notification_preferences, [:user_role_id, :channel, :notification_type],
-             name: :notification_preferences_user_channel_type_index
+             name: :notification_preferences_user_channel_type_index,
+             where: "notification_type IS NOT NULL"
+           )
+
+    # Separate partial unique index for the channel-default rows (type IS NULL).
+    create unique_index(:notification_preferences, [:user_role_id, :channel],
+             name: :notification_preferences_user_channel_null_type_index,
+             where: "notification_type IS NULL"
            )
 
     create index(:notification_preferences, [:user_role_id])

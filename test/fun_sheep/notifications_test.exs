@@ -6,6 +6,8 @@ defmodule FunSheep.NotificationsTest do
 
   use FunSheep.DataCase, async: true
 
+  import Ecto.Query
+
   alias FunSheep.{Accounts, Notifications, Repo}
   alias FunSheep.ContentFixtures
   alias FunSheep.Engagement.StudySession
@@ -84,6 +86,11 @@ defmodule FunSheep.NotificationsTest do
     test "rejects a tampered token" do
       assert {:error, _} = UnsubscribeToken.verify("not-a-valid-token")
     end
+
+    test "rejects a non-binary input" do
+      assert {:error, :invalid} = UnsubscribeToken.verify(nil)
+      assert {:error, :invalid} = UnsubscribeToken.verify(123)
+    end
   end
 
   # ── Alert enqueue / read / count ─────────────────────────────────────────
@@ -152,6 +159,64 @@ defmodule FunSheep.NotificationsTest do
         )
 
       assert notif.payload["streak"] == 7
+    end
+
+    test "skips push when notification_frequency is :off" do
+      {:ok, student} =
+        Accounts.create_user_role(%{
+          interactor_user_id: "itr_#{System.unique_integer([:positive])}",
+          role: :student,
+          email: "freqoff_#{System.unique_integer([:positive])}@test.com",
+          push_enabled: true,
+          notification_frequency: :off
+        })
+
+      {:ok, notifs} =
+        Notifications.enqueue(student.id,
+          type: :streak_at_risk,
+          body: "body",
+          channels: [:in_app, :push]
+        )
+
+      assert Enum.all?(notifs, &(&1.channel == :in_app))
+    end
+
+    test "enqueues email channel when requested", %{student: s} do
+      {:ok, notifs} =
+        Notifications.enqueue(s.id,
+          type: :weekly_digest,
+          body: "Your weekly digest",
+          channels: [:email]
+        )
+
+      assert length(notifs) == 1
+      assert hd(notifs).channel == :email
+    end
+
+    test "enqueues sms channel when requested", %{student: s} do
+      {:ok, notifs} =
+        Notifications.enqueue(s.id,
+          type: :streak_at_risk,
+          body: "body",
+          channels: [:sms]
+        )
+
+      assert length(notifs) == 1
+      assert hd(notifs).channel == :sms
+    end
+
+    test "stores a custom scheduled_for timestamp", %{student: s} do
+      future = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, [notif]} =
+        Notifications.enqueue(s.id,
+          type: :streak_at_risk,
+          body: "body",
+          channels: [:in_app],
+          scheduled_for: future
+        )
+
+      assert DateTime.truncate(notif.scheduled_for, :second) == future
     end
   end
 
@@ -248,6 +313,82 @@ defmodule FunSheep.NotificationsTest do
       tokens = Notifications.list_push_tokens(s.id)
       assert length(tokens) == 1
       assert hd(tokens).token == "tok1"
+    end
+  end
+
+  # ── Upcoming test alerts query ────────────────────────────────────────────
+
+  describe "upcoming_test_alerts/0" do
+    defp create_test_schedule(student, days_from_today) do
+      course = ContentFixtures.create_course()
+      test_date = Date.add(Date.utc_today(), days_from_today)
+
+      {:ok, ts} =
+        FunSheep.Assessments.create_test_schedule(%{
+          user_role_id: student.id,
+          course_id: course.id,
+          name: "Test #{days_from_today}d",
+          test_date: test_date,
+          scope: %{"chapters" => [1]}
+        })
+
+      ts
+    end
+
+    test "returns T-3 alert entries for eligible students" do
+      student = ContentFixtures.create_user_role(%{role: :student, alerts_test_upcoming: true})
+      _ts = create_test_schedule(student, 3)
+
+      alerts = Notifications.upcoming_test_alerts()
+      student_ids = Enum.map(alerts, & &1.student_id)
+      assert student.id in student_ids
+    end
+
+    test "returns T-1 alert entries for eligible students" do
+      student = ContentFixtures.create_user_role(%{role: :student, alerts_test_upcoming: true})
+      _ts = create_test_schedule(student, 1)
+
+      alerts = Notifications.upcoming_test_alerts()
+      student_ids = Enum.map(alerts, & &1.student_id)
+      assert student.id in student_ids
+    end
+
+    test "excludes students with alerts_test_upcoming=false" do
+      student = ContentFixtures.create_user_role(%{role: :student})
+
+      Repo.update_all(
+        from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^student.id),
+        set: [alerts_test_upcoming: false]
+      )
+
+      _ts = create_test_schedule(student, 3)
+
+      alerts = Notifications.upcoming_test_alerts()
+      student_ids = Enum.map(alerts, & &1.student_id)
+      refute student.id in student_ids
+    end
+
+    test "excludes suspended students" do
+      student = ContentFixtures.create_user_role(%{role: :student, alerts_test_upcoming: true})
+      _ts = create_test_schedule(student, 3)
+
+      Repo.update_all(
+        from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^student.id),
+        set: [suspended_at: DateTime.utc_now() |> DateTime.truncate(:second)]
+      )
+
+      alerts = Notifications.upcoming_test_alerts()
+      student_ids = Enum.map(alerts, & &1.student_id)
+      refute student.id in student_ids
+    end
+
+    test "does not return entries for tests not on T-3 or T-1" do
+      student = ContentFixtures.create_user_role(%{role: :student, alerts_test_upcoming: true})
+      _ts = create_test_schedule(student, 5)
+
+      alerts = Notifications.upcoming_test_alerts()
+      student_ids = Enum.map(alerts, & &1.student_id)
+      refute student.id in student_ids
     end
   end
 
