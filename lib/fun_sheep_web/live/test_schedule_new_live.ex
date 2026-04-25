@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.TestScheduleNewLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Courses}
+  alias FunSheep.{Assessments, Courses, FixedTests}
 
   @question_types ~w(multiple_choice short_answer free_response true_false)
 
@@ -28,11 +28,12 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       end
 
     {:ok,
-     assign(socket,
+     socket
+     |> assign(
        page_title:
          if(action == :edit,
            do: "Edit Test - #{course.name}",
-           else: "Schedule New Test - #{course.name}"
+           else: "New Test - #{course.name}"
          ),
        live_action: action,
        course: course,
@@ -46,6 +47,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
        form: to_form(changeset),
        form_name: form_name,
        form_test_date: form_date,
+       # Test type (new tests only; edit always adaptive)
+       test_type: :adaptive,
        # Format
        format_description: "",
        format_sections: [],
@@ -55,10 +58,23 @@ defmodule FunSheepWeb.TestScheduleNewLive do
        new_section_points: 1,
        time_limit: nil,
        question_types: @question_types
+     )
+     |> allow_upload(:questions_file,
+       accept: ~w(.csv),
+       max_entries: 1,
+       max_file_size: 2_000_000
      )}
   end
 
   @impl true
+  def handle_event("set_test_type", %{"type" => type}, socket) do
+    {:noreply, assign(socket, test_type: String.to_existing_atom(type))}
+  end
+
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :questions_file, ref)}
+  end
+
   def handle_event("toggle_expand", %{"chapter-id" => chapter_id}, socket) do
     expanded = socket.assigns.expanded_chapter_ids
 
@@ -161,8 +177,12 @@ defmodule FunSheepWeb.TestScheduleNewLive do
      )}
   end
 
-  def handle_event("update_form", %{"name" => name, "test_date" => test_date}, socket) do
+  def handle_event("validate", %{"name" => name, "test_date" => test_date}, socket) do
     {:noreply, assign(socket, form_name: name, form_test_date: test_date)}
+  end
+
+  def handle_event("validate", _params, socket) do
+    {:noreply, socket}
   end
 
   def handle_event("update_description", %{"format_description" => text}, socket) do
@@ -215,6 +235,59 @@ defmodule FunSheepWeb.TestScheduleNewLive do
   end
 
   def handle_event("save", %{"name" => name, "test_date" => test_date}, socket) do
+    case socket.assigns.test_type do
+      :custom -> save_custom_test(name, socket)
+      :adaptive -> save_adaptive_test(name, test_date, socket)
+    end
+  end
+
+  defp save_custom_test(name, socket) do
+    user_role_id = socket.assigns.current_user["user_role_id"]
+    course_id = socket.assigns.course_id
+
+    if String.trim(name) == "" do
+      {:noreply, put_flash(socket, :error, "Test name is required")}
+    else
+      attrs = %{
+        "title" => name,
+        "course_id" => course_id,
+        "created_by_id" => user_role_id,
+        "visibility" => "class"
+      }
+
+      case FixedTests.create_bank(attrs) do
+        {:ok, bank} ->
+          all_questions =
+            consume_uploaded_entries(socket, :questions_file, fn %{path: path}, _entry ->
+              {:ok, parse_questions_csv(path)}
+            end)
+            |> List.flatten()
+
+          {flash_key, flash_msg} =
+            if all_questions == [] do
+              {:info, "Custom test created — add questions now"}
+            else
+              case FixedTests.bulk_import_questions(bank, all_questions) do
+                {:ok, _} ->
+                  {:info, "Custom test created with #{length(all_questions)} question(s)"}
+
+                {:error, _} ->
+                  {:error, "Test created but some questions failed to import. Check your CSV format."}
+              end
+            end
+
+          {:noreply,
+           socket
+           |> put_flash(flash_key, flash_msg)
+           |> push_navigate(to: ~p"/custom-tests/#{bank.id}")}
+
+        {:error, changeset} ->
+          {:noreply, assign(socket, form: to_form(changeset))}
+      end
+    end
+  end
+
+  defp save_adaptive_test(name, test_date, socket) do
     user_role_id = socket.assigns.current_user["user_role_id"]
     course_id = socket.assigns.selected_course_id
     chapter_ids = MapSet.to_list(socket.assigns.selected_chapter_ids)
@@ -240,7 +313,6 @@ defmodule FunSheepWeb.TestScheduleNewLive do
 
     case result do
       {:ok, schedule} ->
-        # Create format template if sections were defined (only on new)
         if socket.assigns.live_action == :new && socket.assigns.format_sections != [] do
           structure = %{
             "sections" => socket.assigns.format_sections,
@@ -353,14 +425,46 @@ defmodule FunSheepWeb.TestScheduleNewLive do
         </.link>
         <div>
           <h1 class="text-3xl font-bold text-[#1C1C1E]">
-            {if @live_action == :edit, do: "Edit Test", else: "Schedule New Test"}
+            {if @live_action == :edit, do: "Edit Test", else: "New Test"}
           </h1>
           <p class="text-sm text-[#8E8E93]">{@course.name}</p>
         </div>
       </div>
 
       <div class="bg-white rounded-2xl shadow-md p-8">
-        <form phx-submit="save" phx-change="update_form" class="space-y-6">
+        <%!-- Test type toggle (new tests only) --%>
+        <div :if={@live_action == :new} class="flex rounded-xl bg-[#F5F5F7] p-1 mb-6">
+          <button
+            type="button"
+            phx-click="set_test_type"
+            phx-value-type="adaptive"
+            class={[
+              "flex-1 py-2 text-sm font-medium rounded-lg transition-colors",
+              if(@test_type == :adaptive,
+                do: "bg-white shadow-sm text-[#1C1C1E]",
+                else: "text-[#8E8E93] hover:text-[#1C1C1E]"
+              )
+            ]}
+          >
+            Adaptive (AI questions)
+          </button>
+          <button
+            type="button"
+            phx-click="set_test_type"
+            phx-value-type="custom"
+            class={[
+              "flex-1 py-2 text-sm font-medium rounded-lg transition-colors",
+              if(@test_type == :custom,
+                do: "bg-white shadow-sm text-[#1C1C1E]",
+                else: "text-[#8E8E93] hover:text-[#1C1C1E]"
+              )
+            ]}
+          >
+            Custom (upload questions)
+          </button>
+        </div>
+
+        <form phx-submit="save" phx-change="validate" class="space-y-6">
           <div>
             <label for="test-name" class="block text-sm font-medium text-[#1C1C1E] mb-2">
               Test Name
@@ -376,7 +480,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             />
           </div>
 
-          <div>
+          <%!-- Test date: required for adaptive, optional for custom --%>
+          <div :if={@test_type == :adaptive or @live_action == :edit}>
             <label for="test-date" class="block text-sm font-medium text-[#1C1C1E] mb-2">
               Test Date
             </label>
@@ -391,7 +496,8 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             />
           </div>
 
-          <div :if={@chapters != []}>
+          <%!-- Adaptive: chapter scope selection --%>
+          <div :if={@test_type == :adaptive and @chapters != []}>
             <div class="flex items-center justify-between mb-2">
               <label class="block text-sm font-medium text-[#1C1C1E]">
                 Test Scope
@@ -421,7 +527,6 @@ defmodule FunSheepWeb.TestScheduleNewLive do
                 <% expanded = MapSet.member?(@expanded_chapter_ids, chapter.id) %>
 
                 <div class="rounded-lg">
-                  <%!-- Chapter/Unit row --%>
                   <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white transition-colors">
                     <%= if has_sections do %>
                       <button
@@ -459,7 +564,6 @@ defmodule FunSheepWeb.TestScheduleNewLive do
                     </label>
                   </div>
 
-                  <%!-- Sections (children) --%>
                   <div :if={has_sections && expanded} class="ml-10 space-y-0.5 pb-1">
                     <label
                       :for={section <- chapter.sections}
@@ -486,6 +590,59 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             </p>
           </div>
 
+          <%!-- Custom: question upload --%>
+          <div :if={@test_type == :custom} class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-[#1C1C1E] mb-1">
+                Upload Questions (CSV) <span class="text-[#8E8E93] font-normal">— optional</span>
+              </label>
+              <p class="text-xs text-[#8E8E93] mb-3">
+                CSV headers: <code class="bg-[#F5F5F7] px-1 py-0.5 rounded text-xs">question_type, question_text, answer_text, explanation, points</code>.
+                Valid types: <code class="bg-[#F5F5F7] px-1 py-0.5 rounded text-xs">multiple_choice</code>,
+                <code class="bg-[#F5F5F7] px-1 py-0.5 rounded text-xs">true_false</code>,
+                <code class="bg-[#F5F5F7] px-1 py-0.5 rounded text-xs">short_answer</code>.
+                You can also add questions manually after creating the test.
+              </p>
+
+              <div
+                class="border-2 border-dashed border-[#E5E5EA] rounded-2xl p-6 text-center hover:border-[#4CD964] transition-colors"
+                phx-drop-target={@uploads.questions_file.ref}
+              >
+                <.icon name="hero-document-arrow-up" class="w-8 h-8 text-[#8E8E93] mx-auto mb-2" />
+                <p class="text-sm text-[#8E8E93] mb-2">Drop a CSV file here, or</p>
+                <label class="cursor-pointer bg-[#4CD964] hover:bg-[#3DBF55] text-white text-sm font-medium px-4 py-2 rounded-full transition-colors inline-block">
+                  Choose File
+                  <.live_file_input upload={@uploads.questions_file} class="sr-only" />
+                </label>
+              </div>
+
+              <%!-- Uploaded file preview --%>
+              <div :for={entry <- @uploads.questions_file.entries} class="mt-3 flex items-center gap-3 p-3 bg-[#F5F5F7] rounded-xl">
+                <.icon name="hero-document-text" class="w-5 h-5 text-[#4CD964] shrink-0" />
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-[#1C1C1E] truncate">{entry.client_name}</p>
+                  <p class="text-xs text-[#8E8E93]">{Float.round(entry.client_size / 1024, 1)} KB</p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="cancel_upload"
+                  phx-value-ref={entry.ref}
+                  class="text-[#8E8E93] hover:text-[#FF3B30] transition-colors"
+                >
+                  <.icon name="hero-x-mark" class="w-4 h-4" />
+                </button>
+              </div>
+
+              <%!-- Upload errors --%>
+              <p
+                :for={err <- upload_errors(@uploads.questions_file)}
+                class="mt-2 text-xs text-[#FF3B30]"
+              >
+                {upload_error_message(err)}
+              </p>
+            </div>
+          </div>
+
           <div class="flex items-center justify-end gap-4 pt-4">
             <.link
               navigate={~p"/courses/#{@course_id}/tests"}
@@ -495,17 +652,21 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             </.link>
             <button
               type="submit"
-              phx-disable-with={if @live_action == :edit, do: "Saving...", else: "Scheduling..."}
+              phx-disable-with="Saving..."
               class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {if @live_action == :edit, do: "Save Changes", else: "Schedule Test"}
+              {cond do
+                @live_action == :edit -> "Save Changes"
+                @test_type == :custom -> "Create Test"
+                true -> "Schedule Test"
+              end}
             </button>
           </div>
         </form>
       </div>
 
-      <%!-- Test Format (Optional) --%>
-      <div class="bg-white rounded-2xl shadow-md p-8 mt-6">
+      <%!-- Test Format (adaptive only, optional) --%>
+      <div :if={@test_type == :adaptive} class="bg-white rounded-2xl shadow-md p-8 mt-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-1">Test Format</h2>
         <p class="text-sm text-[#8E8E93] mb-4">
           Paste the format you gave students — you can parse it into sections after saving
@@ -520,7 +681,6 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           >{@format_description}</textarea>
         </form>
 
-        <%!-- Existing sections --%>
         <div :if={@format_sections != []} class="space-y-2 mb-4">
           <div
             :for={{section, index} <- Enum.with_index(@format_sections)}
@@ -544,7 +704,6 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           </div>
         </div>
 
-        <%!-- Add section form --%>
         <form phx-change="update_section_form" phx-submit="add_section" class="space-y-3">
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -603,7 +762,6 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           </button>
         </form>
 
-        <%!-- Time Limit --%>
         <div class="mt-4 pt-4 border-t border-[#F5F5F7]">
           <form phx-change="update_time_limit">
             <div class="flex items-center gap-3">
@@ -623,5 +781,33 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       </div>
     </div>
     """
+  end
+
+  defp upload_error_message(:too_large), do: "File too large — max 2 MB"
+  defp upload_error_message(:too_many_files), do: "Only one file allowed"
+  defp upload_error_message(:not_accepted), do: "Only CSV files are accepted"
+  defp upload_error_message(err), do: "Upload error: #{inspect(err)}"
+
+  defp parse_questions_csv(path) do
+    valid_types = ~w(multiple_choice true_false short_answer)
+
+    path
+    |> FunSheep.Ingest.CsvParser.stream()
+    |> Stream.map(fn row ->
+      %{
+        "question_type" => Map.get(row, "question_type") || "short_answer",
+        "question_text" => Map.get(row, "question_text") || "",
+        "answer_text" => Map.get(row, "answer_text") || "",
+        "explanation" => Map.get(row, "explanation"),
+        "points" => parse_int(Map.get(row, "points", "1"), 1)
+      }
+    end)
+    |> Stream.filter(fn row ->
+      row["question_text"] != "" and row["answer_text"] != "" and
+        row["question_type"] in valid_types
+    end)
+    |> Enum.to_list()
+  rescue
+    _ -> []
   end
 end
