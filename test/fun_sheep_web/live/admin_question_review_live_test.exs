@@ -53,8 +53,8 @@ defmodule FunSheepWeb.AdminQuestionReviewLiveTest do
       conn = admin_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/admin/questions/review")
 
-      assert html =~ "Queue is empty"
-      assert html =~ "Question Review Queue"
+      assert html =~ "No questions in this view"
+      assert html =~ "Questions"
     end
 
     test "lists questions in the review queue", %{conn: conn} do
@@ -90,7 +90,7 @@ defmodule FunSheepWeb.AdminQuestionReviewLiveTest do
 
       html = render_click(view, "approve", %{"id" => q.id})
 
-      assert html =~ "Queue is empty"
+      assert html =~ "No questions in this view"
       assert Questions.get_question!(q.id).validation_status == :passed
     end
   end
@@ -104,7 +104,7 @@ defmodule FunSheepWeb.AdminQuestionReviewLiveTest do
 
       html = render_click(view, "reject", %{"id" => q.id})
 
-      assert html =~ "Queue is empty"
+      assert html =~ "No questions in this view"
       assert Questions.get_question!(q.id).validation_status == :failed
     end
   end

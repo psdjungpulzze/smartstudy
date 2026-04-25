@@ -39,7 +39,7 @@ defmodule FunSheepWeb.TestScheduleLiveTest do
       {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests")
 
       assert html =~ "Assessments"
-      assert html =~ "Schedule New Test"
+      assert html =~ "New Test"
     end
 
     test "displays scheduled tests", %{conn: conn, user_role: ur, course: c, chapter: ch} do
@@ -63,7 +63,7 @@ defmodule FunSheepWeb.TestScheduleLiveTest do
       conn = auth_conn(conn, ur)
       {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests")
 
-      assert html =~ "No tests scheduled yet"
+      assert html =~ "No tests yet"
     end
   end
 
@@ -72,7 +72,7 @@ defmodule FunSheepWeb.TestScheduleLiveTest do
       conn = auth_conn(conn, ur)
       {:ok, _view, html} = live(conn, ~p"/courses/#{c.id}/tests/new")
 
-      assert html =~ "Schedule New Test"
+      assert html =~ "New Test"
       assert html =~ "Test Name"
       assert html =~ "Course"
       assert html =~ "Test Date"

@@ -98,7 +98,7 @@ defmodule FunSheepWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
       assert html =~ "Midterm Exam"
-      assert html =~ "Your Study Path"
+      assert html =~ "days left"
       assert html =~ "Readiness"
     end
   end

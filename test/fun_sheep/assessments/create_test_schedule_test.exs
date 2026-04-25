@@ -22,13 +22,17 @@ defmodule FunSheep.Assessments.CreateTestScheduleTest do
   end
 
   defp passed_question(course, chapter, section, idx) do
+    passed_question_with_difficulty(course, chapter, section, idx, :medium)
+  end
+
+  defp passed_question_with_difficulty(course, chapter, section, idx, difficulty) do
     {:ok, _} =
       Questions.create_question(%{
         validation_status: :passed,
-        content: "Q#{idx}",
+        content: "Q#{idx}-#{difficulty}",
         answer: "A",
         question_type: :multiple_choice,
-        difficulty: :medium,
+        difficulty: difficulty,
         options: %{"A" => "a", "B" => "b"},
         course_id: course.id,
         chapter_id: chapter.id,
@@ -72,7 +76,12 @@ defmodule FunSheep.Assessments.CreateTestScheduleTest do
   } do
     {:ok, ch1} = Courses.create_chapter(%{name: "Ch1", position: 1, course_id: course.id})
     {:ok, sec1} = Courses.create_section(%{name: "Skill", position: 1, chapter_id: ch1.id})
-    for i <- 1..3, do: passed_question(course, ch1, sec1, i)
+
+    # Provide questions at every difficulty level so ch1 passes both the total
+    # gate AND the per-difficulty gate (no backfill enqueue needed).
+    for {diff, base} <- [{:easy, 0}, {:medium, 3}, {:hard, 6}],
+        i <- 1..3,
+        do: passed_question_with_difficulty(course, ch1, sec1, base + i, diff)
 
     {:ok, ch2} = Courses.create_chapter(%{name: "Ch2", position: 2, course_id: course.id})
 
@@ -105,7 +114,12 @@ defmodule FunSheep.Assessments.CreateTestScheduleTest do
   } do
     {:ok, chapter} = Courses.create_chapter(%{name: "Ch1", position: 1, course_id: course.id})
     {:ok, section} = Courses.create_section(%{name: "Skill", position: 1, chapter_id: chapter.id})
-    for i <- 1..3, do: passed_question(course, chapter, section, i)
+
+    # Provide questions at all three difficulty levels so neither the total gate
+    # nor the per-difficulty gate triggers any enqueue.
+    for {diff, base} <- [{:easy, 0}, {:medium, 3}, {:hard, 6}],
+        i <- 1..3,
+        do: passed_question_with_difficulty(course, chapter, section, base + i, diff)
 
     Oban.Testing.with_testing_mode(:manual, fn ->
       {:ok, _schedule} =

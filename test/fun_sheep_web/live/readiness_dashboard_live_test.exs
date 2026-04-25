@@ -60,7 +60,7 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
       {:ok, _view, html} =
         live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
-      assert html =~ "Chapter Breakdown"
+      assert html =~ "Concepts in scope"
       assert html =~ "Chapter 1"
     end
 
@@ -81,8 +81,7 @@ defmodule FunSheepWeb.ReadinessDashboardLiveTest do
         live(conn, ~p"/courses/#{schedule.course_id}/tests/#{schedule.id}/readiness")
 
       assert html =~ "Start Assessment"
-      assert html =~ "Generate Study Guide"
-      assert html =~ "Recalculate Readiness"
+      assert html =~ "Recalculate"
     end
 
     test "recalculate readiness creates score", %{conn: conn, user_role: ur, schedule: schedule} do

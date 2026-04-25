@@ -34,7 +34,10 @@ defmodule FunSheepWeb.Plugs.MaintenanceMode do
   end
 
   defp maintenance_on? do
-    FunSheep.FeatureFlags.enabled?(:maintenance_mode)
+    # maintenance_mode defaults to OFF — only block traffic when explicitly enabled.
+    # If FunWithFlags can't reach the DB (test env without sandbox, or DB down),
+    # treat as disabled so the site stays up.
+    FunWithFlags.enabled?(:maintenance_mode)
   rescue
     _ -> false
   end

@@ -68,22 +68,22 @@ defmodule FunSheepWeb.AdminPagesTest do
 
       {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
 
-      assert has_element?(view, "button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+      assert has_element?(view, "button[phx-click='open_subscription'][phx-value-id='#{student.id}']")
 
       view
-      |> element("button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+      |> element("button[phx-click='open_subscription'][phx-value-id='#{student.id}']")
       |> render_click()
 
-      assert has_element?(view, "form[phx-submit='save_bonus']")
+      assert has_element?(view, "form[phx-submit='save_subscription']")
       assert render(view) =~ "free_student@test.com"
       assert render(view) =~ "50 base + 0 bonus"
 
       view
-      |> form("form[phx-submit='save_bonus']", bonus: "30")
+      |> form("form[phx-submit='save_subscription']", bonus: "30")
       |> render_submit()
 
       assert FunSheep.Billing.lifetime_usage(student.id).limit == 80
-      assert render(view) =~ "Free lessons updated for free_student@test.com"
+      assert render(view) =~ "Subscription updated for free_student@test.com"
     end
 
     test "Free lessons button is hidden for non-students", %{conn: conn} do
@@ -97,10 +97,10 @@ defmodule FunSheepWeb.AdminPagesTest do
 
       {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
 
-      refute has_element?(view, "button[phx-click='open_bonus'][phx-value-id='#{parent.id}']")
+      refute has_element?(view, "button[phx-click='open_subscription'][phx-value-id='#{parent.id}']")
     end
 
-    test "Free lessons button is hidden for paid-plan students", %{conn: conn} do
+    test "Subscription button shows for paid-plan students (bonus field hidden within modal)", %{conn: conn} do
       {:ok, student} =
         Accounts.create_user_role(%{
           interactor_user_id: Ecto.UUID.generate(),
@@ -114,7 +114,8 @@ defmodule FunSheepWeb.AdminPagesTest do
 
       {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
 
-      refute has_element?(view, "button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+      # The Subscription button shows for all students; the bonus field is hidden inside the modal for paid plans.
+      assert has_element?(view, "button[phx-click='open_subscription'][phx-value-id='#{student.id}']")
     end
 
     test "rejects non-integer bonus input", %{conn: conn} do
@@ -129,11 +130,11 @@ defmodule FunSheepWeb.AdminPagesTest do
       {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/users")
 
       view
-      |> element("button[phx-click='open_bonus'][phx-value-id='#{student.id}']")
+      |> element("button[phx-click='open_subscription'][phx-value-id='#{student.id}']")
       |> render_click()
 
       view
-      |> form("form[phx-submit='save_bonus']", bonus: "abc")
+      |> form("form[phx-submit='save_subscription']", bonus: "abc")
       |> render_submit()
 
       assert render(view) =~ "Bonus must be a non-negative whole number."

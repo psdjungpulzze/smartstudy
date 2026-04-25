@@ -54,8 +54,15 @@ defmodule FunSheep.Interactor.Auth do
 
   @impl true
   def init(_opts) do
-    :ets.new(@table, [:named_table, :public, read_concurrency: true])
-    {:ok, %{}}
+    # If the named table already exists (e.g. when a test starts a second
+    # Auth GenServer alongside the one started by the application supervisor),
+    # reuse it rather than crashing.
+    case :ets.whereis(@table) do
+      :undefined -> :ets.new(@table, [:named_table, :public, read_concurrency: true])
+      _tid -> @table
+    end
+
+    {:ok, %{token: nil, expires_at: nil}}
   end
 
   @impl true

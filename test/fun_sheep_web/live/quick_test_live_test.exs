@@ -92,7 +92,7 @@ defmodule FunSheepWeb.QuickTestLiveTest do
       conn = auth_conn(conn, ur)
       {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
-      html = render_click(view, "mark_known")
+      html = render_click(view, "mark_i_know")
 
       # Stats should update
       assert html =~ "Quick Test"
@@ -102,7 +102,7 @@ defmodule FunSheepWeb.QuickTestLiveTest do
       conn = auth_conn(conn, ur)
       {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
-      html = render_click(view, "mark_unknown")
+      html = render_click(view, "mark_dont_know")
 
       assert html =~ "Correct Answer"
       assert html =~ "Got It"
@@ -113,9 +113,9 @@ defmodule FunSheepWeb.QuickTestLiveTest do
       {:ok, view, _html} = live(conn, ~p"/courses/#{course.id}/quick-test")
 
       # Process all 3 cards with "I Know This"
-      render_click(view, "mark_known")
-      render_click(view, "mark_known")
-      html = render_click(view, "mark_known")
+      render_click(view, "mark_i_know")
+      render_click(view, "mark_i_know")
+      html = render_click(view, "mark_i_know")
 
       assert html =~ "Session Complete!"
       assert html =~ "Practice Again"

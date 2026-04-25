@@ -14,6 +14,8 @@ defmodule FunSheep.Questions.Validation do
   structured response, and applies the verdict.
   """
 
+  @behaviour FunSheep.Interactor.AssistantSpec
+
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.Question
 
@@ -21,6 +23,8 @@ defmodule FunSheep.Questions.Validation do
 
   @passed_threshold 95.0
   @review_threshold 70.0
+
+  @assistant_name "funsheep-question-validator"
 
   @llm_opts %{
     model: "gpt-4o-mini",
@@ -61,6 +65,19 @@ defmodule FunSheep.Questions.Validation do
   Return ONLY a JSON array. No prose, no markdown fences. Each element MUST
   include the question's id plus every field in the verdict schema.
   """
+
+  @impl FunSheep.Interactor.AssistantSpec
+  def assistant_attrs do
+    %{
+      name: @assistant_name,
+      description: "FunSheep question validator — reviews generated questions for accuracy and relevance",
+      system_prompt: @assistant_system_prompt,
+      llm_provider: "openai",
+      llm_model: "gpt-4o-mini",
+      llm_config: %{temperature: 0.1, max_tokens: 8_000},
+      metadata: %{app: "funsheep", role: "question_validator"}
+    }
+  end
 
   @doc """
   Validates a list of questions in one Interactor round-trip.
