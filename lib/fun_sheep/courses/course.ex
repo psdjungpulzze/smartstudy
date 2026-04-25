@@ -53,6 +53,7 @@ defmodule FunSheep.Courses.Course do
     field :visibility_state, :string, default: "normal"
     field :dormant_at, :utc_datetime
 
+
     # A TOC rebase proposal waiting for approval. When non-nil, the course
     # has a candidate DiscoveredTOC that didn't auto-apply (material change
     # with risk to existing attempts). UI surfaces this as a banner to the
