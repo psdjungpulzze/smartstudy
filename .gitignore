@@ -28,6 +28,14 @@ fun_sheep-*.tar
 # Ignore assets that are produced by build tools.
 /priv/static/assets/
 
+# esbuild and tailwind standalone binaries (downloaded by mix assets.setup)
+esbuild-linux-x64
+tailwind-linux-x64
+esbuild-darwin-arm64
+esbuild-darwin-x64
+tailwind-darwin-arm64
+tailwind-darwin-x64
+
 # Ignore digested assets cache.
 /priv/static/cache_manifest.json
 
