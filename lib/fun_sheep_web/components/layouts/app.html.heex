@@ -33,7 +33,9 @@
         phx-hook="SheepIdlePersonality"
         class="text-2xl inline-block"
         aria-hidden="true"
-      >🐑</span>
+      >
+        🐑
+      </span>
       <span class="font-extrabold text-gray-900 text-lg tracking-tight hidden sm:inline">
         Fun Sheep
       </span>
@@ -314,18 +316,23 @@
 <.fp_modal id="fp-modal" summary={assigns[:fp_summary]} />
 
 <%!-- Bottom Tab Bar (mobile only, hidden on tablet+, on practice, and on onboarding wizards) --%>
-<nav class={[
-  "fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 z-50 safe-area-bottom",
-  cond do
-    (@current_path || "") == "/practice" -> "hidden lg:hidden"
-    String.starts_with?(@current_path || "", "/onboarding/") -> "hidden"
-    true -> "md:hidden"
-  end
-]}>
+<nav
+  id="bottom-nav-sheep"
+  phx-hook="NavSheepRunner"
+  class={[
+    "fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 z-50 safe-area-bottom",
+    cond do
+      (@current_path || "") == "/practice" -> "hidden lg:hidden"
+      String.starts_with?(@current_path || "", "/onboarding/") -> "hidden"
+      true -> "md:hidden"
+    end
+  ]}
+>
   <div class="flex items-center justify-around py-1.5 px-1">
     <%= for item <- FunSheepWeb.Layouts.nav_items_for_role(@current_role) |> Enum.take(5) do %>
       <.link
         navigate={item.path}
+        data-tab={item.icon}
         class={[
           "flex flex-col items-center justify-center gap-0.5 py-1.5 px-2 rounded-xl transition-all touch-target flex-1",
           if(item.path == (@current_path || ""),

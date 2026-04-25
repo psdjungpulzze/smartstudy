@@ -109,16 +109,13 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
 
   defp route_by_format(%{material_format: format} = material, _course_id)
        when format in ["mobi", "azw3"] do
-    Logger.info("[OCR] Unsupported ebook format #{format} for material #{material.id}")
+    Logger.info("[OCR] Routing material #{material.id} to MOBI/AZW3 conversion pipeline")
 
-    Content.update_uploaded_material(material, %{
-      ocr_status: :failed,
-      ocr_error:
-        "#{String.upcase(format)} format is not yet supported. " <>
-          "Please convert to EPUB first and re-upload."
-    })
+    %{"uploaded_material_id" => material.id}
+    |> FunSheep.Workers.MobiConvertWorker.new()
+    |> Oban.insert()
 
-    :unsupported
+    :handled
   end
 
   defp route_by_format(_material, _course_id), do: :continue

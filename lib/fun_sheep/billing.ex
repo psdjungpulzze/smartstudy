@@ -538,6 +538,70 @@ defmodule FunSheep.Billing do
     paid_subscription?(user_role_id)
   end
 
+  # Maps plan names to the maximum course access_level they unlock.
+  # This mirrors the rank table in the Courses context.
+  @plan_max_access_level %{
+    "free" => "preview",
+    "monthly" => "standard",
+    "annual" => "standard",
+    "premium_monthly" => "premium",
+    "premium_annual" => "professional",
+    "professional_monthly" => "professional",
+    "professional_annual" => "professional"
+  }
+
+  # Maps plan names to the catalog test types they unlock.
+  # nil means "all test types".
+  @plan_catalog_types %{
+    "free" => [],
+    "monthly" => ["sat", "act"],
+    "annual" => ["sat", "act"],
+    "premium_monthly" => ["sat", "act", "ap", "ib", "hsc", "clt"],
+    "premium_annual" => nil,
+    "professional_monthly" => nil,
+    "professional_annual" => nil
+  }
+
+  @doc """
+  Returns true if the given subscription plan grants access to the course's
+  access_level.
+
+  Access tiers (ascending):
+    free → public + preview only
+    monthly/annual → + standard
+    premium_monthly → + premium
+    premium_annual/professional → + professional
+  """
+  @spec subscription_grants_access?(Subscription.t() | nil, map()) :: boolean()
+  def subscription_grants_access?(nil, course), do: course.access_level in ["public", "preview"]
+
+  def subscription_grants_access?(%Subscription{} = sub, course) do
+    plan = sub.plan || "free"
+    max_level = Map.get(@plan_max_access_level, to_string(plan), "preview")
+
+    access_level_rank = fn level ->
+      case level do
+        "public" -> 0
+        "preview" -> 1
+        "standard" -> 2
+        "premium" -> 3
+        "professional" -> 4
+        _ -> 0
+      end
+    end
+
+    access_level_rank.(course.access_level) <= access_level_rank.(max_level)
+  end
+
+  @doc """
+  Returns the list of catalog test types accessible under a given plan,
+  or nil if all types are accessible.
+  """
+  @spec catalog_types_for_plan(String.t()) :: [String.t()] | nil
+  def catalog_types_for_plan(plan) do
+    Map.get(@plan_catalog_types, to_string(plan), [])
+  end
+
   defp plan_id_for("monthly"), do: "plan_monthly"
   defp plan_id_for("annual"), do: "plan_annual"
   defp plan_id_for(_), do: "plan_free"

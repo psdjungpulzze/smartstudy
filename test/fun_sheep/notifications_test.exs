@@ -165,7 +165,11 @@ defmodule FunSheep.NotificationsTest do
 
     test "does not return read notifications", %{student: s} do
       {:ok, [notif]} =
-        Notifications.enqueue(s.id, type: :streak_at_risk, body: "will be read", channels: [:in_app])
+        Notifications.enqueue(s.id,
+          type: :streak_at_risk,
+          body: "will be read",
+          channels: [:in_app]
+        )
 
       Notifications.mark_read(s.id, notif.id)
       assert [] == Notifications.list_in_app_unread(s.id)

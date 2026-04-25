@@ -91,6 +91,14 @@ defmodule FunSheep.Content.UploadedMaterial do
     field :kind_classified_at, :utc_datetime
     field :kind_classification_notes, :string
 
+    # Per-material OCR progress tracking (Tier 2a — ETA display).
+    # Set by the OCR worker when processing begins; updated as pages complete.
+    # `ocr_pages_total` is set at dispatch time; `ocr_pages_done` increments
+    # as each page's Vision response is persisted.
+    field :ocr_started_at, :utc_datetime
+    field :ocr_pages_done, :integer, default: 0
+    field :ocr_pages_total, :integer
+
     # Format detected from magic bytes at OCR dispatch time.
     # Values: "pdf", "epub", "mobi", "azw3", "image", "unknown"
     field :material_format, :string, default: "unknown"
@@ -136,6 +144,9 @@ defmodule FunSheep.Content.UploadedMaterial do
       :kind_confidence,
       :kind_classified_at,
       :kind_classification_notes,
+      :ocr_started_at,
+      :ocr_pages_done,
+      :ocr_pages_total,
       :material_format,
       :ebook_metadata,
       :user_role_id,

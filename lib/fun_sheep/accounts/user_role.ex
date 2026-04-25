@@ -34,6 +34,7 @@ defmodule FunSheep.Accounts.UserRole do
 
     # Extended notification preferences (Phase 1 — alerts system).
     field :push_enabled, :boolean, default: true
+
     field :notification_frequency, Ecto.Enum,
       values: [:off, :light, :standard, :all],
       default: :standard

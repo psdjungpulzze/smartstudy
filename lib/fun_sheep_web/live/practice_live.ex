@@ -641,7 +641,11 @@ defmodule FunSheepWeb.PracticeLive do
       </div>
 
       <%!-- Question card --%>
-      <div :if={@current_question && !@practice_complete} class="bg-white rounded-2xl shadow-md p-8">
+      <div
+        :if={@current_question && !@practice_complete}
+        id={"question-card-#{@current_question && @current_question.id}"}
+        class="bg-white rounded-2xl shadow-md p-8 animate-page-turn"
+      >
         <div class="flex items-center justify-between mb-3">
           <p class="text-sm text-[#8E8E93]">
             Question {@question_number}

@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.SubscriptionLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Billing, Credits}
+  alias FunSheep.{Billing, Courses, Credits}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -35,6 +35,15 @@ defmodule FunSheepWeb.SubscriptionLive do
 
     pending_credits = Credits.get_balance(user_role_id)
 
+    catalog_types = Billing.catalog_types_for_plan(sub.plan)
+
+    alacarte_enrollments =
+      Courses.list_premium_catalog()
+      |> Enum.filter(fn course ->
+        enrollment = Courses.get_enrollment(user_role_id, course.id)
+        enrollment != nil and enrollment.access_type == "alacarte"
+      end)
+
     socket =
       socket
       |> assign(
@@ -52,6 +61,8 @@ defmodule FunSheepWeb.SubscriptionLive do
         setup_intent: nil,
         pending_credits: pending_credits,
         redeem_loading: false,
+        catalog_types: catalog_types,
+        alacarte_enrollments: alacarte_enrollments,
         # Flow A (§4.7) — when the parent arrives via the accept link,
         # the request is loaded here so checkout carries its metadata.
         practice_request: nil,
@@ -286,7 +297,8 @@ defmodule FunSheepWeb.SubscriptionLive do
         >
           {if @redeem_loading,
             do: "Redeeming…",
-            else: "Redeem #{@pending_credits} credit#{if @pending_credits == 1, do: "", else: "s"} — unlock unlimited tests"}
+            else:
+              "Redeem #{@pending_credits} credit#{if @pending_credits == 1, do: "", else: "s"} — unlock unlimited tests"}
         </button>
       </div>
 
@@ -320,7 +332,8 @@ defmodule FunSheepWeb.SubscriptionLive do
               {"Overview", "overview"},
               {"Plans", "plans"},
               {"Payment", "payment"},
-              {"History", "history"}
+              {"History", "history"},
+              {"Catalog Access", "catalog"}
             ]
           }
           label={label}
@@ -360,6 +373,14 @@ defmodule FunSheepWeb.SubscriptionLive do
 
       <div :if={@active_tab == "history"}>
         <.history_tab invoices={@invoices} />
+      </div>
+
+      <div :if={@active_tab == "catalog"}>
+        <.catalog_tab
+          stats={@stats}
+          catalog_types={@catalog_types}
+          alacarte_enrollments={@alacarte_enrollments}
+        />
       </div>
     </div>
     """
@@ -981,6 +1002,160 @@ defmodule FunSheepWeb.SubscriptionLive do
       </div>
     </div>
     """
+  end
+
+  # ── Catalog Access Tab ─────────────────────────────────────────────────────
+
+  attr :stats, :map, required: true
+  attr :catalog_types, :any, required: true
+  attr :alacarte_enrollments, :list, required: true
+
+  defp catalog_tab(assigns) do
+    plan = assigns.stats.plan
+
+    assigns =
+      assign(assigns,
+        plan_label: plan_display_label(plan),
+        all_access: assigns.catalog_types == nil
+      )
+
+    ~H"""
+    <div class="space-y-6">
+      <%!-- Plan catalog summary --%>
+      <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-6">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-[#E8F8EB] dark:bg-[#4CD964]/20 flex items-center justify-center">
+            <svg
+              class="w-5 h-5 text-[#4CD964]"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342M6.75 15a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm0 0v-3.675A55.378 55.378 0 0 1 12 8.443m-7.007 11.55A5.981 5.981 0 0 0 6.75 15.75v-1.5"
+              />
+            </svg>
+          </div>
+          <div>
+            <p class="text-xs text-[#8E8E93] uppercase tracking-wide font-medium">
+              Catalog Access — {@plan_label} Plan
+            </p>
+            <h3 class="text-lg font-bold text-[#1C1C1E] dark:text-white">
+              {if @all_access,
+                do: "Full catalog including professional tests",
+                else:
+                  if(is_list(@catalog_types) and @catalog_types != [],
+                    do: "#{length(@catalog_types)} catalog type(s) included",
+                    else: "No catalog access on this plan"
+                  )}
+            </h3>
+          </div>
+        </div>
+
+        <%= if @all_access do %>
+          <p class="text-sm text-[#8E8E93] mb-4">
+            Your plan includes every test type in the premium catalog — SAT, ACT, AP, IB, HSC, CLT, LSAT, GMAT, MCAT, GRE, and more.
+          </p>
+        <% else %>
+          <%= if is_list(@catalog_types) and @catalog_types != [] do %>
+            <p class="text-sm text-[#8E8E93] mb-3">Your plan includes the following test types:</p>
+            <div class="flex flex-wrap gap-2 mb-4">
+              <span
+                :for={type <- @catalog_types}
+                class="px-3 py-1 rounded-full bg-[#E8F8EB] text-[#4CD964] text-xs font-bold uppercase"
+              >
+                {type}
+              </span>
+            </div>
+          <% else %>
+            <p class="text-sm text-[#8E8E93] mb-4">
+              Upgrade to access premium catalog courses for SAT, ACT, AP, and more.
+            </p>
+          <% end %>
+        <% end %>
+
+        <.link
+          navigate={~p"/catalog"}
+          class="inline-flex items-center gap-2 bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2.5 rounded-full shadow-md transition-colors text-sm"
+        >
+          Browse Catalog
+        </.link>
+      </div>
+
+      <%!-- À la carte purchases --%>
+      <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md p-6">
+        <h3 class="text-lg font-bold text-[#1C1C1E] dark:text-white mb-4">
+          Individual Course Purchases
+        </h3>
+
+        <%= if @alacarte_enrollments == [] do %>
+          <div class="text-center py-8">
+            <svg
+              class="w-10 h-10 text-[#E5E5EA] mx-auto mb-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"
+              />
+            </svg>
+            <p class="text-[#8E8E93] text-sm">No individual courses purchased yet</p>
+            <p class="text-xs text-[#8E8E93] mt-1">
+              Browse the catalog and unlock individual courses without a subscription.
+            </p>
+          </div>
+        <% else %>
+          <div class="space-y-3">
+            <div
+              :for={course <- @alacarte_enrollments}
+              class="flex items-center justify-between p-4 bg-[#F5F5F7] dark:bg-[#1C1C1E] rounded-xl"
+            >
+              <div>
+                <p class="text-sm font-medium text-[#1C1C1E] dark:text-white">{course.name}</p>
+                <p class="text-xs text-[#8E8E93]">
+                  {course.catalog_test_type && String.upcase(course.catalog_test_type || "")}
+                  {if course.catalog_subject,
+                    do: " · #{humanize_catalog_subject(course.catalog_subject)}",
+                    else: ""}
+                </p>
+              </div>
+              <.link
+                navigate={~p"/courses/#{course.id}"}
+                class="px-4 py-1.5 rounded-full bg-[#4CD964] hover:bg-[#3DBF55] text-white text-xs font-medium shadow-sm transition-colors"
+              >
+                Open
+              </.link>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  defp plan_display_label("free"), do: "Free"
+  defp plan_display_label("monthly"), do: "Monthly"
+  defp plan_display_label("annual"), do: "Annual"
+  defp plan_display_label("premium_monthly"), do: "Premium Monthly"
+  defp plan_display_label("premium_annual"), do: "Premium Annual"
+  defp plan_display_label("professional_monthly"), do: "Professional Monthly"
+  defp plan_display_label("professional_annual"), do: "Professional Annual"
+  defp plan_display_label(plan), do: String.capitalize(plan || "Free")
+
+  defp humanize_catalog_subject(nil), do: ""
+
+  defp humanize_catalog_subject(subject) do
+    subject
+    |> String.split("_")
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
   end
 
   # ── Shared Components ──────────────────────────────────────────────────────

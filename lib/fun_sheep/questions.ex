@@ -1568,4 +1568,78 @@ defmodule FunSheep.Questions do
   defp maybe_filter_by_course(query, course_id) do
     where(query, [g], g.course_id == ^course_id)
   end
+
+  ## Creator Metrics
+
+  @doc """
+  Returns a metrics summary for a content creator (teacher/admin) identified
+  by their `user_role_id`. Questions are attributed to a creator when they
+  come from an `UploadedMaterial` that the creator uploaded.
+
+  Returns:
+  ```
+  %{
+    total_contributed: non_neg_integer(),
+    passed: non_neg_integer(),
+    pending: non_neg_integer(),
+    failed: non_neg_integer(),
+    by_course: [%{course: %Course{}, question_count: non_neg_integer()}]
+  }
+  ```
+  """
+  @spec creator_stats(String.t()) :: %{
+          total_contributed: non_neg_integer(),
+          passed: non_neg_integer(),
+          pending: non_neg_integer(),
+          failed: non_neg_integer(),
+          by_course: list()
+        }
+  def creator_stats(user_role_id) do
+    alias FunSheep.Content.UploadedMaterial
+    alias FunSheep.Courses.Course
+
+    # Aggregate counts grouped by validation_status for this creator's questions.
+    # A question is attributed to a creator if its source_material was uploaded
+    # by that user_role_id.
+    counts =
+      from(q in Question,
+        join: m in UploadedMaterial,
+        on: m.id == q.source_material_id,
+        where: m.user_role_id == ^user_role_id,
+        group_by: q.validation_status,
+        select: {q.validation_status, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    total = counts |> Map.values() |> Enum.sum()
+
+    # Per-course breakdown: how many questions came from this creator, grouped by course
+    by_course =
+      from(q in Question,
+        join: m in UploadedMaterial,
+        on: m.id == q.source_material_id,
+        join: c in Course,
+        on: c.id == q.course_id,
+        where: m.user_role_id == ^user_role_id,
+        group_by: [c.id, c.name, c.subject, c.grade],
+        order_by: [desc: count(q.id)],
+        select: %{
+          course_id: c.id,
+          course_name: c.name,
+          course_subject: c.subject,
+          course_grade: c.grade,
+          question_count: count(q.id)
+        }
+      )
+      |> Repo.all()
+
+    %{
+      total_contributed: total,
+      passed: Map.get(counts, :passed, 0),
+      pending: Map.get(counts, :pending, 0),
+      failed: Map.get(counts, :failed, 0),
+      by_course: by_course
+    }
+  end
 end

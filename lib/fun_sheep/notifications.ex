@@ -15,7 +15,7 @@ defmodule FunSheep.Notifications do
 
   alias FunSheep.Accounts.{StudentGuardian, UserRole}
   alias FunSheep.Engagement.{StudySession, StudySessions}
-  alias FunSheep.Notifications.{Notification, PushToken, UnsubscribeToken}
+  alias FunSheep.Notifications.{Notification, NotificationPreference, PushToken, UnsubscribeToken}
   alias FunSheep.{Accountability, Accounts, Assessments, Repo}
 
   @digest_lookback_days 7
@@ -70,13 +70,17 @@ defmodule FunSheep.Notifications do
 
   defp build_digest(guardian, student) do
     minutes_this_week = minutes_in_window(student.id, @digest_lookback_days)
-    minutes_prev_week = minutes_between(student.id, @digest_lookback_days, 2 * @digest_lookback_days)
+
+    minutes_prev_week =
+      minutes_between(student.id, @digest_lookback_days, 2 * @digest_lookback_days)
 
     if minutes_this_week == 0 and minutes_prev_week == 0 do
       {:skip, :no_activity}
     else
       schedules = Assessments.list_upcoming_schedules(student.id, 14)
-      prompt = Accountability.conversation_prompts_for_parent(guardian.id, student.id) |> List.first()
+
+      prompt =
+        Accountability.conversation_prompts_for_parent(guardian.id, student.id) |> List.first()
 
       {:ok,
        %{
@@ -255,7 +259,12 @@ defmodule FunSheep.Notifications do
     case Repo.get_by(PushToken, user_role_id: user_role_id, token: token) do
       nil ->
         %PushToken{}
-        |> PushToken.changeset(%{user_role_id: user_role_id, token: token, platform: platform, active: true})
+        |> PushToken.changeset(%{
+          user_role_id: user_role_id,
+          token: token,
+          platform: platform,
+          active: true
+        })
         |> Repo.insert()
 
       %PushToken{} = existing ->
@@ -289,7 +298,9 @@ defmodule FunSheep.Notifications do
   At risk means: streak > 0 and last_activity_date was yesterday (not today).
   Workers call this to find who needs a nudge before midnight resets their streak.
   """
-  @spec streak_at_risk_students() :: [%{user_role_id: binary(), streak: integer(), email: String.t()}]
+  @spec streak_at_risk_students() :: [
+          %{user_role_id: binary(), streak: integer(), email: String.t()}
+        ]
   def streak_at_risk_students do
     today = Date.utc_today()
     yesterday = Date.add(today, -1)
@@ -356,7 +367,11 @@ defmodule FunSheep.Notifications do
 
   @doc "Returns true if the current local hour falls in the user's quiet window."
   @spec in_quiet_hours?(UserRole.t()) :: boolean()
-  def in_quiet_hours?(%UserRole{timezone: tz, notification_quiet_start: qs, notification_quiet_end: qe}) do
+  def in_quiet_hours?(%UserRole{
+        timezone: tz,
+        notification_quiet_start: qs,
+        notification_quiet_end: qe
+      }) do
     local_hour =
       case DateTime.shift_zone(DateTime.utc_now(), tz || "Etc/UTC") do
         {:ok, local} -> local.hour
@@ -369,6 +384,72 @@ defmodule FunSheep.Notifications do
     else
       # Same-day window: quiet when hour >= start AND hour < end
       local_hour >= qs and local_hour < qe
+    end
+  end
+
+  ## ── Notification preferences ─────────────────────────────────────────────
+
+  @doc """
+  Returns the preference row for a (user, channel) combination, optionally
+  scoped to a specific notification type.
+
+  When `notification_type` is `nil` the channel-level default row is returned.
+  When `notification_type` is given, a type-specific row is returned if it
+  exists, otherwise falls back to the channel default, then `nil`.
+  """
+  @spec get_preference(binary(), atom(), atom() | nil) :: NotificationPreference.t() | nil
+  def get_preference(user_role_id, channel, notification_type \\ nil) do
+    channel_str = to_string(channel)
+    type_str = notification_type && to_string(notification_type)
+
+    if type_str do
+      # Try type-specific row first, fall back to channel default.
+      Repo.get_by(NotificationPreference,
+        user_role_id: user_role_id,
+        channel: channel_str,
+        notification_type: type_str
+      ) ||
+        Repo.get_by(NotificationPreference,
+          user_role_id: user_role_id,
+          channel: channel_str,
+          notification_type: nil
+        )
+    else
+      Repo.get_by(NotificationPreference,
+        user_role_id: user_role_id,
+        channel: channel_str,
+        notification_type: nil
+      )
+    end
+  end
+
+  @doc """
+  Creates or updates a notification preference for a user.
+
+  The unique key is `(user_role_id, channel, notification_type)`.
+  """
+  @spec upsert_preference(map()) ::
+          {:ok, NotificationPreference.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_preference(attrs) do
+    user_role_id = Map.get(attrs, :user_role_id) || Map.get(attrs, "user_role_id")
+    channel = Map.get(attrs, :channel) || Map.get(attrs, "channel")
+    notification_type = Map.get(attrs, :notification_type) || Map.get(attrs, "notification_type")
+
+    existing =
+      Repo.get_by(NotificationPreference,
+        user_role_id: user_role_id,
+        channel: to_string(channel),
+        notification_type: notification_type && to_string(notification_type)
+      )
+
+    changeset =
+      (existing || %NotificationPreference{})
+      |> NotificationPreference.changeset(attrs)
+
+    if existing do
+      Repo.update(changeset)
+    else
+      Repo.insert(changeset)
     end
   end
 

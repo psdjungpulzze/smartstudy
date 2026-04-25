@@ -235,7 +235,16 @@ if config_env() == :prod do
          {"0 3 * * *", FunSheep.Workers.CoverageAuditWorker},
          # Sunday 23:55 UTC — compute weekly shout out winners. Keep in
          # sync with config/config.exs.
-         {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker}
+         {"55 23 * * 0", FunSheep.Workers.ComputeShoutOutsWorker},
+         # Nightly at 03:30 UTC — mark courses with 0 attempts and no
+         # quality update in 90+ days as dormant. Keep in sync with config/config.exs.
+         {"30 3 * * *", FunSheep.Workers.MarkDormantContentWorker},
+         # Every 2 hours — nudge students whose streak will reset at midnight
+         # if they haven't studied today. Keep in sync with config/config.exs.
+         {"0 */2 * * *", FunSheep.Workers.StreakAtRiskWorker},
+         # Daily at 08:00 UTC — send T-3 and T-1 countdown alerts to students
+         # and guardians for upcoming test schedules.
+         {"0 8 * * *", FunSheep.Workers.TestUpcomingWorker}
        ]}
     ]
 

@@ -265,7 +265,7 @@ defmodule FunSheep.Content do
         where: m.id == ^material_id,
         select: m.ocr_pages_completed
       )
-      |> Repo.update_all(inc: [ocr_pages_completed: n])
+      |> Repo.update_all(inc: [ocr_pages_completed: n, ocr_pages_done: n])
 
     new_count
   end

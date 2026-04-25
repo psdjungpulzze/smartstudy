@@ -497,6 +497,104 @@ const ConfettiBurstHook = {
   }
 }
 
+// ── NavSheepRunner Hook ──────────────────────────────────────────────────────
+// Animates a tiny sheep SVG that scurries between bottom nav tab positions.
+// Mount on the nav container with phx-hook="NavSheepRunner".
+// Each nav item should have a data-tab="<name>" attribute.
+// Speed (walk vs run) is proportional to the distance between tabs.
+const NavSheepRunner = {
+  mounted() {
+    this._sheep = null
+    this._activeTab = null
+    this._activeRect = null
+
+    // Create the sheep element and inject it into the nav container
+    const sheep = document.createElement("span")
+    sheep.setAttribute("aria-hidden", "true")
+    sheep.className = "absolute bottom-1 text-base pointer-events-none transition-none z-10"
+    sheep.style.cssText = "position: absolute; bottom: 4px; left: 0; font-size: 18px; pointer-events: none; will-change: transform; transition: transform 0.3s ease-out;"
+    sheep.textContent = "🐑"
+    this._sheep = sheep
+
+    // Position relative to nav container
+    this.el.style.position = "relative"
+    this.el.appendChild(sheep)
+
+    // Initialize position from active tab
+    this._updateActiveTab(true)
+
+    // Listen for tab clicks
+    this._clickHandler = (e) => {
+      const tabEl = e.target.closest("[data-tab]")
+      if (!tabEl) return
+      this._moveSheepToTab(tabEl)
+    }
+    this.el.addEventListener("click", this._clickHandler)
+
+    // Watch DOM changes (LiveView navigation updates active classes)
+    this._observer = new MutationObserver(() => this._updateActiveTab(false))
+    this._observer.observe(this.el, { attributes: true, subtree: true, attributeFilter: ["class"] })
+  },
+
+  destroyed() {
+    this.el.removeEventListener("click", this._clickHandler)
+    if (this._observer) this._observer.disconnect()
+    if (this._sheep && this._sheep.parentNode) this._sheep.remove()
+  },
+
+  _updateActiveTab(instant) {
+    const activeEl = this.el.querySelector("[data-tab].text-\\[\\#4CD964\\]") ||
+                     this.el.querySelector("[data-tab][class*='text-[#4CD964]']") ||
+                     this.el.querySelector("[data-tab][aria-current='page']")
+    if (!activeEl || activeEl === this._activeTab) return
+    this._moveSheepToTab(activeEl, instant)
+  },
+
+  _moveSheepToTab(tabEl, instant) {
+    if (!this._sheep) return
+
+    const navRect = this.el.getBoundingClientRect()
+    const tabRect = tabEl.getBoundingClientRect()
+
+    // Center of tab icon
+    const tabCenterX = tabRect.left - navRect.left + tabRect.width / 2
+    const sheepHalfWidth = 10 // approx half of the 18px sheep
+    const targetX = tabCenterX - sheepHalfWidth
+
+    // Determine speed based on distance
+    let prevX = 0
+    if (this._sheep.dataset.lastX !== undefined) {
+      prevX = parseFloat(this._sheep.dataset.lastX)
+    }
+    const distance = Math.abs(targetX - prevX)
+
+    if (instant || distance === 0) {
+      this._sheep.style.transition = "none"
+      this._sheep.classList.remove("sheep-walk-slow", "sheep-walk-normal", "sheep-trot", "sheep-run")
+    } else if (distance < 80) {
+      // Short hop — trot
+      this._sheep.style.transition = "transform 0.25s ease-out"
+      this._sheep.classList.remove("sheep-walk-slow", "sheep-walk-normal", "sheep-run")
+      this._sheep.classList.add("sheep-trot")
+      setTimeout(() => {
+        if (this._sheep) this._sheep.classList.remove("sheep-trot")
+      }, 400)
+    } else {
+      // Long sprint
+      this._sheep.style.transition = "transform 0.35s ease-out"
+      this._sheep.classList.remove("sheep-walk-slow", "sheep-walk-normal", "sheep-trot")
+      this._sheep.classList.add("sheep-run")
+      setTimeout(() => {
+        if (this._sheep) this._sheep.classList.remove("sheep-run")
+      }, 500)
+    }
+
+    this._sheep.style.transform = `translateX(${targetX}px)`
+    this._sheep.dataset.lastX = targetX
+    this._activeTab = tabEl
+  }
+}
+
 // ── SheepIdlePersonality Hook ─────────────────────────────────────────────────
 // Randomly triggers the sheep-ear-flick animation on the logo every 20–30 seconds
 // to give the mascot an idle "alive" feel.
@@ -526,6 +624,7 @@ const Hooks = {
   CountUp: CountUpHook,
   ConfettiBurst: ConfettiBurstHook,
   SheepIdlePersonality: SheepIdlePersonalityHook,
+  NavSheepRunner: NavSheepRunner,
 
   // ── Sound Player ──────────────────────────────────────────────────────────
   // Listens for "play_sound" events pushed from LiveView and plays the named

@@ -305,8 +305,8 @@ defmodule FunSheepWeb.UploadController do
     ext = Path.extname(lower) |> String.trim_leading(".")
 
     cond do
-      # EPUB files are textbooks
-      ext == "epub" ->
+      # eBook formats are textbooks (EPUB, MOBI, AZW3)
+      ext in ["epub", "mobi", "azw", "azw3"] ->
         :textbook
 
       Regex.match?(~r/\b(answers?|answer[-_ ]?key|solutions?|key)\b/, lower) ->

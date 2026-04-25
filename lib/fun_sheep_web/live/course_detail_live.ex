@@ -373,7 +373,11 @@ defmodule FunSheepWeb.CourseDetailLive do
           {:noreply,
            assign(socket,
              user_reaction: user_reaction,
-             course: %{socket.assigns.course | like_count: course.like_count, dislike_count: course.dislike_count}
+             course: %{
+               socket.assigns.course
+               | like_count: course.like_count,
+                 dislike_count: course.dislike_count
+             }
            )}
 
         {:error, _} ->

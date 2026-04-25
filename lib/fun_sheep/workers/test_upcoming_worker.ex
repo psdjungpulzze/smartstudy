@@ -52,7 +52,10 @@ defmodule FunSheep.Workers.TestUpcomingWorker do
       )
   end
 
-  defp send_guardian_alerts(%{student_id: student_id, test_name: name, student_name: student_name}, days_until) do
+  defp send_guardian_alerts(
+         %{student_id: student_id, test_name: name, student_name: student_name},
+         days_until
+       ) do
     guardian_links = Accounts.list_active_guardians_for_student(student_id)
 
     Enum.each(guardian_links, fn %{guardian: guardian} ->
@@ -69,7 +72,11 @@ defmodule FunSheep.Workers.TestUpcomingWorker do
             priority: priority,
             title: "#{student_name}'s test in #{days_until} #{day_word(days_until)}",
             body: guardian_body,
-            payload: %{"days_until" => days_until, "test_name" => name, "student_id" => student_id},
+            payload: %{
+              "days_until" => days_until,
+              "test_name" => name,
+              "student_id" => student_id
+            },
             channels: [:in_app, :push]
           )
       end

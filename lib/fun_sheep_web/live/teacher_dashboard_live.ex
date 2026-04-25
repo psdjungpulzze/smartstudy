@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.TeacherDashboardLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Accounts, Assessments, Credits}
+  alias FunSheep.{Accounts, Assessments, Credits, Questions}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -32,6 +32,13 @@ defmodule FunSheepWeb.TeacherDashboardLive do
         {0, nil, []}
       end
 
+    creator_stats =
+      if user_role_id do
+        Questions.creator_stats(user_role_id)
+      else
+        %{total_contributed: 0, passed: 0, pending: 0, failed: 0, by_course: []}
+      end
+
     socket =
       socket
       |> assign(
@@ -51,7 +58,8 @@ defmodule FunSheepWeb.TeacherDashboardLive do
         give_credit_recipient: nil,
         give_credit_note: "",
         give_credit_error: nil,
-        give_credit_success: nil
+        give_credit_success: nil,
+        creator_stats: creator_stats
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "teacher_dashboard",
@@ -168,7 +176,8 @@ defmodule FunSheepWeb.TeacherDashboardLive do
                give_credit_search: "",
                give_credit_note: "",
                give_credit_error: nil,
-               give_credit_success: "1 credit given to #{recipient.display_name || recipient.email}!"
+               give_credit_success:
+                 "1 credit given to #{recipient.display_name || recipient.email}!"
              )}
 
           {:error, :insufficient_balance} ->
@@ -178,7 +187,8 @@ defmodule FunSheepWeb.TeacherDashboardLive do
             {:noreply, assign(socket, give_credit_error: "That recipient is not available.")}
 
           {:error, _} ->
-            {:noreply, assign(socket, give_credit_error: "Something went wrong. Please try again.")}
+            {:noreply,
+             assign(socket, give_credit_error: "Something went wrong. Please try again.")}
         end
     end
   end
@@ -523,6 +533,65 @@ defmodule FunSheepWeb.TeacherDashboardLive do
         </div>
       <% end %>
 
+      <%!-- Creator Metrics Card --%>
+      <div class="bg-white rounded-2xl shadow-md p-6 mt-8">
+        <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4 flex items-center gap-2">
+          <.icon name="hero-book-open" class="w-5 h-5 text-[#4CD964]" /> My Contributions
+        </h2>
+
+        <%= if @creator_stats.total_contributed == 0 do %>
+          <p class="text-sm text-[#8E8E93]">
+            No questions attributed to your uploads yet. Upload course materials to contribute questions.
+          </p>
+        <% else %>
+          <%!-- Summary counts --%>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div class="bg-[#F5F5F7] rounded-xl p-4 text-center">
+              <p class="text-2xl font-bold text-[#1C1C1E]">{@creator_stats.total_contributed}</p>
+              <p class="text-xs text-[#8E8E93] mt-1">Total Questions</p>
+            </div>
+            <div class="bg-[#E8F8EB] rounded-xl p-4 text-center">
+              <p class="text-2xl font-bold text-[#4CD964]">{@creator_stats.passed}</p>
+              <p class="text-xs text-[#8E8E93] mt-1">Approved</p>
+            </div>
+            <div class="bg-[#FFF8E1] rounded-xl p-4 text-center">
+              <p class="text-2xl font-bold text-[#FF9500]">{@creator_stats.pending}</p>
+              <p class="text-xs text-[#8E8E93] mt-1">Pending</p>
+            </div>
+            <div class="bg-[#FFE5E3] rounded-xl p-4 text-center">
+              <p class="text-2xl font-bold text-[#FF3B30]">{@creator_stats.failed}</p>
+              <p class="text-xs text-[#8E8E93] mt-1">Rejected</p>
+            </div>
+          </div>
+
+          <%!-- Per-course breakdown --%>
+          <%= if @creator_stats.by_course != [] do %>
+            <div>
+              <p class="text-xs font-semibold text-[#8E8E93] uppercase tracking-wide mb-3">
+                By Course
+              </p>
+              <ul class="space-y-2">
+                <li
+                  :for={entry <- @creator_stats.by_course}
+                  class="flex items-center justify-between text-sm bg-[#F5F5F7] rounded-xl px-4 py-2.5"
+                >
+                  <div class="min-w-0">
+                    <p class="font-medium text-[#1C1C1E] truncate">{entry.course_name}</p>
+                    <p class="text-xs text-[#8E8E93]">
+                      {entry.course_subject} · Grade {entry.course_grade}
+                    </p>
+                  </div>
+                  <span class="text-xs font-semibold text-[#4CD964] bg-[#E8F8EB] rounded-full px-3 py-1 ml-3 shrink-0">
+                    {entry.question_count} {if entry.question_count == 1, do: "question",
+                      else: "questions"}
+                  </span>
+                </li>
+              </ul>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+
       <%!-- Wool Credits Card --%>
       <div class="bg-white rounded-2xl shadow-md p-6 mt-8">
         <div class="flex items-center justify-between mb-4">
@@ -634,7 +703,10 @@ defmodule FunSheepWeb.TeacherDashboardLive do
 
               <%= if @give_credit_recipient do %>
                 <p class="text-xs text-[#8E8E93]">
-                  Sending to: <strong class="text-[#1C1C1E]">{@give_credit_recipient.display_name || @give_credit_recipient.email}</strong>
+                  Sending to:
+                  <strong class="text-[#1C1C1E]">
+                    {@give_credit_recipient.display_name || @give_credit_recipient.email}
+                  </strong>
                 </p>
               <% end %>
 
@@ -663,13 +735,17 @@ defmodule FunSheepWeb.TeacherDashboardLive do
             Recent activity
           </p>
           <%= if @credit_ledger == [] do %>
-            <p class="text-sm text-[#8E8E93]">No activity yet. Earn credits by growing your classroom!</p>
+            <p class="text-sm text-[#8E8E93]">
+              No activity yet. Earn credits by growing your classroom!
+            </p>
           <% else %>
             <ul class="space-y-2">
               <li :for={entry <- @credit_ledger} class="flex items-center justify-between text-sm">
                 <span class="text-[#1C1C1E]">{ledger_source_label(entry)}</span>
                 <span class={"font-semibold #{if entry.delta > 0, do: "text-[#4CD964]", else: "text-[#FF3B30]"}"}>
-                  {if entry.delta > 0, do: "+"}{ div(entry.delta, 4) != 0 && "#{div(entry.delta, 4)} credit" || "#{rem(abs(entry.delta), 4)}/4 unit"}
+                  {if entry.delta > 0, do: "+"}{(div(entry.delta, 4) != 0 &&
+                                                   "#{div(entry.delta, 4)} credit") ||
+                    "#{rem(abs(entry.delta), 4)}/4 unit"}
                 </span>
               </li>
             </ul>

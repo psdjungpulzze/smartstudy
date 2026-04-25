@@ -39,7 +39,6 @@ defmodule FunSheep.Courses.Course do
     # 'hl', 'sl', 'ab', 'bc', '1', '2', etc.
     field :catalog_level, :string
     field :published_at, :utc_datetime
-    field :published_by_id, :binary_id
     field :sample_question_count, :integer, default: 10
 
     # Community quality scoring fields (Phase 1 — community content validation)
@@ -66,12 +65,14 @@ defmodule FunSheep.Courses.Course do
     belongs_to :textbook, FunSheep.Courses.Textbook
     belongs_to :pending_toc, FunSheep.Courses.DiscoveredTOC
     belongs_to :pending_toc_proposed_by, FunSheep.Accounts.UserRole
+    belongs_to :published_by, FunSheep.Accounts.UserRole, foreign_key: :published_by_id
 
     has_many :chapters, FunSheep.Courses.Chapter
     has_many :questions, FunSheep.Questions.Question
     has_many :uploaded_materials, FunSheep.Content.UploadedMaterial
     has_many :test_schedules, FunSheep.Assessments.TestSchedule
     has_many :discovered_tocs, FunSheep.Courses.DiscoveredTOC
+    has_many :enrollments, FunSheep.Courses.CourseEnrollment
 
     timestamps(type: :utc_datetime)
   end
@@ -127,6 +128,7 @@ defmodule FunSheep.Courses.Course do
     |> foreign_key_constraint(:school_id)
     |> foreign_key_constraint(:pending_toc_id)
     |> foreign_key_constraint(:pending_toc_proposed_by_id)
+    |> foreign_key_constraint(:published_by_id)
   end
 
   @doc """

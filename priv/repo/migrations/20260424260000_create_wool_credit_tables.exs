@@ -4,7 +4,10 @@ defmodule FunSheep.Repo.Migrations.CreateWoolCreditTables do
   def change do
     create table(:wool_credits, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :user_role_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :user_role_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :delta, :integer, null: false
       add :source, :string, null: false
       add :source_ref_id, :binary_id

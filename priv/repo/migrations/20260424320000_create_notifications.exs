@@ -4,7 +4,10 @@ defmodule FunSheep.Repo.Migrations.CreateNotifications do
   def change do
     create table(:notifications, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :user_role_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :user_role_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :type, :string, null: false
       add :channel, :string, null: false
       add :priority, :integer, null: false, default: 2

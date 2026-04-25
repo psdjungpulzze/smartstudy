@@ -198,6 +198,8 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
       Content.update_uploaded_material(material, %{
         ocr_operations: %{"chunks" => chunk_entries},
         ocr_pages_expected: total_pages,
+        ocr_pages_total: total_pages,
+        ocr_started_at: DateTime.utc_now() |> DateTime.truncate(:second),
         ocr_status: :processing
       })
 
