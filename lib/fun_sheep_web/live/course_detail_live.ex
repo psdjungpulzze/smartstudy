@@ -1268,6 +1268,17 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
+      <%!-- PDF guidance banner (Tier 2d) --%>
+      <div class="flex items-start gap-3 px-4 py-3 mb-4 bg-blue-50 border border-blue-100 rounded-2xl">
+        <.icon name="hero-bolt" class="w-5 h-5 text-[#007AFF] shrink-0 mt-0.5" />
+        <div>
+          <p class="text-sm font-semibold text-[#1C1C1E]">PDF processes 20× faster</p>
+          <p class="text-xs text-[#8E8E93] mt-0.5">
+            A single PDF completes in under 10 minutes. Uploading individual images takes hours — combine them first if you can.
+          </p>
+        </div>
+      </div>
+
       <%!-- Material kind selector (default for new uploads) --%>
       <div class="flex items-center gap-3 mb-3">
         <label for="default-material-kind" class="text-sm font-medium text-[#1C1C1E] shrink-0">
@@ -1527,6 +1538,67 @@ defmodule FunSheepWeb.CourseDetailLive do
   defp ocr_status_label(:failed), do: "Failed"
   defp ocr_status_label(_), do: "Unknown"
 
+  # Returns subtitle text for the OCR pipeline step, including ETA when available.
+  defp ocr_subtitle(course) do
+    completed = min(course.ocr_completed_count, course.ocr_total_count)
+    total = course.ocr_total_count
+    base = "#{completed} of #{total} files processed"
+
+    case ocr_eta_text(course) do
+      nil -> base
+      eta -> "#{base} · #{eta}"
+    end
+  end
+
+  # Computes a moving-average ETA string from ocr_started_at and completed/total.
+  # Returns nil when there is not enough data to estimate.
+  defp ocr_eta_text(course) do
+    with %DateTime{} = started_at <- course.ocr_started_at,
+         total when total > 0 <- course.ocr_total_count,
+         completed when completed > 2 <- course.ocr_completed_count,
+         true <- completed < total do
+      elapsed_s = DateTime.diff(DateTime.utc_now(), started_at)
+      pages_per_s = completed / max(elapsed_s, 1)
+      remaining = total - completed
+      eta_s = round(remaining / pages_per_s)
+
+      cond do
+        eta_s < 60 ->
+          "about a minute remaining"
+
+        eta_s < 3600 ->
+          mins = div(eta_s, 60)
+          "about #{mins} #{if mins == 1, do: "minute", else: "minutes"} remaining"
+
+        true ->
+          eta_at =
+            DateTime.add(DateTime.utc_now(), eta_s, :second)
+            |> Calendar.strftime("%I:%M %p")
+
+          "expected ready at #{eta_at}"
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  # Returns true when estimated remaining OCR time exceeds 3 minutes.
+  # Used to decide whether to show the "come back later" tip (Tier 2b).
+  defp long_wait?(course) do
+    with %DateTime{} = started_at <- course.ocr_started_at,
+         total when total > 0 <- course.ocr_total_count,
+         completed when completed > 2 <- course.ocr_completed_count,
+         true <- completed < total do
+      elapsed_s = DateTime.diff(DateTime.utc_now(), started_at)
+      pages_per_s = completed / max(elapsed_s, 1)
+      remaining = total - completed
+      eta_s = round(remaining / pages_per_s)
+      eta_s > 180
+    else
+      _ -> false
+    end
+  end
+
   # ── Processing Status Banner Components ────────────────────────────────
 
   attr :course, :map, required: true
@@ -1682,10 +1754,10 @@ defmodule FunSheepWeb.CourseDetailLive do
           state={@step3_state}
           icon="hero-document-text"
           title="Processing uploaded materials"
-          subtitle={"#{min(@course.ocr_completed_count, @course.ocr_total_count)} of #{@course.ocr_total_count} files processed"}
+          subtitle={ocr_subtitle(@course)}
         />
 
-        <%!-- OCR progress bar --%>
+        <%!-- OCR progress bar + ETA (Tier 2a) --%>
         <div :if={@has_ocr && !@ocr_done} class="ml-10 -mt-2 mb-1">
           <div class="w-full bg-[#F5F5F7] rounded-full h-1.5">
             <div
@@ -1693,6 +1765,23 @@ defmodule FunSheepWeb.CourseDetailLive do
               style={"width: #{if @course.ocr_total_count > 0, do: min(round(@course.ocr_completed_count / @course.ocr_total_count * 100), 100), else: 0}%"}
             />
           </div>
+          <p :if={ocr_eta_text(@course)} class="text-[11px] text-[#8E8E93] mt-1">
+            {ocr_eta_text(@course)}
+          </p>
+        </div>
+
+        <%!-- Progressive unlock banner: show once preliminary extraction fires --%>
+        <div
+          :if={
+            @has_ocr && !@ocr_done &&
+              get_in(@course.metadata || %{}, ["preliminary_extracted"]) == true
+          }
+          class="ml-10 mt-1 flex items-center gap-2 px-3 py-2 bg-[#E8F8EB] border border-[#4CD964] rounded-xl"
+        >
+          <div class="w-1.5 h-1.5 rounded-full bg-[#3DBF55] animate-pulse shrink-0" />
+          <p class="text-xs text-[#3DBF55] font-medium">
+            First questions ready — you can start practising while we finish processing!
+          </p>
         </div>
 
         <%!-- Step 4: Generating questions (AI creates raw questions) --%>
@@ -1744,14 +1833,21 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
-      <%!-- Helpful tip at bottom --%>
+      <%!-- Helpful tip at bottom (Tier 2b: suggest closing when wait is long) --%>
       <div class="mt-5 pt-4 border-t border-[#F5F5F7]">
         <div class="flex items-start gap-2.5">
           <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
-          <p class="text-xs text-[#8E8E93]">
-            <span class="font-medium text-[#1C1C1E]">You can start using your course now!</span>
-            Schedule a test or explore practice while we finish setting up. Content will appear automatically as it's ready.
-          </p>
+          <%= if @has_ocr && !@ocr_done && long_wait?(@course) do %>
+            <p class="text-xs text-[#8E8E93]">
+              <span class="font-medium text-[#1C1C1E]">Feel free to close this page.</span>
+              We'll email you when your course is ready. Questions appear automatically as pages are processed.
+            </p>
+          <% else %>
+            <p class="text-xs text-[#8E8E93]">
+              <span class="font-medium text-[#1C1C1E]">You can start using your course now!</span>
+              Schedule a test or explore practice while we finish setting up. Content will appear automatically as it's ready.
+            </p>
+          <% end %>
         </div>
       </div>
     </div>

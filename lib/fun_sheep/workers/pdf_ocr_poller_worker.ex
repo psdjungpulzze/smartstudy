@@ -292,17 +292,47 @@ defmodule FunSheep.Workers.PdfOcrPollerWorker do
   defp advance_course(course_id) do
     {new_count, total} = FunSheep.Courses.increment_ocr_completed(course_id)
 
+    if new_count == 1, do: FunSheep.Courses.set_ocr_started_at(course_id)
+
     Phoenix.PubSub.broadcast(
       FunSheep.PubSub,
       "course:#{course_id}",
       {:processing_update, %{ocr_completed: new_count, ocr_total: total}}
     )
 
+    if total > 0 and new_count < total do
+      maybe_trigger_preliminary_extraction(course_id, new_count, total)
+    end
+
     if new_count >= total do
       maybe_trigger_extraction(course_id)
     end
 
     :ok
+  end
+
+  defp maybe_trigger_preliminary_extraction(course_id, new_count, total) do
+    if new_count / total >= 0.20 do
+      course = FunSheep.Courses.get_course!(course_id)
+      metadata = course.metadata || %{}
+
+      unless metadata["preliminary_extracted"] == true do
+        completed_ids = FunSheep.Courses.list_completed_material_ids(course_id)
+
+        {:ok, _} =
+          FunSheep.Courses.update_course(course, %{
+            metadata:
+              Map.merge(metadata, %{
+                "preliminary_extracted" => true,
+                "preliminary_material_ids" => completed_ids
+              })
+          })
+
+        %{course_id: course_id, phase: "preliminary"}
+        |> FunSheep.Workers.QuestionExtractionWorker.new()
+        |> Oban.insert()
+      end
+    end
   end
 
   defp maybe_trigger_extraction(course_id) do

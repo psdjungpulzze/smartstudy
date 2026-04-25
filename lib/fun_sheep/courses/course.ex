@@ -58,6 +58,7 @@ defmodule FunSheep.Courses.Course do
     # has a candidate DiscoveredTOC that didn't auto-apply (material change
     # with risk to existing attempts). UI surfaces this as a banner to the
     # creator / active users; escalates through tiers over time.
+    field :ocr_started_at, :utc_datetime
     field :pending_toc_proposed_at, :utc_datetime
 
     belongs_to :school, FunSheep.Geo.School
@@ -98,6 +99,7 @@ defmodule FunSheep.Courses.Course do
       :external_provider,
       :external_id,
       :external_synced_at,
+      :ocr_started_at,
       :pending_toc_id,
       :pending_toc_proposed_by_id,
       :pending_toc_proposed_at,

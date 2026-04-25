@@ -183,6 +183,9 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
   defp advance_course(course_id) do
     {new_count, total} = Courses.increment_ocr_completed(course_id)
 
+    # Record when OCR first started so the UI can compute an ETA (Tier 2a)
+    if new_count == 1, do: Courses.set_ocr_started_at(course_id)
+
     # Update processing step text periodically
     if rem(new_count, 50) == 0 or new_count >= total do
       course = Courses.get_course!(course_id)
@@ -199,6 +202,12 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
       {:processing_update, %{ocr_completed: new_count, ocr_total: total}}
     )
 
+    # Progressive unlock at 20% (Tier 2c): fire preliminary extraction so the
+    # student can start practising while the remaining 80% is still processing.
+    if total > 0 and new_count < total do
+      maybe_trigger_preliminary_extraction(course_id, new_count, total)
+    end
+
     # When all OCR is done, mark it and check if extraction can start
     if new_count >= total do
       Logger.info("[OCR] All #{total} materials processed for course #{course_id}")
@@ -214,6 +223,41 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     end
 
     :ok
+  end
+
+  # Fire a preliminary extraction job when 20% of pages are done, so students
+  # get their first questions well before the full OCR drain completes.
+  # Oban's unique constraint prevents a second preliminary from enqueuing if
+  # multiple workers hit the threshold simultaneously.
+  defp maybe_trigger_preliminary_extraction(course_id, new_count, total) do
+    threshold_reached = new_count / total >= 0.20
+
+    if threshold_reached do
+      course = Courses.get_course!(course_id)
+      metadata = course.metadata || %{}
+      already_triggered = metadata["preliminary_extracted"] == true
+
+      unless already_triggered do
+        completed_ids = Courses.list_completed_material_ids(course_id)
+
+        {:ok, _} =
+          Courses.update_course(course, %{
+            metadata:
+              Map.merge(metadata, %{
+                "preliminary_extracted" => true,
+                "preliminary_material_ids" => completed_ids
+              })
+          })
+
+        %{course_id: course_id, phase: "preliminary"}
+        |> FunSheep.Workers.QuestionExtractionWorker.new()
+        |> Oban.insert()
+
+        Logger.info(
+          "[OCR] Enqueued preliminary extraction at #{new_count}/#{total} for course #{course_id}"
+        )
+      end
+    end
   end
 
   defp mark_ocr_complete(course_id) do

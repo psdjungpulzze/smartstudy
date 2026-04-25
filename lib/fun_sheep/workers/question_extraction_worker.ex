@@ -25,13 +25,20 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
   require Logger
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"course_id" => course_id}}) do
-    Logger.info("[Questions] Starting extraction for course #{course_id}")
+  def perform(%Oban.Job{args: %{"course_id" => course_id} = args}) do
+    phase = Map.get(args, "phase", "final")
+    preliminary = phase == "preliminary"
+
+    Logger.info("[Questions] Starting #{phase} extraction for course #{course_id}")
 
     course = Courses.get_course_with_chapters!(course_id)
-    ocr_pages = collect_ocr_pages(course_id)
 
-    if ocr_pages == [] do
+    # Preliminary extraction only processes the first batch of completed materials
+    # (those saved in metadata when the 20% threshold was hit). The final
+    # extraction processes the remaining materials so each page is only extracted once.
+    ocr_pages = collect_ocr_pages(course_id, preliminary: preliminary)
+
+    if ocr_pages == [] and not preliminary do
       Logger.info("[Questions] No OCR pages for course #{course_id}, generating from curriculum")
 
       # Don't finalize yet — set status to "generating" and let AI worker finalize
@@ -48,7 +55,10 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
       :ok
     else
       questions = extract_questions(ocr_pages, course)
-      Logger.info("[Questions] Extracted #{length(questions)} questions for course #{course_id}")
+
+      Logger.info(
+        "[Questions] Extracted #{length(questions)} questions (#{phase}) for course #{course_id}"
+      )
 
       # Insert questions into DB
       {inserted, inserted_ids} =
@@ -76,14 +86,27 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
         course_id: course_id
       )
 
-      # Don't finalize yet — AI generation will add more questions
-      set_generating_status(course, inserted)
+      if preliminary do
+        # Preliminary: don't change course status or start AI generation yet.
+        # Broadcast that early questions are available so the UI can update.
+        Phoenix.PubSub.broadcast(
+          FunSheep.PubSub,
+          "course:#{course_id}",
+          {:questions_generated, %{count: inserted, phase: "preliminary"}}
+        )
 
-      # After extracting questions from materials, trigger AI to generate more
-      FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
-        count: 20,
-        mode: "from_material"
-      )
+        Logger.info(
+          "[Questions] Preliminary extraction done: #{inserted} questions for course #{course_id}"
+        )
+      else
+        # Final: set generating status and kick off AI question generation.
+        set_generating_status(course, inserted)
+
+        FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
+          count: 20,
+          mode: "from_material"
+        )
+      end
 
       :ok
     end
@@ -128,12 +151,27 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
 
   alias FunSheep.Workers.MaterialClassificationWorker
 
-  defp collect_ocr_pages(course_id) do
+  # preliminary: true  → only pages from materials in preliminary_material_ids
+  # preliminary: false → only pages from materials NOT in preliminary_material_ids
+  #                      (so each page is extracted exactly once)
+  defp collect_ocr_pages(course_id, opts) do
+    preliminary = Keyword.get(opts, :preliminary, false)
     materials = Content.list_materials_by_course(course_id)
+
+    course = Courses.get_course!(course_id)
+    preliminary_ids = get_in(course.metadata || %{}, ["preliminary_material_ids"]) || []
 
     completed =
       materials
       |> Enum.filter(&(&1.ocr_status == :completed))
+      |> Enum.filter(fn m ->
+        if preliminary do
+          m.id in preliminary_ids
+        else
+          # final pass: skip any material already extracted in the preliminary run
+          m.id not in preliminary_ids or preliminary_ids == []
+        end
+      end)
 
     # Split by classifier routing: anything the classifier says is a
     # Q&A source (or the legacy sample_questions fallback) is a primary
