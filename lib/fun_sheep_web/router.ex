@@ -14,6 +14,12 @@ defmodule FunSheepWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Dev-only binary upload receiver. Needs session (for DevAuth) but no CSRF
+  # — the URL-embedded HMAC token is the auth mechanism for this endpoint.
+  pipeline :local_upload do
+    plug :fetch_session
+  end
+
   # Health check for Cloud Run (no auth, no CSRF)
   scope "/health", FunSheepWeb do
     pipe_through :api
@@ -153,10 +159,13 @@ defmodule FunSheepWeb.Router do
     post "/uploads/sign", UploadController, :sign
     post "/uploads/finalize", UploadController, :finalize
 
-    # Local-backend PUT receiver — only active when storage_backend is
-    # FunSheep.Storage.Local (dev/test). In prod the Local module isn't
-    # used; the handler itself also guards on this. `*key` matches the
-    # whole remaining path so staging/.../file.pdf stays intact.
+  end
+
+  # Local-backend PUT receiver — only active when storage_backend is
+  # FunSheep.Storage.Local (dev/test). Uses a minimal pipeline with no CSRF
+  # protection; the HMAC token embedded in the URL is the auth mechanism.
+  scope "/api", FunSheepWeb do
+    pipe_through [:local_upload, FunSheepWeb.Plugs.DevAuth]
     put "/uploads/local/:token/*key", UploadController, :local_put
   end
 

@@ -410,28 +410,30 @@ When writing code:
 - **Every PR/commit that adds or modifies code MUST include test scripts** — unit tests at minimum, integration/e2e tests where applicable
 - **Test coverage must remain above 80% at all times** — run `mix test --cover` to verify before considering work complete
 
-**Mandatory visual verification for UI/UX changes**:
-- After implementing any UI/UX feature or change, you **MUST** visually verify it using Playwright before reporting it as complete
-- Use `scripts/i/visual-test.sh` to manage an isolated test server:
-  ```bash
-  # Start a server on a random available port (4041-4099)
-  PORT=$(./scripts/i/visual-test.sh start)
+**Mandatory visual verification — UI/UX changes AND server-touching changes**:
 
-  # Get the URL for a specific page
-  ./scripts/i/visual-test.sh url /dev/login
+Use `scripts/i/visual-test.sh` to manage an isolated test server (never port 4040):
+```bash
+PORT=$(./scripts/i/visual-test.sh start)   # start on a free port (4041-4099)
+./scripts/i/visual-test.sh url /dev/login  # get URL for a page
+./scripts/i/visual-test.sh stop            # clean up
+```
 
-  # When done testing
-  ./scripts/i/visual-test.sh stop
-  ```
-- Steps:
-  1. Run `PORT=$(./scripts/i/visual-test.sh start)` to start an isolated server
-  2. Use Playwright to navigate to `http://localhost:$PORT/dev/login` and log in as a test user
-  3. Navigate to the affected page(s) and take screenshots
-  4. Verify the UI renders correctly and the feature works as expected
-  5. If the visual test reveals issues, fix them and re-verify before marking the task as done
-  6. Run `./scripts/i/visual-test.sh stop` to clean up
-- This is **not optional** — do not claim a UI feature is implemented without visual confirmation
+**UI/UX changes** (LiveView, HEEx, components, CSS/JS):
+1. Start an isolated server with `visual-test.sh start`
+2. Navigate to `/dev/login`, log in as a test user
+3. Navigate to the affected page(s) and take screenshots
+4. Verify correct rendering; fix issues and re-verify before marking done
+- This is **not optional** — do not claim a UI feature is done without screenshots
 - Use the `visual-tester` agent for Playwright-based screenshot verification
+
+**Server-touching changes** (config files, `mix.exs`/`mix.lock`, `application.ex`, env files):
+1. Remind the user their dev server at port 4040 needs a restart to pick up the change
+2. Start an isolated test server with `visual-test.sh start`
+3. Navigate to `http://localhost:$PORT/` — confirm HTTP 200, no crash/boot error
+4. Navigate to `/dev/login` — confirm login page loads and auth works
+5. Navigate to the affected feature page if the change was targeted
+- Do **not** claim a config/env/dependency change is safe without verifying the server boots
 
 **Parallel session isolation**:
 - Each Claude session **MUST** use its own port via `scripts/i/visual-test.sh` — never share port 4040 for Playwright tests

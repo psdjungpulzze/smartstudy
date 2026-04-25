@@ -38,6 +38,11 @@ if config_env() in [:dev, :test] do
       end
     end)
   end
+
+  # Set LLM API keys into Application env after .env.credentials is loaded above.
+  config :fun_sheep,
+    openai_api_key: System.get_env("OPENAI_API_KEY"),
+    anthropic_api_key: System.get_env("ANTHROPIC_API_KEY")
 end
 
 # Google Vision API key (from env or .env.credentials).

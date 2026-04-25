@@ -1443,18 +1443,30 @@ defmodule FunSheepWeb.CourseDetailLive do
       <%!-- Process button — hidden when course is already actively processing --%>
       <div
         :if={@has_pending && !@uploading && @course.processing_status not in ["processing", "extracting", "validating"]}
-        class="flex items-center justify-between pt-3 border-t border-[#F5F5F7]"
+        class="pt-3 border-t border-[#F5F5F7]"
       >
-        <p class="text-xs text-[#8E8E93]">
-          <span class="font-medium text-[#1C1C1E]">{@pending_count} new file(s)</span>
-          ready to process — this will update chapters, sections, and questions from your textbook
-        </p>
-        <button
-          phx-click="enrich_course"
-          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm whitespace-nowrap ml-3"
+        <%!-- "Files ready" callout shown right after upload completes --%>
+        <div
+          :if={@progress.total > 0 && @progress.completed > 0}
+          class="flex items-center gap-2 mb-3 px-3 py-2.5 bg-[#E8F8EB] border border-[#4CD964] rounded-xl"
         >
-          <.icon name="hero-sparkles" class="w-4 h-4 inline mr-1" /> Process Materials
-        </button>
+          <.icon name="hero-check-circle" class="w-4 h-4 text-[#4CD964] shrink-0" />
+          <p class="text-xs font-medium text-[#1C1C1E]">
+            {@progress.completed} file{if @progress.completed != 1, do: "s"} uploaded — ready to process
+          </p>
+        </div>
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-[#8E8E93]">
+            <span class="font-medium text-[#1C1C1E]">{@pending_count} file{if @pending_count != 1, do: "s"}</span>
+            waiting — will update chapters, sections, and questions
+          </p>
+          <button
+            phx-click="enrich_course"
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm whitespace-nowrap ml-3"
+          >
+            <.icon name="hero-sparkles" class="w-4 h-4 inline mr-1" /> Process Materials
+          </button>
+        </div>
       </div>
 
     </div>
@@ -1639,6 +1651,8 @@ defmodule FunSheepWeb.CourseDetailLive do
         true -> :pending
       end
 
+    show_ctas = (step4_state == :active && question_count > 0) || step5_state == :active
+
     assigns =
       assign(assigns,
         discovery_done: discovery_done,
@@ -1652,7 +1666,8 @@ defmodule FunSheepWeb.CourseDetailLive do
         step2_state: step2_state,
         step3_state: step3_state,
         step4_state: step4_state,
-        step5_state: step5_state
+        step5_state: step5_state,
+        show_ctas: show_ctas
       )
 
     ~H"""
@@ -1680,6 +1695,7 @@ defmodule FunSheepWeb.CourseDetailLive do
           state={@step1_state}
           icon="hero-globe-alt"
           title="Searching for study materials"
+          sub_step={if @step1_state == :active, do: @sub_step}
           subtitle={
             cond do
               @sources_count > 0 ->
@@ -1699,6 +1715,7 @@ defmodule FunSheepWeb.CourseDetailLive do
           state={@step2_state}
           icon="hero-academic-cap"
           title="Discovering course structure"
+          sub_step={if @step2_state == :active, do: @sub_step}
           subtitle={
             cond do
               @discovery_done ->
@@ -1802,30 +1819,48 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
-      <%!-- Live sub-step detail (Claude Code-style) --%>
-      <div :if={@sub_step} class="mt-4 ml-10">
-        <div class="flex items-center gap-2 px-3 py-2 bg-[#F5F5F7] rounded-xl">
-          <div class="w-1.5 h-1.5 rounded-full bg-[#007AFF] animate-pulse shrink-0" />
-          <p class="text-xs text-[#8E8E93] font-mono truncate">{@sub_step}</p>
-        </div>
-      </div>
-
-      <%!-- Helpful tip at bottom (Tier 2b: suggest closing when wait is long) --%>
+      <%!-- What's happening / what to do --%>
       <div class="mt-5 pt-4 border-t border-[#F5F5F7]">
-        <div class="flex items-start gap-2.5">
-          <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
-          <%= if @has_ocr && !@ocr_done && long_wait?(@course) do %>
-            <p class="text-xs text-[#8E8E93]">
-              <span class="font-medium text-[#1C1C1E]">Feel free to close this page.</span>
-              We'll email you when your course is ready. Questions appear automatically as pages are processed.
-            </p>
-          <% else %>
-            <p class="text-xs text-[#8E8E93]">
-              <span class="font-medium text-[#1C1C1E]">You can start using your course now!</span>
-              Schedule a test or explore practice while we finish setting up. Content will appear automatically as it's ready.
-            </p>
-          <% end %>
-        </div>
+        <%= cond do %>
+          <% @show_ctas -> %>
+            <div class="flex items-start gap-2.5">
+              <.icon name="hero-rocket-launch" class="w-4 h-4 text-[#4CD964] shrink-0 mt-0.5" />
+              <div>
+                <p class="text-xs font-medium text-[#1C1C1E] mb-2">
+                  {@question_count} question{if @question_count != 1, do: "s"} ready — you can start now while more are being added.
+                </p>
+                <div class="flex gap-2 flex-wrap">
+                  <.link
+                    navigate={~p"/courses/#{@course.id}/practice"}
+                    class="inline-flex items-center gap-1 text-xs font-medium text-white bg-[#4CD964] hover:bg-[#3DBF55] px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <.icon name="hero-bolt" class="w-3 h-3" /> Quick Practice
+                  </.link>
+                  <.link
+                    navigate={~p"/courses/#{@course.id}/tests/new"}
+                    class="inline-flex items-center gap-1 text-xs font-medium text-[#1C1C1E] bg-[#F5F5F7] hover:bg-[#E5E5EA] px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <.icon name="hero-calendar" class="w-3 h-3" /> Schedule Test
+                  </.link>
+                </div>
+              </div>
+            </div>
+          <% @has_ocr && !@ocr_done && long_wait?(@course) -> %>
+            <div class="flex items-start gap-2.5">
+              <.icon name="hero-clock" class="w-4 h-4 text-[#8E8E93] shrink-0 mt-0.5" />
+              <p class="text-xs text-[#8E8E93]">
+                <span class="font-medium text-[#1C1C1E]">Feel free to close this page.</span>
+                We'll email you when your course is ready. Questions appear automatically as pages are processed.
+              </p>
+            </div>
+          <% true -> %>
+            <div class="flex items-start gap-2.5">
+              <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
+              <p class="text-xs text-[#8E8E93]">
+                Building your course structure. Once questions are generated, you can start practising right from this page.
+              </p>
+            </div>
+        <% end %>
       </div>
     </div>
     """
@@ -1835,6 +1870,7 @@ defmodule FunSheepWeb.CourseDetailLive do
   attr :icon, :string, required: true
   attr :title, :string, required: true
   attr :subtitle, :string, required: true
+  attr :sub_step, :string, default: nil
 
   defp pipeline_step(assigns) do
     ~H"""
@@ -1874,7 +1910,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- Content --%>
-      <div>
+      <div class="min-w-0 flex-1">
         <p class={[
           "text-sm font-medium",
           if(@state == :pending, do: "text-[#C7C7CC]", else: "text-[#1C1C1E]")
@@ -1887,6 +1923,11 @@ defmodule FunSheepWeb.CourseDetailLive do
         ]}>
           {@subtitle}
         </p>
+        <%!-- Live detail shown inline for the active step --%>
+        <div :if={@state == :active && @sub_step} class="mt-1.5 flex items-start gap-1.5">
+          <div class="w-1.5 h-1.5 rounded-full bg-[#007AFF] animate-pulse shrink-0 mt-1" />
+          <p class="text-xs text-[#007AFF] leading-snug">{@sub_step}</p>
+        </div>
       </div>
     </div>
     """
