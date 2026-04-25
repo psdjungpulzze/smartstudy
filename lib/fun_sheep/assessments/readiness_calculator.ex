@@ -38,7 +38,16 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
     # P4: strip phantom IDs — chapters deleted from the course after the
     # schedule was created would make assessment_complete? return false forever.
     real_sections = Courses.list_sections_by_chapters(raw_chapter_ids)
-    chapter_ids = real_sections |> Enum.map(& &1.chapter_id) |> Enum.uniq()
+    section_chapter_ids = real_sections |> Enum.map(& &1.chapter_id) |> Enum.uniq()
+
+    # When sections exist, use only the chapters that have sections (strips
+    # phantom chapter IDs). When no sections exist at all, fall back to the
+    # raw scope chapter IDs so the chapter-level assessment heuristic works
+    # for courses that haven't been sectioned yet.
+    chapter_ids =
+      if section_chapter_ids != [],
+        do: section_chapter_ids,
+        else: raw_chapter_ids
 
     chapter_scores =
       Enum.into(chapter_ids, %{}, fn ch_id ->
@@ -89,8 +98,11 @@ defmodule FunSheep.Assessments.ReadinessCalculator do
 
   def assessment_complete?(%{skill_scores: skill_scores} = readiness)
       when is_map(skill_scores) and map_size(skill_scores) > 0 do
-    Enum.all?(skill_scores, fn {_id, data} -> skill_total(data) > 0 end) or
-      chapters_all_attempted?(readiness)
+    # When skill_scores is non-empty, every practicable section must have at
+    # least one attempt. Only fall back to chapter coverage when there are no
+    # practicable sections at all (skill_scores would be empty in that case,
+    # handled by the clause below).
+    Enum.all?(skill_scores, fn {_id, data} -> skill_total(data) > 0 end)
   end
 
   def assessment_complete?(%{chapter_scores: cs} = readiness)
