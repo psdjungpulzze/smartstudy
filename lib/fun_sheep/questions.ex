@@ -1334,6 +1334,14 @@ defmodule FunSheep.Questions do
           :readiness_updated
         )
 
+        case Repo.get(Question, attempt.question_id) do
+          %Question{course_id: course_id} when not is_nil(course_id) ->
+            FunSheep.Social.maybe_award_study_buddy_xp(attempt.user_role_id, course_id)
+
+          _ ->
+            :noop
+        end
+
         {:ok, attempt}
 
       error ->

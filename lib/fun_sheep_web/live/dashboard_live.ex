@@ -13,7 +13,8 @@ defmodule FunSheepWeb.DashboardLive do
     FixedTests,
     Gamification,
     Integrations,
-    MemorySpan
+    MemorySpan,
+    Social
   }
 
   alias FunSheep.Engagement.{SpacedRepetition, StudySessions}
@@ -24,6 +25,7 @@ defmodule FunSheepWeb.DashboardLive do
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(FunSheep.PubSub, "student_progress:#{user_role_id}")
+      Phoenix.PubSub.subscribe(FunSheep.PubSub, "social:feed:#{user_role_id}")
     end
 
     {upcoming_tests, gamification, course_count, review_stats, daily_summary, integrations,
@@ -67,6 +69,18 @@ defmodule FunSheepWeb.DashboardLive do
            nil, [], true, []}
       end
 
+    social_suggestions =
+      case Ecto.UUID.cast(user_role_id) do
+        {:ok, _} -> Social.suggested_follows(user_role_id, 3)
+        :error -> []
+      end
+
+    following_count =
+      case Ecto.UUID.cast(user_role_id) do
+        {:ok, _} -> Social.following_count(user_role_id)
+        :error -> 0
+      end
+
     # Build memory_spans map: course_id → span (for quick lookup in templates)
     memory_spans =
       upcoming_tests
@@ -92,7 +106,10 @@ defmodule FunSheepWeb.DashboardLive do
         memory_spans: memory_spans,
         custom_assignments: custom_assignments,
         onboarding_complete: onboarding_complete,
-        enrolled_courses: enrolled_courses
+        enrolled_courses: enrolled_courses,
+        social_suggestions: social_suggestions,
+        following_count: following_count,
+        social_feed: []
       )
       |> FunSheepWeb.LiveHelpers.assign_tutorial(
         key: "dashboard",
@@ -204,6 +221,15 @@ defmodule FunSheepWeb.DashboardLive do
 
     {:noreply,
      assign(socket, primary_test: primary, other_tests: other, memory_spans: memory_spans)}
+  end
+
+  def handle_info({:friend_achievement, friend_id, achievement_type}, socket) do
+    alias FunSheep.Gamification.Achievement
+    info = Achievement.display_info(achievement_type)
+
+    entry = %{friend_id: friend_id, achievement_type: achievement_type, info: info}
+    feed = [entry | socket.assigns.social_feed] |> Enum.take(5)
+    {:noreply, assign(socket, social_feed: feed)}
   end
 
   # Ignore other PubSub messages we're not interested in.
@@ -395,6 +421,12 @@ defmodule FunSheepWeb.DashboardLive do
       <div :if={@primary_test} class="animate-slide-up">
         <.daily_goal gamification={@gamification} />
       </div>
+
+      <%!-- ── Find Classmates Widget ── --%>
+      <.find_classmates_widget suggestions={@social_suggestions} following_count={@following_count} />
+
+      <%!-- ── Friends Activity Feed ── --%>
+      <.social_feed_widget :if={@social_feed != []} feed={@social_feed} />
     </div>
     """
   end
@@ -1418,6 +1450,96 @@ defmodule FunSheepWeb.DashboardLive do
   end
 
   defp subject_emoji(_), do: "📘"
+
+  # ── Find Classmates Widget ────────────────────────────────────────────────
+
+  attr :suggestions, :list, required: true
+  attr :following_count, :integer, required: true
+
+  defp find_classmates_widget(assigns) do
+    ~H"""
+    <div :if={@suggestions != [] or @following_count == 0} class="animate-slide-up">
+      <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md overflow-hidden">
+        <div class="flex items-center justify-between px-4 pt-4 pb-2">
+          <div>
+            <h2 class="font-extrabold text-gray-900 dark:text-white text-sm">Find Classmates</h2>
+            <p class="text-xs text-gray-400 mt-0.5">
+              Following {@following_count} {if @following_count == 1, do: "student", else: "students"}
+            </p>
+          </div>
+          <.link navigate={~p"/social/find"} class="text-xs text-[#4CD964] font-bold hover:underline">
+            See All →
+          </.link>
+        </div>
+
+        <div :if={@suggestions != []} class="divide-y divide-gray-50 dark:divide-gray-700">
+          <div :for={s <- @suggestions} class="flex items-center gap-3 px-4 py-2.5">
+            <.link navigate={~p"/social/profile/#{s.user_role.id}"} class="shrink-0">
+              <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-200 hover:opacity-80 transition-opacity">
+                {String.first(s.user_role.display_name || "?")}
+              </div>
+            </.link>
+            <.link navigate={~p"/social/profile/#{s.user_role.id}"} class="flex-1 min-w-0 hover:underline">
+              <p class="text-sm font-bold text-gray-900 dark:text-white truncate">
+                {s.user_role.display_name}
+              </p>
+              <p class="text-xs text-gray-400">{suggestion_reason(s.reason)}</p>
+            </.link>
+            <.link navigate={~p"/social/find"} class="shrink-0 text-xs px-3 py-1 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors">
+              + Follow
+            </.link>
+          </div>
+        </div>
+
+        <div :if={@suggestions == [] and @following_count == 0} class="px-4 pb-4 pt-2 text-center">
+          <p class="text-xs text-gray-400">No classmates found yet.</p>
+        </div>
+
+        <div class="bg-gray-50 dark:bg-gray-800 px-4 py-2.5">
+          <.link navigate={~p"/social/find"} class="w-full flex items-center justify-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-200 hover:text-[#4CD964] transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            Search All Classmates
+          </.link>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp suggestion_reason(:school), do: "🏫 Same school"
+  defp suggestion_reason(:fof), do: "👥 Friend of a friend"
+  defp suggestion_reason(:course), do: "📚 Shared course"
+  defp suggestion_reason(_), do: "Suggested"
+
+  # ── Social Feed Widget ────────────────────────────────────────────────────
+
+  attr :feed, :list, required: true
+
+  defp social_feed_widget(assigns) do
+    ~H"""
+    <div class="animate-slide-up">
+      <div class="bg-white dark:bg-[#2C2C2E] rounded-2xl shadow-md overflow-hidden">
+        <div class="px-4 pt-4 pb-2">
+          <h2 class="font-extrabold text-gray-900 dark:text-white text-sm">Friends Activity</h2>
+        </div>
+        <div class="divide-y divide-gray-50 dark:divide-gray-700">
+          <div :for={entry <- @feed} class="flex items-center gap-3 px-4 py-2.5">
+            <span class="text-2xl">{entry.info.emoji}</span>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-gray-600 dark:text-gray-300">
+                A friend just earned
+                <span class="font-semibold">{entry.info.name}</span>
+              </p>
+              <p class="text-[10px] text-gray-400">{entry.info.description}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
 
   # State A: nothing answered yet
   defp card_readiness_state(_readiness_score, 0), do: :untested

@@ -5,21 +5,23 @@ defmodule FunSheepWeb.LeaderboardLive do
 
   alias FunSheep.Gamification
   alias FunSheep.Gamification.{Achievement, ShoutOut}
+  alias FunSheep.Social
 
   @impl true
   def mount(_params, _session, socket) do
     user_role_id = socket.assigns.current_user["id"]
 
-    {achievements, gamification, flock, my_rank, flock_size} =
+    {achievements, gamification, flock, my_rank, flock_size, school_peers} =
       case Ecto.UUID.cast(user_role_id) do
         {:ok, _uuid} ->
           achv = Gamification.list_achievements(user_role_id)
           gam = Gamification.dashboard_summary(user_role_id)
-          {flock_list, rank, size} = Gamification.build_flock(user_role_id)
-          {achv, gam, flock_list, rank, size}
+          {flock_list, rank, size} = Social.flock_with_social(user_role_id)
+          peers = Social.school_peers(user_role_id, limit: 50)
+          {achv, gam, flock_list, rank, size, peers}
 
         :error ->
-          {[], default_gamification(), [], 0, 0}
+          {[], default_gamification(), [], 0, 0, []}
       end
 
     shout_outs = Gamification.get_current_shout_outs()
@@ -28,19 +30,57 @@ defmodule FunSheepWeb.LeaderboardLive do
      assign(socket,
        page_title: "Flock",
        tab: :leaderboard,
+       flock_filter: :all,
        achievements: achievements,
        gamification: gamification,
        flock: flock,
        my_rank: my_rank,
        flock_size: flock_size,
-       shout_outs: shout_outs
+       shout_outs: shout_outs,
+       school_peers: school_peers
      )}
   end
 
   @impl true
   def handle_event("switch_tab", %{"tab" => tab}, socket)
-      when tab in ["leaderboard", "achievements", "shout_outs"] do
+      when tab in ["leaderboard", "achievements", "shout_outs", "school"] do
     {:noreply, assign(socket, :tab, String.to_existing_atom(tab))}
+  end
+
+  @impl true
+  def handle_event("set_flock_filter", %{"filter" => filter}, socket)
+      when filter in ["all", "following", "mutual"] do
+    user_role_id = socket.assigns.current_user["id"]
+    filter_atom = String.to_existing_atom(filter)
+
+    {flock, my_rank, flock_size} =
+      Social.flock_with_social(user_role_id, filter: filter_atom)
+
+    {:noreply,
+     assign(socket,
+       flock_filter: filter_atom,
+       flock: flock,
+       my_rank: my_rank,
+       flock_size: flock_size
+     )}
+  end
+
+  @impl true
+  def handle_event("follow", %{"id" => target_id}, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+    Social.follow(user_role_id, target_id)
+
+    socket = refresh_social(socket, user_role_id)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("unfollow", %{"id" => target_id}, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+    Social.unfollow(user_role_id, target_id)
+
+    socket = refresh_social(socket, user_role_id)
+    {:noreply, socket}
   end
 
   @impl true
@@ -85,12 +125,69 @@ defmodule FunSheepWeb.LeaderboardLive do
         >
           ✨ Shout Outs
         </button>
+        <button
+          phx-click="switch_tab"
+          phx-value-tab="school"
+          class={tab_class(@tab == :school)}
+        >
+          🏫 School
+        </button>
       </div>
 
       <%!-- ═══ Leaderboard Tab ═══ --%>
       <div :if={@tab == :leaderboard} class="space-y-4 animate-slide-up">
+        <%!-- Social filter --%>
+        <div class="flex gap-2">
+          <button
+            phx-click="set_flock_filter"
+            phx-value-filter="all"
+            class={filter_class(@flock_filter == :all)}
+          >
+            Everyone
+          </button>
+          <button
+            phx-click="set_flock_filter"
+            phx-value-filter="following"
+            class={filter_class(@flock_filter == :following)}
+          >
+            Following
+          </button>
+          <button
+            phx-click="set_flock_filter"
+            phx-value-filter="mutual"
+            class={filter_class(@flock_filter == :mutual)}
+          >
+            ♥ Friends
+          </button>
+        </div>
+
+        <%!-- Empty following/mutual state --%>
+        <div
+          :if={@flock == [] and @flock_filter != :all}
+          class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+        >
+          <p class="text-3xl mb-3">{if @flock_filter == :mutual, do: "♥", else: "👥"}</p>
+          <h3 class="font-extrabold text-gray-900 text-lg">
+            {if @flock_filter == :mutual,
+              do: "No friends yet",
+              else: "You're not following anyone"}
+          </h3>
+          <p class="text-sm text-gray-500 mt-1">
+            {if @flock_filter == :mutual,
+              do: "When you and someone both follow each other, they appear here.",
+              else: "Follow classmates from the School tab to see their rankings."}
+          </p>
+          <button
+            phx-click="switch_tab"
+            phx-value-tab="school"
+            class="mt-4 px-4 py-2 rounded-full text-sm font-bold bg-[#4CD964] text-white shadow-md"
+          >
+            Find Classmates
+          </button>
+        </div>
+
         <%!-- Podium: Top 3 --%>
-        <.podium :if={length(@flock) >= 3} flock={@flock} />
+        <.podium :if={length(@flock) >= 3 and @flock_filter == :all} flock={@flock} />
 
         <%!-- Your Position Card --%>
         <div class="bg-gradient-to-r from-[#4CD964] to-emerald-500 rounded-2xl p-4 text-white shadow-lg">
@@ -114,7 +211,7 @@ defmodule FunSheepWeb.LeaderboardLive do
         </div>
 
         <%!-- Full Ranking --%>
-        <div class="space-y-2">
+        <div :if={@flock != []} class="space-y-2">
           <div
             :for={member <- @flock}
             class={[
@@ -133,29 +230,52 @@ defmodule FunSheepWeb.LeaderboardLive do
               {rank_display(member.rank)}
             </div>
 
-            <%!-- Avatar --%>
-            <div class={[
-              "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0",
-              if(Map.get(member, :is_me),
-                do:
-                  "bg-gradient-to-br from-[#4CD964] to-emerald-600 text-white ring-2 ring-green-200",
-                else: "bg-gray-100 text-gray-600"
-              )
-            ]}>
+            <%!-- Avatar (clickable for non-me) --%>
+            <.link
+              :if={!Map.get(member, :is_me)}
+              navigate={~p"/social/profile/#{member.id}"}
+              class={[
+                "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 hover:opacity-80 transition-opacity",
+                avatar_class(member)
+              ]}
+            >
+              {String.first(member.display_name || "?")}
+            </.link>
+            <div
+              :if={Map.get(member, :is_me)}
+              class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 bg-gradient-to-br from-[#4CD964] to-emerald-600 text-white ring-2 ring-green-200"
+            >
               {String.first(member.display_name || "?")}
             </div>
 
             <%!-- Name + tags --%>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-1.5">
-                <p class={[
-                  "font-bold text-sm truncate",
-                  if(Map.get(member, :is_me), do: "text-[#4CD964]", else: "text-gray-900")
-                ]}>
-                  {if Map.get(member, :is_me), do: "You", else: member.display_name}
+                <.link
+                  :if={!Map.get(member, :is_me)}
+                  navigate={~p"/social/profile/#{member.id}"}
+                  class={[
+                    "font-bold text-sm truncate hover:underline",
+                    follow_name_class(Map.get(member, :follow_state, :none))
+                  ]}
+                >
+                  {member.display_name}
+                </.link>
+                <p
+                  :if={Map.get(member, :is_me)}
+                  class="font-bold text-sm truncate text-[#4CD964]"
+                >
+                  You
                 </p>
                 <span :if={member.streak >= 3} class="text-xs" title={"#{member.streak} day streak"}>
                   🔥{member.streak}
+                </span>
+                <span
+                  :if={Map.get(member, :follow_state) == :mutual}
+                  class="text-xs"
+                  title="Friends"
+                >
+                  ♥
                 </span>
               </div>
               <div class="flex gap-1 mt-0.5">
@@ -178,11 +298,31 @@ defmodule FunSheepWeb.LeaderboardLive do
               <p class="text-sm font-extrabold text-gray-900">{member.weekly_xp}</p>
               <p class="text-[10px] text-gray-400">FP</p>
             </div>
+
+            <%!-- Follow button --%>
+            <div :if={!Map.get(member, :is_me)} class="shrink-0">
+              <button
+                :if={Map.get(member, :follow_state) in [:none, :followed_by]}
+                phx-click="follow"
+                phx-value-id={member.id}
+                class="text-xs px-3 py-1 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors"
+              >
+                + Follow
+              </button>
+              <button
+                :if={Map.get(member, :follow_state) in [:following, :mutual]}
+                phx-click="unfollow"
+                phx-value-id={member.id}
+                class="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-colors"
+              >
+                {if Map.get(member, :follow_state) == :mutual, do: "Friends ♥", else: "Following"}
+              </button>
+            </div>
           </div>
         </div>
 
-        <%!-- Empty flock --%>
-        <div :if={@flock == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+        <%!-- Empty flock (all filter) --%>
+        <div :if={@flock == [] and @flock_filter == :all} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
           <.sheep state={:encouraging} size="lg" message="Your flock is forming!" />
           <h3 class="font-extrabold text-gray-900 text-lg mt-4">No flock members yet</h3>
           <p class="text-sm text-gray-500 mt-1">
@@ -216,6 +356,89 @@ defmodule FunSheepWeb.LeaderboardLive do
         </div>
       </div>
 
+      <%!-- ═══ School Tab ═══ --%>
+      <div :if={@tab == :school} class="space-y-4 animate-slide-up">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-extrabold text-gray-900">Your School</h2>
+            <p class="text-xs text-gray-500 mt-0.5">
+              {length(@school_peers)} students studying with you
+            </p>
+          </div>
+          <.link
+            navigate={~p"/social/find"}
+            class="text-xs px-3 py-1.5 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors"
+          >
+            Find Friends
+          </.link>
+        </div>
+
+        <div :if={@school_peers == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+          <p class="text-3xl mb-3">🏫</p>
+          <h3 class="font-extrabold text-gray-900 text-lg">No classmates found yet</h3>
+          <p class="text-sm text-gray-500 mt-1">
+            Make sure your school is set in your profile. Invite classmates to join!
+          </p>
+        </div>
+
+        <div :if={@school_peers != []} class="space-y-2">
+          <div
+            :for={peer <- @school_peers}
+            class="bg-white rounded-2xl border border-gray-100 p-3 flex items-center gap-3"
+          >
+            <%!-- Avatar --%>
+            <.link navigate={~p"/social/profile/#{peer.id}"} class="shrink-0">
+              <div class={[
+                "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold hover:opacity-80 transition-opacity",
+                peer_avatar_class(peer.follow_state)
+              ]}>
+                {String.first(peer.display_name || "?")}
+              </div>
+            </.link>
+
+            <%!-- Info --%>
+            <div class="flex-1 min-w-0">
+              <.link navigate={~p"/social/profile/#{peer.id}"} class="hover:underline">
+                <p class={["font-bold text-sm truncate", follow_name_class(peer.follow_state)]}>
+                  {peer.display_name}
+                  <span :if={peer.follow_state == :mutual} class="text-xs ml-1">♥</span>
+                </p>
+              </.link>
+              <p class="text-xs text-gray-400 mt-0.5">
+                {grade_label(peer.grade)}
+                {if peer.streak > 0, do: " · 🔥#{peer.streak} day streak"}
+              </p>
+            </div>
+
+            <%!-- Weekly XP --%>
+            <div class="text-right shrink-0 text-xs text-gray-400">
+              <p class="font-bold text-gray-700">{peer.weekly_xp}</p>
+              <p>FP/wk</p>
+            </div>
+
+            <%!-- Follow button --%>
+            <div class="shrink-0">
+              <button
+                :if={peer.follow_state in [:none, :followed_by]}
+                phx-click="follow"
+                phx-value-id={peer.id}
+                class="text-xs px-3 py-1 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors"
+              >
+                + Follow
+              </button>
+              <button
+                :if={peer.follow_state in [:following, :mutual]}
+                phx-click="unfollow"
+                phx-value-id={peer.id}
+                class="text-xs px-3 py-1 rounded-full bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-colors"
+              >
+                {if peer.follow_state == :mutual, do: "Friends ♥", else: "Following"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <%!-- ═══ Shout Outs Tab ═══ --%>
       <div :if={@tab == :shout_outs} class="space-y-4 animate-slide-up">
         <div>
@@ -225,7 +448,6 @@ defmodule FunSheepWeb.LeaderboardLive do
           </p>
         </div>
 
-        <%!-- Empty state --%>
         <div
           :if={@shout_outs == []}
           class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
@@ -237,7 +459,6 @@ defmodule FunSheepWeb.LeaderboardLive do
           </p>
         </div>
 
-        <%!-- Shout out cards --%>
         <div :if={@shout_outs != []} class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <.shout_out_card
             :for={shout_out <- @shout_outs}
@@ -371,7 +592,6 @@ defmodule FunSheepWeb.LeaderboardLive do
         else: "bg-white border-gray-100"
       )
     ]}>
-      <%!-- Category icon + label row --%>
       <div class="flex items-center gap-2 mb-3">
         <span class="text-2xl">{@info.icon}</span>
         <span class="text-xs font-extrabold text-gray-500 uppercase tracking-wider">
@@ -379,7 +599,6 @@ defmodule FunSheepWeb.LeaderboardLive do
         </span>
       </div>
 
-      <%!-- Winner name --%>
       <p class={[
         "font-extrabold text-base truncate",
         if(@is_me, do: "text-[#4CD964]", else: "text-gray-900")
@@ -387,13 +606,11 @@ defmodule FunSheepWeb.LeaderboardLive do
         {if @is_me, do: "You", else: @winner_name}
       </p>
 
-      <%!-- Metric value + unit --%>
       <p class="text-sm text-gray-500 mt-0.5">
         <span class="font-extrabold text-gray-700">{@shout_out.metric_value}</span>
         {@info.unit}
       </p>
 
-      <%!-- "That's you!" badge --%>
       <div :if={@is_me} class="mt-2">
         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-[#4CD964] text-white shadow-sm">
           That's you! 🎉
@@ -407,7 +624,6 @@ defmodule FunSheepWeb.LeaderboardLive do
 
   defp podium(assigns) do
     top3 = Enum.take(assigns.flock, 3)
-    # Reorder for visual: 2nd, 1st, 3rd
     ordered =
       case top3 do
         [first, second, third] -> [second, first, third]
@@ -419,29 +635,35 @@ defmodule FunSheepWeb.LeaderboardLive do
     ~H"""
     <div class="flex items-end justify-center gap-3 py-4">
       <div
-        :for={{member, visual_idx} <- Enum.with_index(@podium_members)}
+        :for={{member, _visual_idx} <- Enum.with_index(@podium_members)}
         class="flex flex-col items-center"
       >
-        <%!-- Crown for 1st --%>
         <div :if={member.rank == 1} class="text-2xl mb-1 animate-float">👑</div>
 
-        <%!-- Avatar --%>
-        <div class={[
-          "rounded-full flex items-center justify-center font-bold mb-2 shadow-lg",
-          podium_avatar_class(member.rank)
-        ]}>
+        <.link :if={!Map.get(member, :is_me)} navigate={~p"/social/profile/#{member.id}"}>
+          <div class={[
+            "rounded-full flex items-center justify-center font-bold mb-2 shadow-lg hover:opacity-80 transition-opacity",
+            podium_avatar_class(member.rank)
+          ]}>
+            {String.first(member.display_name || "?")}
+          </div>
+        </.link>
+        <div
+          :if={Map.get(member, :is_me)}
+          class={[
+            "rounded-full flex items-center justify-center font-bold mb-2 shadow-lg",
+            podium_avatar_class(member.rank)
+          ]}
+        >
           {String.first(member.display_name || "?")}
         </div>
 
-        <%!-- Name --%>
         <p class="text-xs font-bold text-gray-700 truncate max-w-[80px] text-center">
           {if Map.get(member, :is_me), do: "You", else: member.display_name}
         </p>
 
-        <%!-- XP --%>
         <p class="text-xs font-extrabold text-gray-900 mt-0.5">{member.weekly_xp} FP</p>
 
-        <%!-- Podium block --%>
         <div class={[
           "w-20 rounded-t-xl mt-2 flex items-center justify-center",
           podium_block_class(member.rank)
@@ -453,7 +675,20 @@ defmodule FunSheepWeb.LeaderboardLive do
     """
   end
 
-  # ── Helpers ─────────────────────────────────────────────────────────────
+  # ── Private helpers ──────────────────────────────────────────────────────
+
+  defp refresh_social(socket, user_role_id) do
+    filter = socket.assigns.flock_filter
+    {flock, my_rank, flock_size} = Social.flock_with_social(user_role_id, filter: filter)
+    school_peers = Social.school_peers(user_role_id, limit: 50)
+
+    assign(socket,
+      flock: flock,
+      my_rank: my_rank,
+      flock_size: flock_size,
+      school_peers: school_peers
+    )
+  end
 
   defp default_gamification do
     %{
@@ -466,16 +701,19 @@ defmodule FunSheepWeb.LeaderboardLive do
   end
 
   defp tab_class(true),
-    do:
-      "px-4 py-2 rounded-full text-sm font-bold bg-[#4CD964] text-white shadow-md transition-all"
+    do: "px-4 py-2 rounded-full text-sm font-bold bg-[#4CD964] text-white shadow-md transition-all"
 
   defp tab_class(false),
-    do:
-      "px-4 py-2 rounded-full text-sm font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
+    do: "px-4 py-2 rounded-full text-sm font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
+
+  defp filter_class(true),
+    do: "px-3 py-1.5 rounded-full text-xs font-bold bg-gray-800 text-white transition-all"
+
+  defp filter_class(false),
+    do: "px-3 py-1.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500 hover:bg-gray-200 transition-all"
 
   defp week_start do
     today = Date.utc_today()
-    # Monday of current week
     day_of_week = Date.day_of_week(today)
     Date.add(today, -(day_of_week - 1))
   end
@@ -508,16 +746,13 @@ defmodule FunSheepWeb.LeaderboardLive do
   defp rank_badge_class(_), do: "bg-gray-50 text-gray-400"
 
   defp podium_avatar_class(1),
-    do:
-      "w-16 h-16 bg-gradient-to-br from-amber-400 to-yellow-500 text-white text-xl ring-4 ring-amber-200"
+    do: "w-16 h-16 bg-gradient-to-br from-amber-400 to-yellow-500 text-white text-xl ring-4 ring-amber-200"
 
   defp podium_avatar_class(2),
-    do:
-      "w-12 h-12 bg-gradient-to-br from-gray-300 to-gray-400 text-white text-lg ring-2 ring-gray-200"
+    do: "w-12 h-12 bg-gradient-to-br from-gray-300 to-gray-400 text-white text-lg ring-2 ring-gray-200"
 
   defp podium_avatar_class(_),
-    do:
-      "w-12 h-12 bg-gradient-to-br from-orange-300 to-orange-400 text-white text-lg ring-2 ring-orange-200"
+    do: "w-12 h-12 bg-gradient-to-br from-orange-300 to-orange-400 text-white text-lg ring-2 ring-orange-200"
 
   defp podium_block_class(1), do: "bg-gradient-to-b from-amber-400 to-amber-500 h-20"
   defp podium_block_class(2), do: "bg-gradient-to-b from-gray-300 to-gray-400 h-14"
@@ -534,11 +769,35 @@ defmodule FunSheepWeb.LeaderboardLive do
   defp wool_state_from_level(level) when level >= 8, do: :fluffy
   defp wool_state_from_level(_), do: :studying
 
+  defp follow_name_class(:mutual), do: "text-[#4CD964]"
+  defp follow_name_class(:following), do: "text-blue-600"
+  defp follow_name_class(_), do: "text-gray-900"
+
+  defp avatar_class(%{follow_state: :mutual}),
+    do: "bg-gradient-to-br from-[#4CD964] to-emerald-600 text-white ring-2 ring-green-200"
+
+  defp avatar_class(%{follow_state: :following}),
+    do: "bg-blue-100 text-blue-600"
+
+  defp avatar_class(_), do: "bg-gray-100 text-gray-600"
+
+  defp peer_avatar_class(:mutual),
+    do: "bg-gradient-to-br from-[#4CD964] to-emerald-600 text-white ring-2 ring-green-200"
+
+  defp peer_avatar_class(:following), do: "bg-blue-100 text-blue-600"
+  defp peer_avatar_class(:followed_by), do: "bg-purple-100 text-purple-600"
+  defp peer_avatar_class(_), do: "bg-gray-100 text-gray-600"
+
+  defp grade_label(nil), do: "Student"
+  defp grade_label(g), do: "Grade #{g}"
+
   @all_types ~w(
     golden_fleece first_assessment first_practice
     streak_3 streak_7 streak_14 streak_30 streak_100
     topic_mastery chapter_mastery speed_demon perfect_score
     night_owl early_bird comeback_kid
+    first_follow first_follower flock_starter shepherd
+    lead_shepherd flock_builder study_buddy mutual_10
   )
 
   defp locked_achievement_types(earned) do
