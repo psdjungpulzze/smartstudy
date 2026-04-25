@@ -15,6 +15,8 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Courses.{Chapter, Section}
 
+  import Ecto.Query, warn: false
+
   require Logger
 
   @system_prompt "You are an educational curriculum expert. Given a subject, grade level, and optional textbook or web context, identify the complete chapter and section structure. Return ONLY a JSON array of chapters (each with \"name\" and optional \"sections\" array). Include ALL chapters — do NOT truncate. A typical textbook has 20–50 chapters."
@@ -27,11 +29,22 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
   }
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"course_id" => course_id} = args}) do
-    Logger.info("[Discovery] Starting chapter discovery for course #{course_id}")
+  def perform(%Oban.Job{
+        args: %{"course_id" => course_id} = args,
+        attempt: attempt,
+        max_attempts: max_attempts
+      }) do
+    Logger.info("[Discovery] Starting chapter discovery for course #{course_id} (attempt #{attempt})")
 
     course = Courses.get_course_with_chapters!(course_id)
     source_context = args["source_context"] || ""
+
+    # On retry, wipe any chapters partially written by the previous attempt so
+    # we start clean and don't accumulate duplicates.
+    if attempt > 1 do
+      Logger.info("[Discovery] Retry — deleting partial chapters for course #{course_id}")
+      from(ch in Chapter, where: ch.course_id == ^course_id) |> Repo.delete_all()
+    end
 
     Courses.update_course(course, %{
       processing_step: "Discovering course structure..."
@@ -76,6 +89,33 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
 
       :ok
     end
+  rescue
+    exception ->
+      Logger.error(
+        "[Discovery] Unexpected crash for course #{course_id} (attempt #{attempt}): #{inspect(exception)}"
+      )
+
+      # Only mark as failed on the last attempt so intermediate retries don't
+      # flash a "failed" state in the UI while Oban is still going to retry.
+      if attempt >= max_attempts do
+        try do
+          course = Courses.get_course!(course_id)
+
+          Courses.update_course(course, %{
+            processing_status: "failed",
+            processing_step: "Chapter discovery failed unexpectedly. Please try again."
+          })
+
+          broadcast(course_id, %{
+            status: "failed",
+            step: "Chapter discovery failed unexpectedly. Please try again."
+          })
+        rescue
+          _ -> :ok
+        end
+      end
+
+      reraise exception, __STACKTRACE__
   end
 
   defp discover_chapters(course, source_context) do
@@ -209,30 +249,35 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
   defp create_chapters(chapters, course_id) do
     chapters
     |> Enum.with_index(1)
-    |> Enum.map(fn {chapter_data, position} ->
-      {:ok, chapter} =
-        %Chapter{}
-        |> Chapter.changeset(%{name: chapter_data.name, position: position, course_id: course_id})
-        |> Repo.insert()
+    |> Enum.reduce(0, fn {chapter_data, position}, count ->
+      case %Chapter{}
+           |> Chapter.changeset(%{name: chapter_data.name, position: position, course_id: course_id})
+           |> Repo.insert() do
+        {:ok, chapter} ->
+          if chapter_data[:sections] && chapter_data.sections != [] do
+            chapter_data.sections
+            |> Enum.with_index(1)
+            |> Enum.each(fn {section_name, sec_pos} ->
+              %Section{}
+              |> Section.changeset(%{
+                name: section_name,
+                position: sec_pos,
+                chapter_id: chapter.id
+              })
+              |> Repo.insert()
+            end)
+          end
 
-      # Create sections if present
-      if chapter_data[:sections] && chapter_data.sections != [] do
-        chapter_data.sections
-        |> Enum.with_index(1)
-        |> Enum.each(fn {section_name, sec_pos} ->
-          %Section{}
-          |> Section.changeset(%{
-            name: section_name,
-            position: sec_pos,
-            chapter_id: chapter.id
-          })
-          |> Repo.insert()
-        end)
+          count + 1
+
+        {:error, changeset} ->
+          Logger.error(
+            "[Discovery] Failed to insert chapter '#{chapter_data.name}': #{inspect(changeset.errors)}"
+          )
+
+          count
       end
-
-      chapter
     end)
-    |> length()
   end
 
   defp mark_discovery_complete(course_id) do
