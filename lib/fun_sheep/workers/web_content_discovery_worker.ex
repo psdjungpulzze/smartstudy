@@ -44,7 +44,11 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
   ]
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"course_id" => course_id}}) do
+  def perform(%Oban.Job{
+        args: %{"course_id" => course_id},
+        attempt: attempt,
+        max_attempts: max_attempts
+      }) do
     course = Courses.get_course_with_chapters!(course_id)
 
     Logger.info(
@@ -199,6 +203,31 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     |> Oban.insert()
 
     :ok
+  rescue
+    exception ->
+      Logger.error(
+        "[WebDiscovery] Unexpected crash for course #{course_id} (attempt #{attempt}): #{inspect(exception)}"
+      )
+
+      if attempt >= max_attempts do
+        try do
+          course = Courses.get_course!(course_id)
+
+          Courses.update_course(course, %{
+            processing_status: "failed",
+            processing_step: "Web search failed unexpectedly. Please try again."
+          })
+
+          broadcast(course_id, %{
+            status: "failed",
+            step: "Web search failed unexpectedly. Please try again."
+          })
+        rescue
+          _ -> :ok
+        end
+      end
+
+      reraise exception, __STACKTRACE__
   end
 
   @doc """
