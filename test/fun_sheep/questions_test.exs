@@ -451,4 +451,535 @@ defmodule FunSheep.QuestionsTest do
       assert MapSet.new(result, & &1.id) == MapSet.new(questions, & &1.id)
     end
   end
+
+  # ── list_chapter_section_counts/2 ────────────────────────────────────────────
+
+  describe "list_chapter_section_counts/2" do
+    test "returns nested chapter -> section question counts for passed questions" do
+      course = create_course()
+
+      {:ok, ch1} = Courses.create_chapter(%{name: "Ch 1", position: 1, course_id: course.id})
+      {:ok, sec1} = Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: ch1.id})
+      {:ok, sec2} = Courses.create_section(%{name: "Sec 2", position: 2, chapter_id: ch1.id})
+
+      create_question(course, %{
+        chapter_id: ch1.id,
+        section_id: sec1.id,
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch1.id,
+        section_id: sec1.id,
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch1.id,
+        section_id: sec2.id,
+        validation_status: :passed
+      })
+
+      counts = Questions.list_chapter_section_counts(course.id)
+
+      assert Map.has_key?(counts, ch1.id)
+      assert counts[ch1.id].total == 3
+      assert Map.has_key?(counts[ch1.id].sections, sec1.id)
+      assert counts[ch1.id].sections[sec1.id] == 2
+      assert Map.has_key?(counts[ch1.id].sections, sec2.id)
+      assert counts[ch1.id].sections[sec2.id] == 1
+    end
+
+    test "excludes non-passed questions by default (student visibility)" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        validation_status: :pending
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        validation_status: :needs_review
+      })
+
+      counts = Questions.list_chapter_section_counts(course.id)
+
+      assert counts[ch.id].total == 1
+    end
+
+    test "includes all statuses when opts specify multiple statuses" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        validation_status: :pending
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        validation_status: :needs_review
+      })
+
+      counts =
+        Questions.list_chapter_section_counts(course.id,
+          statuses: [:passed, :pending, :needs_review, :failed]
+        )
+
+      assert counts[ch.id].total == 3
+    end
+
+    test "returns empty map when course has no questions" do
+      course = create_course()
+      assert Questions.list_chapter_section_counts(course.id) == %{}
+    end
+
+    test "groups questions without a section_id under :none key" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+
+      # Override create_question to omit section_id so the row is unclassified
+      {:ok, _q} =
+        Questions.create_question(%{
+          content: "No section",
+          answer: "A",
+          question_type: :multiple_choice,
+          difficulty: :easy,
+          course_id: course.id,
+          chapter_id: ch.id,
+          validation_status: :passed
+        })
+
+      counts = Questions.list_chapter_section_counts(course.id)
+
+      assert Map.has_key?(counts, ch.id)
+      assert Map.has_key?(counts[ch.id].sections, :none)
+      assert counts[ch.id].sections[:none] == 1
+    end
+  end
+
+  # ── list_questions_for_section/2 ─────────────────────────────────────────────
+
+  describe "list_questions_for_section/2" do
+    test "returns questions for a specific section with total count" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+      {:ok, other_sec} = Courses.create_section(%{name: "Other", position: 2, chapter_id: ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "In-section Q",
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: other_sec.id,
+        content: "Other section Q",
+        validation_status: :passed
+      })
+
+      {questions, total} = Questions.list_questions_for_section(sec.id)
+
+      assert total == 1
+      assert length(questions) == 1
+      assert hd(questions).content == "In-section Q"
+    end
+
+    test "paginates correctly" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      page_size = Questions.page_size()
+
+      for i <- 1..(page_size + 2) do
+        create_question(course, %{
+          chapter_id: ch.id,
+          section_id: sec.id,
+          content: "Q #{i}",
+          validation_status: :passed
+        })
+      end
+
+      {page1_qs, total} = Questions.list_questions_for_section(sec.id, page: 1)
+      {page2_qs, _total} = Questions.list_questions_for_section(sec.id, page: 2)
+
+      assert total == page_size + 2
+      assert length(page1_qs) == page_size
+      assert length(page2_qs) == 2
+    end
+
+    test "respects statuses option" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "Passed",
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "Pending",
+        validation_status: :pending
+      })
+
+      {questions, total} =
+        Questions.list_questions_for_section(sec.id, statuses: [:passed, :pending])
+
+      assert total == 2
+      assert length(questions) == 2
+    end
+
+    test "filters by difficulty" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "Easy",
+        difficulty: :easy,
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "Hard",
+        difficulty: :hard,
+        validation_status: :passed
+      })
+
+      {questions, total} =
+        Questions.list_questions_for_section(sec.id, filters: %{"difficulty" => "easy"})
+
+      assert total == 1
+      assert hd(questions).content == "Easy"
+    end
+  end
+
+  # ── list_questions_for_chapter/2 ─────────────────────────────────────────────
+
+  describe "list_questions_for_chapter/2" do
+    test "returns all questions across sections in a chapter" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec1} = Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: ch.id})
+      {:ok, sec2} = Courses.create_section(%{name: "Sec 2", position: 2, chapter_id: ch.id})
+
+      {:ok, other_ch} =
+        Courses.create_chapter(%{name: "Other Ch", position: 2, course_id: course.id})
+
+      {:ok, other_sec} =
+        Courses.create_section(%{name: "Other Sec", position: 1, chapter_id: other_ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec1.id,
+        content: "In ch sec1",
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec2.id,
+        content: "In ch sec2",
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: other_ch.id,
+        section_id: other_sec.id,
+        content: "Other chapter Q",
+        validation_status: :passed
+      })
+
+      {questions, total} = Questions.list_questions_for_chapter(ch.id)
+
+      assert total == 2
+      assert length(questions) == 2
+      contents = Enum.map(questions, & &1.content)
+      assert "In ch sec1" in contents
+      assert "In ch sec2" in contents
+      refute "Other chapter Q" in contents
+    end
+
+    test "paginates correctly" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      page_size = Questions.page_size()
+
+      for i <- 1..(page_size + 1) do
+        create_question(course, %{
+          chapter_id: ch.id,
+          section_id: sec.id,
+          content: "Q #{i}",
+          validation_status: :passed
+        })
+      end
+
+      {page1_qs, total} = Questions.list_questions_for_chapter(ch.id, page: 1)
+      {page2_qs, _total} = Questions.list_questions_for_chapter(ch.id, page: 2)
+
+      assert total == page_size + 1
+      assert length(page1_qs) == page_size
+      assert length(page2_qs) == 1
+    end
+
+    test "excludes other statuses by default" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "Passed",
+        validation_status: :passed
+      })
+
+      create_question(course, %{
+        chapter_id: ch.id,
+        section_id: sec.id,
+        content: "Failed",
+        validation_status: :failed
+      })
+
+      {questions, total} = Questions.list_questions_for_chapter(ch.id)
+
+      assert total == 1
+      assert hd(questions).content == "Passed"
+    end
+  end
+
+  # ── coverage_summary/1 ───────────────────────────────────────────────────────
+
+  # Helper to create a question with explicit chapter + section (bypasses the
+  # `ensure_section` auto-creation so tests that care about exact section
+  # counts aren't polluted with extra auto-generated sections).
+  defp make_question_exact(course, chapter, section, attrs \\ %{}) do
+    defaults = %{
+      content: "Q #{System.unique_integer([:positive])}?",
+      answer: "A",
+      question_type: :multiple_choice,
+      difficulty: :medium,
+      course_id: course.id,
+      chapter_id: chapter.id,
+      section_id: section.id,
+      validation_status: :passed
+    }
+
+    {:ok, q} = Questions.create_question(Map.merge(defaults, attrs))
+    q
+  end
+
+  describe "coverage_summary/1" do
+    test "returns correct section coverage counts" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec1} = Courses.create_section(%{name: "Sec 1", position: 1, chapter_id: ch.id})
+      {:ok, sec2} = Courses.create_section(%{name: "Sec 2", position: 2, chapter_id: ch.id})
+
+      # Only sec1 has a passed question; sec2 has none
+      make_question_exact(course, ch, sec1)
+
+      summary = Questions.coverage_summary(course.id)
+
+      assert summary.total_sections == 2
+      assert summary.sections_with_questions == 1
+      assert summary.coverage_pct == 50.0
+
+      _ = sec2
+    end
+
+    test "returns 0.0 coverage for course with no questions" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, _sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      summary = Questions.coverage_summary(course.id)
+
+      assert summary.sections_with_questions == 0
+      assert summary.coverage_pct == 0.0
+    end
+
+    test "returns by_difficulty breakdown" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      make_question_exact(course, ch, sec, %{difficulty: :easy})
+      make_question_exact(course, ch, sec, %{difficulty: :easy})
+
+      make_question_exact(course, ch, sec, %{difficulty: :hard})
+
+      summary = Questions.coverage_summary(course.id)
+
+      assert summary.by_difficulty.easy == 2
+      assert summary.by_difficulty.medium == 0
+      assert summary.by_difficulty.hard == 1
+    end
+
+    test "returns non-passed status counts" do
+      course = create_course()
+
+      {:ok, ch} = Courses.create_chapter(%{name: "Ch", position: 1, course_id: course.id})
+      {:ok, sec} = Courses.create_section(%{name: "Sec", position: 1, chapter_id: ch.id})
+
+      make_question_exact(course, ch, sec, %{validation_status: :needs_review})
+      make_question_exact(course, ch, sec, %{validation_status: :pending})
+      make_question_exact(course, ch, sec, %{validation_status: :failed})
+
+      summary = Questions.coverage_summary(course.id)
+
+      assert summary.needs_review == 1
+      assert summary.pending == 1
+      assert summary.failed == 1
+      assert summary.passed == 0
+    end
+
+    test "returns 0.0 coverage for course with no sections" do
+      course = create_course()
+
+      summary = Questions.coverage_summary(course.id)
+
+      assert summary.total_sections == 0
+      assert summary.coverage_pct == 0.0
+    end
+  end
+
+  describe "creator_stats/1" do
+    alias FunSheep.ContentFixtures
+
+    defp make_question_with_material(user_role, course, attrs \\ %{}) do
+      material = ContentFixtures.create_uploaded_material(%{user_role: user_role, course: course})
+
+      {chapter_id, section_id} = ensure_section(course, nil)
+
+      defaults = %{
+        content: "Creator question #{System.unique_integer([:positive])}?",
+        answer: "answer",
+        question_type: :multiple_choice,
+        difficulty: :medium,
+        course_id: course.id,
+        chapter_id: chapter_id,
+        section_id: section_id,
+        classification_status: :admin_reviewed,
+        validation_status: :passed,
+        source_material_id: material.id
+      }
+
+      {:ok, question} = Questions.create_question(Map.merge(defaults, attrs))
+      {material, question}
+    end
+
+    test "returns zeros for a user with no contributed questions" do
+      user_role = ContentFixtures.create_user_role()
+
+      stats = Questions.creator_stats(user_role.id)
+
+      assert stats.total_contributed == 0
+      assert stats.passed == 0
+      assert stats.pending == 0
+      assert stats.failed == 0
+      assert stats.by_course == []
+    end
+
+    test "counts questions by validation_status" do
+      user_role = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+
+      make_question_with_material(user_role, course, %{validation_status: :passed})
+      make_question_with_material(user_role, course, %{validation_status: :passed})
+      make_question_with_material(user_role, course, %{validation_status: :pending})
+      make_question_with_material(user_role, course, %{validation_status: :failed})
+
+      stats = Questions.creator_stats(user_role.id)
+
+      assert stats.total_contributed == 4
+      assert stats.passed == 2
+      assert stats.pending == 1
+      assert stats.failed == 1
+    end
+
+    test "does not count questions from materials uploaded by other users" do
+      user_role = ContentFixtures.create_user_role()
+      other_user = ContentFixtures.create_user_role()
+      course = ContentFixtures.create_course()
+
+      # Own question
+      make_question_with_material(user_role, course, %{validation_status: :passed})
+      # Another user's question
+      make_question_with_material(other_user, course, %{validation_status: :passed})
+
+      stats = Questions.creator_stats(user_role.id)
+
+      assert stats.total_contributed == 1
+    end
+
+    test "groups by_course with question counts" do
+      user_role = ContentFixtures.create_user_role()
+      course_a = ContentFixtures.create_course(%{name: "Course A"})
+      course_b = ContentFixtures.create_course(%{name: "Course B"})
+
+      make_question_with_material(user_role, course_a)
+      make_question_with_material(user_role, course_a)
+      make_question_with_material(user_role, course_b)
+
+      stats = Questions.creator_stats(user_role.id)
+
+      assert stats.total_contributed == 3
+      assert length(stats.by_course) == 2
+
+      course_a_entry = Enum.find(stats.by_course, &(&1.course_name == "Course A"))
+      course_b_entry = Enum.find(stats.by_course, &(&1.course_name == "Course B"))
+
+      assert course_a_entry.question_count == 2
+      assert course_b_entry.question_count == 1
+    end
+  end
 end
