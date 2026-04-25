@@ -37,6 +37,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     ]
 
   alias FunSheep.{Courses, Repo}
+  alias FunSheep.Courses.Course
   alias FunSheep.Questions.{Question, Validation}
 
   import Ecto.Query
@@ -79,6 +80,18 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     question_ids = Map.get(args, "question_ids", [])
     course_id = Map.get(args, "course_id")
     retry_round = Map.get(args, "retry_round", 0)
+
+    course_cancelled =
+      course_id &&
+        case Repo.get(Course, course_id) do
+          nil -> false
+          course -> course.processing_status == "cancelled"
+        end
+
+    if course_cancelled do
+      Logger.info("[Validation] Skipped cancelled course #{course_id}")
+      :ok
+    else
 
     questions = load_pending(question_ids)
 
@@ -127,6 +140,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
         :ok
       end
+    end
     end
   end
 
