@@ -75,11 +75,12 @@ defmodule FunSheep.Courses do
   Searches courses by subject, grade, and/or school_id.
   Returns matching courses with school preloaded.
   """
-  def search_courses(params) when is_map(params) do
+  def search_courses(params, user_role_id \\ nil) when is_map(params) do
     Course
     |> maybe_filter_subject(params)
     |> maybe_filter_grade(params)
     |> maybe_filter_school(params)
+    |> maybe_exclude_enrolled(user_role_id)
     |> order_by([c], asc: c.name)
     |> preload(:school)
     |> Repo.all()
@@ -103,6 +104,27 @@ defmodule FunSheep.Courses do
 
   defp maybe_filter_school(query, _params), do: query
 
+  defp maybe_exclude_enrolled(query, nil), do: query
+
+  defp maybe_exclude_enrolled(query, user_role_id) do
+    case Ecto.UUID.cast(user_role_id) do
+      {:ok, uuid} ->
+        enrolled_subquery =
+          from(ts in FunSheep.Assessments.TestSchedule,
+            where: ts.user_role_id == ^uuid,
+            select: ts.course_id
+          )
+
+        from(c in query,
+          where: c.created_by_id != ^uuid,
+          where: c.id not in subquery(enrolled_subquery)
+        )
+
+      :error ->
+        query
+    end
+  end
+
   @grade_order ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)
 
   @doc """
@@ -114,15 +136,18 @@ defmodule FunSheep.Courses do
 
     query =
       from(c in Course,
+        left_join: ts in FunSheep.Assessments.TestSchedule,
+        on: ts.course_id == c.id and ts.user_role_id == ^user_role_id,
         where: c.grade in ^grades,
         where: c.created_by_id != ^user_role_id,
+        where: is_nil(ts.id),
         order_by: [asc: c.name],
         preload: [:school]
       )
 
     query =
       if school_id do
-        where(query, [c], c.school_id == ^school_id)
+        where(query, [c, _ts], c.school_id == ^school_id)
       else
         query
       end
