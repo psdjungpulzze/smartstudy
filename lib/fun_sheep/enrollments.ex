@@ -63,17 +63,29 @@ defmodule FunSheep.Enrollments do
   end
 
   @doc """
-  Lists active enrollments for a student, preloading the course.
+  Lists active enrollments for a student, preloading the course and school.
   """
   def list_for_student(user_role_id, opts \\ []) do
     status = Keyword.get(opts, :status, "active")
 
     from(sc in StudentCourse,
       where: sc.user_role_id == ^user_role_id and sc.status == ^status,
-      preload: [:course],
+      preload: [course: :school],
       order_by: [desc: sc.enrolled_at]
     )
     |> Repo.all()
+  end
+
+  @doc """
+  Returns all course IDs a student is actively enrolled in.
+  """
+  def enrolled_course_ids(user_role_id) do
+    from(sc in StudentCourse,
+      where: sc.user_role_id == ^user_role_id and sc.status == "active",
+      select: sc.course_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   @doc """
@@ -95,6 +107,28 @@ defmodule FunSheep.Enrollments do
     case Repo.get_by(StudentCourse, user_role_id: user_role_id, course_id: course_id) do
       nil -> {:error, :not_found}
       sc -> Repo.update(StudentCourse.changeset(sc, %{status: "dropped"}))
+    end
+  end
+
+  @doc """
+  Archives an enrollment — removes the course from the student's active list
+  but keeps the record for history.
+  """
+  def archive(user_role_id, course_id) do
+    case Repo.get_by(StudentCourse, user_role_id: user_role_id, course_id: course_id) do
+      nil -> {:error, :not_found}
+      sc -> Repo.update(StudentCourse.changeset(sc, %{status: "archived"}))
+    end
+  end
+
+  @doc """
+  Soft-deletes an enrollment by flagging it as "deleted". The record is
+  retained in the database per industry best practice.
+  """
+  def soft_delete(user_role_id, course_id) do
+    case Repo.get_by(StudentCourse, user_role_id: user_role_id, course_id: course_id) do
+      nil -> {:error, :not_found}
+      sc -> Repo.update(StudentCourse.changeset(sc, %{status: "deleted"}))
     end
   end
 end

@@ -107,17 +107,26 @@ defmodule FunSheep.Courses do
   defp maybe_exclude_enrolled(query, nil), do: query
 
   defp maybe_exclude_enrolled(query, user_role_id) do
+    alias FunSheep.Enrollments.StudentCourse
+
     case Ecto.UUID.cast(user_role_id) do
       {:ok, uuid} ->
-        enrolled_subquery =
+        ts_subquery =
           from(ts in FunSheep.Assessments.TestSchedule,
             where: ts.user_role_id == ^uuid,
             select: ts.course_id
           )
 
+        sc_subquery =
+          from(sc in StudentCourse,
+            where: sc.user_role_id == ^uuid and sc.status == "active",
+            select: sc.course_id
+          )
+
         from(c in query,
           where: c.created_by_id != ^uuid,
-          where: c.id not in subquery(enrolled_subquery)
+          where: c.id not in subquery(ts_subquery),
+          where: c.id not in subquery(sc_subquery)
         )
 
       :error ->
@@ -132,7 +141,15 @@ defmodule FunSheep.Courses do
   excluding courses the user already owns.
   """
   def list_nearby_courses(school_id, grade, user_role_id) do
+    alias FunSheep.Enrollments.StudentCourse
+
     grades = nearby_grades(grade)
+
+    sc_subquery =
+      from(sc in StudentCourse,
+        where: sc.user_role_id == ^user_role_id and sc.status == "active",
+        select: sc.course_id
+      )
 
     query =
       from(c in Course,
@@ -141,6 +158,7 @@ defmodule FunSheep.Courses do
         where: c.grade in ^grades,
         where: c.created_by_id != ^user_role_id,
         where: is_nil(ts.id),
+        where: c.id not in subquery(sc_subquery),
         order_by: [asc: c.name],
         preload: [:school]
       )
@@ -251,16 +269,21 @@ defmodule FunSheep.Courses do
   end
 
   @doc """
-  Lists courses the user is "enrolled in" — either created by them or
-  has test schedules for. Returns courses with school preloaded.
+  Lists courses the user is "enrolled in" — either created by them, has test
+  schedules for, or has an active StudentCourse enrollment. Returns courses
+  with school preloaded.
   """
   def list_user_courses(nil), do: []
 
   def list_user_courses(user_role_id) do
+    alias FunSheep.Enrollments.StudentCourse
+
     from(c in Course,
       left_join: ts in FunSheep.Assessments.TestSchedule,
       on: ts.course_id == c.id and ts.user_role_id == ^user_role_id,
-      where: c.created_by_id == ^user_role_id or not is_nil(ts.id),
+      left_join: sc in StudentCourse,
+      on: sc.course_id == c.id and sc.user_role_id == ^user_role_id and sc.status == "active",
+      where: c.created_by_id == ^user_role_id or not is_nil(ts.id) or not is_nil(sc.id),
       distinct: c.id,
       order_by: [desc: c.inserted_at],
       preload: [:school]
