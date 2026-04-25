@@ -31,16 +31,23 @@ defmodule FunSheep.Application do
         # simultaneous requests → "Finch was unable to provide a connection
         # within the timeout due to excess queuing for connections" — the
         # 2026-04-22 incident where 80% of classification jobs silently
-        # dropped their questions back to :uncategorized). 200 × 4 gives
-        # 800 effective slots, with `count=4` spreading load across multiple
-        # connection pools to avoid head-of-line blocking on a single pool.
-        # Override per-environment via FINCH_AI_POOL_SIZE / FINCH_AI_POOL_COUNT.
+        # dropped their questions back to :uncategorized).
+        #
+        # IMPORTANT: count MUST stay at 1. count>1 causes Mint to call
+        # ssl.getopts(socket, [:sndbuf, :recbuf, :buffer]) on simultaneous SSL
+        # connections; Cloud Run's container rejects this with EINVAL, breaking
+        # every AI call. The transport_opts sndbuf/recbuf/buffer pre-set values
+        # that satisfy Mint's inet_opts check without triggering the kernel error.
+        # See: lib/fun_sheep/ocr/google_vision.ex (same fix applied for Vision API).
         {Finch,
          name: FunSheep.Finch,
          pools: %{
            default: [
-             size: String.to_integer(System.get_env("FINCH_AI_POOL_SIZE") || "200"),
-             count: String.to_integer(System.get_env("FINCH_AI_POOL_COUNT") || "4")
+             size: String.to_integer(System.get_env("FINCH_AI_POOL_SIZE") || "100"),
+             count: 1,
+             conn_opts: [
+               transport_opts: [sndbuf: 65_536, recbuf: 65_536, buffer: 65_536]
+             ]
            ]
          }},
         # Background job processing
