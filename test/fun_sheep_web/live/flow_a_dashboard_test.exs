@@ -67,20 +67,20 @@ defmodule FunSheepWeb.FlowADashboardTest do
   end
 
   describe "usage meter rendering" do
-    test "fresh state — 0 of 20 shows positive copy", %{conn: conn} do
+    test "fresh state — 0 of 50 shows positive copy", %{conn: conn} do
       {conn, _user} = student_conn(conn)
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
       assert html =~ "free practice left this week"
-      assert html =~ "0 of 20 this week"
+      assert html =~ "0 of 50 this week"
       refute html =~ "Ask a grown-up"
     end
 
-    test "ask state — 17 of 20 renders the Ask card if a guardian is linked", %{conn: conn} do
+    test "ask state — 43 of 50 renders the Ask card if a guardian is linked", %{conn: conn} do
       {conn, user} = student_conn(conn)
       parent = create_parent()
       link_parent(parent, user)
-      record_tests(user.id, 17)
+      record_tests(user.id, 43)
 
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
@@ -88,11 +88,11 @@ defmodule FunSheepWeb.FlowADashboardTest do
       assert html =~ "Almost at your weekly free practice"
     end
 
-    test "hardwall state — 20 of 20 shows the complete-for-the-week copy", %{conn: conn} do
+    test "hardwall state — 50 of 50 shows the complete-for-the-week copy", %{conn: conn} do
       {conn, user} = student_conn(conn)
       parent = create_parent()
       link_parent(parent, user)
-      record_tests(user.id, 20)
+      record_tests(user.id, 50)
 
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
@@ -101,7 +101,7 @@ defmodule FunSheepWeb.FlowADashboardTest do
 
     test "ask state without linked guardian shows the invite-a-grown-up fallback", %{conn: conn} do
       {conn, user} = student_conn(conn)
-      record_tests(user.id, 19)
+      record_tests(user.id, 49)
 
       {:ok, _view, html} = live(conn, ~p"/dashboard")
 
