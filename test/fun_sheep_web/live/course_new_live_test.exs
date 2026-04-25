@@ -10,6 +10,8 @@ defmodule FunSheepWeb.CourseNewLiveTest do
 
   alias FunSheep.AI.ClientMock
   alias FunSheep.Accounts
+  alias FunSheep.Courses
+  alias FunSheep.ContentFixtures
 
   # Catch-all stub: workers' AI calls fail gracefully instead of crashing with
   # Mox.UnexpectedCallError, matching prior behaviour where Agents calls returned
@@ -44,6 +46,29 @@ defmodule FunSheepWeb.CourseNewLiveTest do
       })
 
     {conn, user_role}
+  end
+
+  describe "school_id propagation" do
+    test "created course inherits school_id from the user's profile", %{conn: conn} do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        school = ContentFixtures.create_school()
+        {conn, _user_role} = user_role_conn(conn, %{school_id: school.id})
+        {:ok, view, _html} = live(conn, ~p"/courses/new")
+
+        view
+        |> element("#course-form")
+        |> render_change(%{"course_name" => "AP Chemistry", "subject" => "Chemistry", "selected_grade" => "11"})
+
+        render_click(view, "no_textbook", %{})
+
+        assert {:error, {:live_redirect, _}} =
+                 view |> element("#course-form") |> render_submit()
+
+        course = Courses.list_courses() |> Enum.find(&(&1.name == "AP Chemistry"))
+        assert course != nil
+        assert course.school_id == school.id
+      end)
+    end
   end
 
   describe "default flow (no query param)" do

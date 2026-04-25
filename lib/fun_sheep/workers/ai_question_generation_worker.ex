@@ -90,6 +90,11 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
     course = Courses.get_course_with_chapters!(course_id)
 
+    if course.processing_status == "cancelled" do
+      Logger.info("[AIGen] Skipped cancelled course #{course_id}")
+      :ok
+    else
+
     # For curriculum mode without a specific chapter, generate per-chapter
     # so questions get properly tagged to their topic
     if mode == "from_curriculum" and is_nil(chapter_id) and course.chapters != [] do
@@ -178,6 +183,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
           finalize_course(course_id, 0)
           {:error, reason}
       end
+    end
     end
   end
 

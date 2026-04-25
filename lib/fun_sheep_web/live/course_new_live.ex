@@ -248,6 +248,7 @@ defmodule FunSheepWeb.CourseNewLive do
       "grade" => assigns.selected_grade,
       "description" => assigns.description,
       "created_by_id" => user_role && user_role.id,
+      "school_id" => user_role && user_role.school_id,
       "textbook_id" => textbook_id,
       "custom_textbook_name" => custom_textbook
     }
