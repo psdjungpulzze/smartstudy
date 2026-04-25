@@ -123,6 +123,22 @@ defmodule FunSheep.Questions.EssayGrader do
 
   defp grade_fallback_scored(question, essay_body) do
     case freeform_grade(question, essay_body) do
+      # ScoredFreeformGrader returns %{is_correct: _, score: _, feedback: _, ...}
+      {:ok, %{is_correct: correct, feedback: feedback}} ->
+        result = %{
+          total_score: if(correct, do: 10, else: 5),
+          max_score: 10,
+          is_correct: correct,
+          feedback: feedback || "",
+          strengths: [],
+          improvements: [],
+          criteria: [],
+          grader: :scored_sonnet
+        }
+
+        {:ok, result}
+
+      # FreeformGrader returns %{correct: _, feedback: _, ...}
       {:ok, %{correct: correct, feedback: feedback}} ->
         result = %{
           total_score: if(correct, do: 10, else: 5),

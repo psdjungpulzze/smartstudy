@@ -156,19 +156,27 @@ defmodule FunSheep.Questions.EssayGraderTest do
   # ---------------------------------------------------------------------------
 
   describe "grade/2 — fallback on HTTP error" do
-    test "falls back to FreeformGrader (binary) when Opus call fails" do
+    test "falls back to ScoredFreeformGrader when Opus call fails" do
       # Opus fails
       expect(ClientMock, :call, fn _sys, _usr, %{source: "essay_grader"} ->
         {:error, :timeout}
       end)
 
-      # FreeformGrader's Haiku call
-      expect(ClientMock, :call, fn _sys, _usr, %{source: "freeform_grader"} ->
-        {:ok, ~S({"correct": true, "feedback": null})}
+      # ScoredFreeformGrader's Sonnet call
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "scored_freeform_grader"} ->
+        {:ok,
+         Jason.encode!(%{
+           "score" => 8,
+           "max_score" => 10,
+           "criteria" => [],
+           "feedback" => "Good essay.",
+           "improvement_hint" => nil,
+           "is_correct" => true
+         })}
       end)
 
       assert {:ok, result} = EssayGrader.grade(@question_with_rubric, @valid_essay)
-      # grader is either :scored_sonnet (if ScoredFreeformGrader exists) or :binary_haiku
+      # grader is :scored_sonnet when ScoredFreeformGrader succeeds
       assert result.grader in [:scored_sonnet, :binary_haiku]
     end
 
@@ -177,9 +185,17 @@ defmodule FunSheep.Questions.EssayGraderTest do
         {:ok, "I am unable to grade this essay."}
       end)
 
-      # FreeformGrader fallback
-      expect(ClientMock, :call, fn _sys, _usr, _opts ->
-        {:ok, ~S({"correct": false, "feedback": "Essay lacks analysis."})}
+      # ScoredFreeformGrader fallback
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "scored_freeform_grader"} ->
+        {:ok,
+         Jason.encode!(%{
+           "score" => 3,
+           "max_score" => 10,
+           "criteria" => [],
+           "feedback" => "Essay lacks analysis.",
+           "improvement_hint" => nil,
+           "is_correct" => false
+         })}
       end)
 
       assert {:ok, result} = EssayGrader.grade(@question_with_rubric, @valid_essay)
@@ -193,9 +209,17 @@ defmodule FunSheep.Questions.EssayGraderTest do
         {:ok, incomplete_response}
       end)
 
-      # FreeformGrader fallback
-      expect(ClientMock, :call, fn _sys, _usr, _opts ->
-        {:ok, ~S({"correct": false, "feedback": null})}
+      # ScoredFreeformGrader fallback
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "scored_freeform_grader"} ->
+        {:ok,
+         Jason.encode!(%{
+           "score" => 5,
+           "max_score" => 10,
+           "criteria" => [],
+           "feedback" => nil,
+           "improvement_hint" => nil,
+           "is_correct" => false
+         })}
       end)
 
       assert {:ok, result} = EssayGrader.grade(@question_with_rubric, @valid_essay)
@@ -208,9 +232,17 @@ defmodule FunSheep.Questions.EssayGraderTest do
   # ---------------------------------------------------------------------------
 
   describe "grade/2 — missing rubric" do
-    test "falls back to FreeformGrader when question has no rubric" do
-      expect(ClientMock, :call, fn _sys, _usr, %{source: "freeform_grader"} ->
-        {:ok, ~S({"correct": true, "feedback": "Good essay!"})}
+    test "falls back to ScoredFreeformGrader when question has no rubric" do
+      expect(ClientMock, :call, fn _sys, _usr, %{source: "scored_freeform_grader"} ->
+        {:ok,
+         Jason.encode!(%{
+           "score" => 8,
+           "max_score" => 10,
+           "criteria" => [],
+           "feedback" => "Good essay!",
+           "improvement_hint" => nil,
+           "is_correct" => true
+         })}
       end)
 
       assert {:ok, result} = EssayGrader.grade(@question_no_rubric, @valid_essay)
