@@ -1268,17 +1268,6 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
-      <%!-- PDF guidance banner (Tier 2d) --%>
-      <div class="flex items-start gap-3 px-4 py-3 mb-4 bg-blue-50 border border-blue-100 rounded-2xl">
-        <.icon name="hero-bolt" class="w-5 h-5 text-[#007AFF] shrink-0 mt-0.5" />
-        <div>
-          <p class="text-sm font-semibold text-[#1C1C1E]">PDF processes 20× faster</p>
-          <p class="text-xs text-[#8E8E93] mt-0.5">
-            A single PDF completes in under 10 minutes. Uploading individual images takes hours — combine them first if you can.
-          </p>
-        </div>
-      </div>
-
       <%!-- Material kind selector (default for new uploads) --%>
       <div class="flex items-center gap-3 mb-3">
         <label for="default-material-kind" class="text-sm font-medium text-[#1C1C1E] shrink-0">
@@ -1301,9 +1290,10 @@ defmodule FunSheepWeb.CourseDetailLive do
           </select>
         </form>
       </div>
+      <p class="text-xs text-[#8E8E93] mb-3">Tip: a single PDF processes in minutes; individual images take hours.</p>
 
       <%!-- Upload buttons --%>
-      <div class="flex flex-col sm:flex-row gap-3 mb-4">
+      <div class="flex flex-col sm:flex-row gap-3 mb-1">
         <button
           id="file-picker-btn"
           phx-hook="FilePicker"
@@ -1321,17 +1311,10 @@ defmodule FunSheepWeb.CourseDetailLive do
           <span class="text-sm font-medium">Select Folder</span>
         </button>
       </div>
-
-      <%!-- DRM notice for EPUB uploads --%>
-      <div class="mb-3 flex items-start gap-2 px-3 py-2 bg-[#FFF9E6] border border-[#FFCC00] rounded-xl text-xs text-[#8E8E93]">
-        <.icon name="hero-information-circle" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
-        <span>
-          <strong class="text-[#1C1C1E]">EPUB files welcome.</strong>
-          EPUBs must be DRM-free to be processed. If your EPUB is from a library or
-          subscription service it may be DRM-protected and will fail — please use
-          a DRM-free copy instead.
-        </span>
-      </div>
+      <p class="text-xs text-[#8E8E93] mb-4">
+        PDF, JPG, PNG, DOC, DOCX, PPT, TXT, EPUB (DRM-free only).
+        Upload your textbook's table of contents and chapter pages for best results.
+      </p>
 
       <%!-- Per-file upload queue (managed by DirectUploader JS hook) --%>
       <div id="upload-file-queue" phx-update="ignore"></div>
@@ -1469,17 +1452,6 @@ defmodule FunSheepWeb.CourseDetailLive do
         </button>
       </div>
 
-      <%!-- Helpful info --%>
-      <div :if={@materials == [] && @progress.total == 0} class="pt-3 border-t border-[#F5F5F7]">
-        <div class="flex items-start gap-2.5">
-          <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
-          <p class="text-xs text-[#8E8E93]">
-            <span class="font-medium text-[#1C1C1E]">Supported formats:</span>
-            PDF, JPG, PNG, DOC, DOCX, PPT, TXT.
-            Upload your textbook's table of contents and chapter pages for the best results.
-          </p>
-        </div>
-      </div>
     </div>
     """
   end
