@@ -316,8 +316,11 @@ defmodule FunSheepWeb.FixedTests.BankLive do
     <div>
       <div class="flex items-center justify-between mb-6">
         <div>
-          <.link navigate={~p"/custom-tests"} class="text-sm text-[#8E8E93] hover:underline">
-            ← My Tests
+          <.link
+            navigate={if @bank.course_id, do: ~p"/courses/#{@bank.course_id}/tests", else: ~p"/custom-tests"}
+            class="text-sm text-[#8E8E93] hover:underline"
+          >
+            ← Back
           </.link>
           <h1 class="text-2xl font-bold text-[#1C1C1E] mt-1">{@bank.title}</h1>
           <p class="text-sm text-[#8E8E93]">

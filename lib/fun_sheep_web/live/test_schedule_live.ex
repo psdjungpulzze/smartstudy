@@ -1,7 +1,7 @@
 defmodule FunSheepWeb.TestScheduleLive do
   use FunSheepWeb, :live_view
 
-  alias FunSheep.{Assessments, Courses}
+  alias FunSheep.{Assessments, Courses, FixedTests}
 
   @impl true
   def mount(%{"course_id" => course_id}, _session, socket) do
@@ -11,6 +11,7 @@ defmodule FunSheepWeb.TestScheduleLive do
     readiness_map = build_readiness_map(user_role_id, schedules)
     chapters = Courses.list_chapters_by_course(course_id)
     chapter_map = Map.new(chapters, fn ch -> {ch.id, ch} end)
+    custom_banks = FixedTests.list_banks_by_course(course_id)
 
     {:ok,
      assign(socket,
@@ -20,6 +21,7 @@ defmodule FunSheepWeb.TestScheduleLive do
        schedules: schedules,
        readiness_map: readiness_map,
        chapter_map: chapter_map,
+       custom_banks: custom_banks,
        today: Date.utc_today()
      )}
   end
@@ -127,19 +129,20 @@ defmodule FunSheepWeb.TestScheduleLive do
           navigate={~p"/courses/#{@course_id}/tests/new"}
           class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-3 sm:py-2 rounded-full shadow-md transition-colors inline-flex items-center justify-center text-center touch-target"
         >
-          Schedule New Test
+          New Test
         </.link>
       </div>
 
-      <div :if={@schedules == []} class="bg-white rounded-2xl shadow-md p-8 text-center">
+      <div :if={@schedules == [] and @custom_banks == []} class="bg-white rounded-2xl shadow-md p-8 text-center">
         <.icon name="hero-clipboard-document-check" class="w-12 h-12 text-[#8E8E93] mx-auto mb-4" />
-        <p class="text-[#8E8E93] text-lg">No tests scheduled yet.</p>
+        <p class="text-[#8E8E93] text-lg">No tests yet.</p>
         <p class="text-[#8E8E93] text-sm mt-2">
-          Schedule your first test to start tracking your readiness.
+          Create your first test to start tracking readiness.
         </p>
       </div>
 
       <div class="space-y-4">
+        <%!-- Adaptive test schedules --%>
         <div
           :for={schedule <- @schedules}
           class="bg-white rounded-2xl shadow-md p-4 sm:p-6"
@@ -148,12 +151,11 @@ defmodule FunSheepWeb.TestScheduleLive do
           <div class="flex items-start gap-3 sm:gap-4">
             <div class={"w-1.5 sm:w-2 h-10 sm:h-12 rounded-full shrink-0 #{urgency_color(schedule.test_date)}"} />
             <div class="flex-1 min-w-0">
-              <h3 class="font-semibold text-[#1C1C1E] text-base sm:text-lg truncate">
-                {schedule.name}
-              </h3>
-              <p class="text-sm text-[#8E8E93]">
-                {if schedule.course, do: schedule.course.name, else: "Unknown Course"}
-              </p>
+              <div class="flex items-center gap-2">
+                <h3 class="font-semibold text-[#1C1C1E] text-base sm:text-lg truncate">
+                  {schedule.name}
+                </h3>
+              </div>
               <p class="text-sm text-[#8E8E93]">
                 {Calendar.strftime(schedule.test_date, "%B %d, %Y")}
               </p>
@@ -218,6 +220,44 @@ defmodule FunSheepWeb.TestScheduleLive do
             >
               <.icon name="hero-trash" class="w-5 h-5" />
             </button>
+          </div>
+        </div>
+
+        <%!-- Custom test banks --%>
+        <div
+          :for={bank <- @custom_banks}
+          class="bg-white rounded-2xl shadow-md p-4 sm:p-6"
+        >
+          <div class="flex items-start gap-3 sm:gap-4">
+            <div class="w-1.5 sm:w-2 h-10 sm:h-12 rounded-full shrink-0 bg-indigo-400" />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                  Custom
+                </span>
+                <h3 class="font-semibold text-[#1C1C1E] text-base sm:text-lg truncate">
+                  {bank.title}
+                </h3>
+              </div>
+              <p class="text-sm text-[#8E8E93] mt-0.5">
+                {bank.visibility} ·
+                added {Calendar.strftime(bank.inserted_at, "%B %d, %Y")}
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+            <.link
+              navigate={~p"/custom-tests/#{bank.id}"}
+              class="bg-white border border-[#E5E5EA] text-[#1C1C1E] hover:bg-[#F5F5F7] font-medium px-4 py-2.5 sm:py-2 rounded-full text-sm transition-colors flex-1 sm:flex-none inline-flex items-center justify-center text-center touch-target"
+            >
+              Edit Questions
+            </.link>
+            <.link
+              navigate={~p"/custom-tests/#{bank.id}/assign"}
+              class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2.5 sm:py-2 rounded-full text-sm transition-colors flex-1 sm:flex-none inline-flex items-center justify-center text-center touch-target"
+            >
+              Assign
+            </.link>
           </div>
         </div>
       </div>

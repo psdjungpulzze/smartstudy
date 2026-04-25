@@ -38,6 +38,14 @@ defmodule FunSheep.FixedTests do
     |> Repo.all()
   end
 
+  def list_banks_by_course(course_id) do
+    from(b in FixedTestBank,
+      where: b.course_id == ^course_id and is_nil(b.archived_at),
+      order_by: [desc: b.inserted_at]
+    )
+    |> Repo.all()
+  end
+
   def create_bank(attrs) do
     %FixedTestBank{}
     |> FixedTestBank.changeset(attrs)
