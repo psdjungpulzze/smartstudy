@@ -44,6 +44,34 @@ defmodule FunSheep.Assessments.StateCache do
     :ok
   end
 
+  @doc "Store exam simulation state."
+  def put_exam(user_role_id, session_id, state) do
+    :ets.insert(@table, {{:exam, user_role_id, session_id}, state, System.monotonic_time(:second)})
+    :ok
+  end
+
+  @doc "Retrieve exam simulation state if not expired."
+  def get_exam(user_role_id, session_id) do
+    case :ets.lookup(@table, {:exam, user_role_id, session_id}) do
+      [{_key, state, stored_at}] ->
+        if System.monotonic_time(:second) - stored_at < @ttl_seconds do
+          {:ok, state}
+        else
+          delete_exam(user_role_id, session_id)
+          :miss
+        end
+
+      [] ->
+        :miss
+    end
+  end
+
+  @doc "Remove exam simulation state."
+  def delete_exam(user_role_id, session_id) do
+    :ets.delete(@table, {:exam, user_role_id, session_id})
+    :ok
+  end
+
   # GenServer callbacks
 
   @impl true
@@ -58,7 +86,7 @@ defmodule FunSheep.Assessments.StateCache do
     now = System.monotonic_time(:second)
 
     :ets.foldl(
-      fn {{_uid, _sid} = key, _state, stored_at}, acc ->
+      fn {key, _state, stored_at}, acc ->
         if now - stored_at >= @ttl_seconds, do: :ets.delete(@table, key)
         acc
       end,

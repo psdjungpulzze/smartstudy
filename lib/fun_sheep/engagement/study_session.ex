@@ -12,7 +12,7 @@ defmodule FunSheep.Engagement.StudySession do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @session_types ~w(review practice assessment quick_test daily_challenge just_this)
+  @session_types ~w(review practice assessment quick_test daily_challenge just_this exam_simulation)
   @time_windows ~w(morning afternoon evening night)
 
   schema "study_sessions" do
