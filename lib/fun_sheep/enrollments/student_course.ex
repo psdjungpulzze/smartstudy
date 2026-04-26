@@ -9,7 +9,7 @@ defmodule FunSheep.Enrollments.StudentCourse do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @statuses ~w(active dropped completed)
+  @statuses ~w(active dropped completed archived deleted)
   @sources ~w(self_enrolled onboarding guardian_assigned teacher_assigned)
 
   @primary_key {:id, :binary_id, autogenerate: true}

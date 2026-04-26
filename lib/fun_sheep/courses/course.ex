@@ -15,7 +15,7 @@ defmodule FunSheep.Courses.Course do
   schema "courses" do
     field :name, :string
     field :subject, :string
-    field :grade, :string
+    field :grades, {:array, :string}, default: []
     field :description, :string
     field :metadata, :map, default: %{}
     field :processing_status, :string, default: "pending"
@@ -41,6 +41,11 @@ defmodule FunSheep.Courses.Course do
     field :published_at, :utc_datetime
     field :sample_question_count, :integer, default: 10
 
+    # Pricing fields (for à-la-carte premium catalog purchases)
+    field :price_cents, :integer
+    field :currency, :string, default: "usd"
+    field :price_label, :string
+
     # Community quality scoring fields (Phase 1 — community content validation)
     field :quality_score, :float, default: 0.0
     field :like_count, :integer, default: 0
@@ -52,7 +57,6 @@ defmodule FunSheep.Courses.Course do
     # "boosted", "normal", "reduced", "flagged", "pending_review", "delisted"
     field :visibility_state, :string, default: "normal"
     field :dormant_at, :utc_datetime
-
 
     # A TOC rebase proposal waiting for approval. When non-nil, the course
     # has a candidate DiscoveredTOC that didn't auto-apply (material change
@@ -86,7 +90,7 @@ defmodule FunSheep.Courses.Course do
     |> cast(attrs, [
       :name,
       :subject,
-      :grade,
+      :grades,
       :description,
       :metadata,
       :school_id,
@@ -113,6 +117,9 @@ defmodule FunSheep.Courses.Course do
       :published_at,
       :published_by_id,
       :sample_question_count,
+      :price_cents,
+      :currency,
+      :price_label,
       :quality_score,
       :like_count,
       :dislike_count,
@@ -123,7 +130,8 @@ defmodule FunSheep.Courses.Course do
       :visibility_state,
       :dormant_at
     ])
-    |> validate_required([:name, :subject, :grade])
+    |> validate_required([:name, :subject])
+    |> validate_length(:grades, min: 1, message: "must include at least one grade")
     |> validate_inclusion(:access_level, @access_levels)
     |> validate_number(:sample_question_count, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:school_id)

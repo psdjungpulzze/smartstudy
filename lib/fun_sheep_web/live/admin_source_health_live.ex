@@ -155,7 +155,7 @@ defmodule FunSheepWeb.AdminSourceHealthLive do
                   value={course.id}
                   selected={@selected_course && @selected_course.id == course.id}
                 >
-                  {course.name} ({course.grade})
+                  {course.name} ({FunSheep.Courses.format_grades(course.grades)})
                 </option>
               </select>
             </form>

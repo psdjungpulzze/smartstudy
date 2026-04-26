@@ -49,6 +49,18 @@ defmodule FunSheepWeb.CourseDetailLive do
         params["upload"] in ["1", "true"] or
         textbook_status.status == :missing
 
+    # Paywall: determine whether the current user can access full course content.
+    # Free/public courses are always accessible. For premium catalog courses,
+    # the user needs an enrollment (à-la-carte purchase) or an active subscription.
+    enrollment = if user_role_id, do: Courses.get_course_enrollment(user_role_id, course.id)
+
+    has_access =
+      course.access_level == "public" or
+        not is_nil(enrollment) or
+        (user_role_id && FunSheep.Billing.has_qualifying_subscription?(user_role_id, course.access_level))
+
+    course_bundles = Courses.list_bundles_for_test_type(course.catalog_test_type)
+
     {:ok,
      assign(socket,
        page_title: course.name,
@@ -81,7 +93,11 @@ defmodule FunSheepWeb.CourseDetailLive do
        # so the render stays readable.
        toc_state: toc_state,
        # Community quality signals
-       user_reaction: user_reaction
+       user_reaction: user_reaction,
+       # Paywall / access control
+       has_access: has_access,
+       enrollment: enrollment,
+       course_bundles: course_bundles
      )}
   end
 
@@ -754,6 +770,17 @@ defmodule FunSheepWeb.CourseDetailLive do
     {:noreply, put_flash(socket, :info, message)}
   end
 
+  # ── Paywall enrollment events ──────────────────────────────────────────
+
+  def handle_event("enroll_single", _params, socket) do
+    course = socket.assigns.course
+    {:noreply, redirect(socket, to: "/billing/checkout?course_id=#{course.id}")}
+  end
+
+  def handle_event("enroll_bundle", %{"bundle-id" => bundle_id}, socket) do
+    {:noreply, redirect(socket, to: "/billing/checkout?bundle_id=#{bundle_id}")}
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────
 
   defp share_test_text(schedule, course, score) do
@@ -881,7 +908,7 @@ defmodule FunSheepWeb.CourseDetailLive do
                 {@course.subject}
               </span>
               <span class="inline-flex items-center px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium bg-blue-50 text-blue-600">
-                Grade {@course.grade}
+                {FunSheep.Courses.format_grades(@course.grades)}
               </span>
               <span
                 :if={@course.school}
@@ -895,7 +922,7 @@ defmodule FunSheepWeb.CourseDetailLive do
           <div class="flex items-center gap-2 shrink-0">
             <.share_button
               title={"#{@course.name} - Fun Sheep"}
-              text={"I'm studying #{@course.subject} (Grade #{@course.grade}) on Fun Sheep! Join me."}
+              text={"I'm studying #{@course.subject} (#{FunSheep.Courses.format_grades(@course.grades)}) on Fun Sheep! Join me."}
               url={share_url(~p"/courses/#{@course.id}")}
               style={:icon}
             />
@@ -995,8 +1022,15 @@ defmodule FunSheepWeb.CourseDetailLive do
         show_sources={@show_sources}
       />
 
-      <%!-- ═══ UPCOMING TESTS (Hero Section) ═══ --%>
-      <div class="mb-6">
+      <%!-- ═══ PAYWALL (premium catalog courses without access) ═══ --%>
+      <.paywall_gate
+        :if={not @has_access}
+        course={@course}
+        course_bundles={@course_bundles}
+      />
+
+      <%!-- ═══ UPCOMING TESTS (Hero Section) ═══ (only shown when access granted) --%>
+      <div :if={@has_access} class="mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-semibold text-[#1C1C1E]">Upcoming Tests</h2>
           <.link
@@ -1032,7 +1066,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ QUICK ACTIONS ═══ --%>
-      <div class="mb-6">
+      <div :if={@has_access} class="mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Practice</h2>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <.link
@@ -1077,7 +1111,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ PAST TESTS ═══ --%>
-      <div :if={@past_tests != []} class="mb-6">
+      <div :if={@has_access and @past_tests != []} class="mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Recent Tests</h2>
         <div class="bg-white rounded-2xl shadow-md overflow-hidden">
           <div
@@ -1112,7 +1146,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ CHAPTER MANAGEMENT (Hidden by default, toggled via gear icon) ═══ --%>
-      <div :if={@show_chapters} id="chapter-management" phx-hook="ScrollIntoView" class="mb-6">
+      <div :if={@has_access and @show_chapters} id="chapter-management" phx-hook="ScrollIntoView" class="mb-6">
         <.chapter_management
           course={@course}
           chapter_form={@chapter_form}
@@ -1125,6 +1159,75 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
     </div>
     """
+  end
+
+  # ── Paywall Gate Component ─────────────────────────────────────────────
+
+  attr :course, :map, required: true
+  attr :course_bundles, :list, default: []
+
+  defp paywall_gate(assigns) do
+    ~H"""
+    <div class="rounded-2xl border-2 border-[#4CD964] bg-white dark:bg-gray-800 p-8 text-center max-w-lg mx-auto my-8">
+      <div class="text-4xl mb-4">🔒</div>
+      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2"><%= @course.name %></h2>
+      <p class="text-gray-500 dark:text-gray-400 mb-6">
+        Enroll to access all questions, adaptive practice, and exam simulations.
+      </p>
+
+      <div class="space-y-3">
+        <button
+          phx-click="enroll_single"
+          class="w-full bg-[#4CD964] hover:bg-[#3DBF55] text-white font-semibold py-3 px-6 rounded-full shadow-md transition-colors"
+        >
+          Get <%= @course.name %> — <%= format_price(@course.price_cents, @course.currency) %>
+        </button>
+
+        <%= for bundle <- @course_bundles do %>
+          <button
+            phx-click="enroll_bundle"
+            phx-value-bundle-id={bundle.id}
+            class="w-full border-2 border-[#4CD964] text-[#4CD964] hover:bg-[#4CD964] hover:text-white font-semibold py-3 px-6 rounded-full transition-colors"
+          >
+            <%= bundle.name %> — <%= format_price(bundle.price_cents, bundle.currency) %>
+            <%= if savings = savings_label(@course, bundle) do %>
+              <span class="text-sm opacity-75 ml-1">(Save <%= savings %>)</span>
+            <% end %>
+          </button>
+        <% end %>
+      </div>
+
+      <p class="text-xs text-gray-400 mt-4">
+        Preview: <%= @course.sample_question_count %> free questions per section included.
+      </p>
+    </div>
+    """
+  end
+
+  defp format_price(nil, _currency), do: "Free"
+
+  defp format_price(cents, currency) do
+    dollars = div(cents, 100)
+    cents_remainder = rem(cents, 100)
+    symbol = if currency == "usd", do: "$", else: String.upcase(currency || "USD")
+
+    if cents_remainder == 0 do
+      "#{symbol}#{dollars}"
+    else
+      "#{symbol}#{dollars}.#{String.pad_leading(Integer.to_string(cents_remainder), 2, "0")}"
+    end
+  end
+
+  defp savings_label(course, bundle) do
+    if course.price_cents do
+      # Bundles contain this course plus at least one other; compare full-price
+      # single-course cost vs bundle cost to show savings.
+      savings = course.price_cents * length(bundle.course_ids) - bundle.price_cents
+
+      if savings > 0 do
+        format_price(savings, course.currency)
+      end
+    end
   end
 
   # ── Test Card Component ────────────────────────────────────────────────
@@ -1295,7 +1398,9 @@ defmodule FunSheepWeb.CourseDetailLive do
           </select>
         </form>
       </div>
-      <p class="text-xs text-[#8E8E93] mb-3">Tip: a single PDF processes in minutes; individual images take hours.</p>
+      <p class="text-xs text-[#8E8E93] mb-3">
+        Tip: a single PDF processes in minutes; individual images take hours.
+      </p>
 
       <%!-- Upload buttons --%>
       <div class="flex flex-col sm:flex-row gap-3 mb-1">
@@ -1442,21 +1547,37 @@ defmodule FunSheepWeb.CourseDetailLive do
 
       <%!-- Process button — hidden when course is already actively processing --%>
       <div
-        :if={@has_pending && !@uploading && @course.processing_status not in ["processing", "extracting", "validating"]}
-        class="flex items-center justify-between pt-3 border-t border-[#F5F5F7]"
+        :if={
+          @has_pending && !@uploading &&
+            @course.processing_status not in ["processing", "extracting", "validating"]
+        }
+        class="pt-3 border-t border-[#F5F5F7]"
       >
-        <p class="text-xs text-[#8E8E93]">
-          <span class="font-medium text-[#1C1C1E]">{@pending_count} new file(s)</span>
-          ready to process — this will update chapters, sections, and questions from your textbook
-        </p>
-        <button
-          phx-click="enrich_course"
-          class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm whitespace-nowrap ml-3"
+        <%!-- "Files ready" callout shown right after upload completes --%>
+        <div
+          :if={@progress.total > 0 && @progress.completed > 0}
+          class="flex items-center gap-2 mb-3 px-3 py-2.5 bg-[#E8F8EB] border border-[#4CD964] rounded-xl"
         >
-          <.icon name="hero-sparkles" class="w-4 h-4 inline mr-1" /> Process Materials
-        </button>
+          <.icon name="hero-check-circle" class="w-4 h-4 text-[#4CD964] shrink-0" />
+          <p class="text-xs font-medium text-[#1C1C1E]">
+            {@progress.completed} file{if @progress.completed != 1, do: "s"} uploaded — ready to process
+          </p>
+        </div>
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-[#8E8E93]">
+            <span class="font-medium text-[#1C1C1E]">
+              {@pending_count} file{if @pending_count != 1, do: "s"}
+            </span>
+            waiting — will update chapters, sections, and questions
+          </p>
+          <button
+            phx-click="enrich_course"
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm whitespace-nowrap ml-3"
+          >
+            <.icon name="hero-sparkles" class="w-4 h-4 inline mr-1" /> Process Materials
+          </button>
+        </div>
       </div>
-
     </div>
     """
   end
@@ -1601,25 +1722,32 @@ defmodule FunSheepWeb.CourseDetailLive do
 
     web_search_done = meta["web_search_complete"] == true
 
-    # Determine step states (web search runs first, then discovery)
+    # Step 1: Web search (always first)
     step1_state =
       cond do
         web_search_done -> :done
         true -> :active
       end
 
+    # Step 2: OCR — runs in parallel with web search, but shown before
+    # discovery because discovery for textbook courses waits for OCR to finish.
     step2_state =
       cond do
-        discovery_done -> :done
-        web_search_done -> :active
-        true -> :pending
+        not has_ocr -> :skip
+        ocr_done -> :done
+        true -> :active
       end
 
+    # Step 3: Discovering course structure — for textbook courses this only
+    # starts after OCR completes (EnrichDiscoveryWorker uses textbook text).
+    # For web-only courses it starts after web search.
     step3_state =
       cond do
-        has_ocr && ocr_done -> :done
-        has_ocr -> :active
-        true -> :skip
+        discovery_done -> :done
+        has_ocr && ocr_done -> :active
+        has_ocr -> :pending
+        web_search_done -> :active
+        true -> :pending
       end
 
     # Split question work into two distinct steps so the UI tells the truth
@@ -1639,6 +1767,8 @@ defmodule FunSheepWeb.CourseDetailLive do
         true -> :pending
       end
 
+    show_ctas = (step4_state == :active && question_count > 0) || step5_state == :active
+
     assigns =
       assign(assigns,
         discovery_done: discovery_done,
@@ -1652,7 +1782,8 @@ defmodule FunSheepWeb.CourseDetailLive do
         step2_state: step2_state,
         step3_state: step3_state,
         step4_state: step4_state,
-        step5_state: step5_state
+        step5_state: step5_state,
+        show_ctas: show_ctas
       )
 
     ~H"""
@@ -1680,10 +1811,14 @@ defmodule FunSheepWeb.CourseDetailLive do
           state={@step1_state}
           icon="hero-globe-alt"
           title="Searching for study materials"
+          sub_step={if @step1_state == :active, do: @sub_step}
           subtitle={
             cond do
               @sources_count > 0 ->
                 "Found #{@sources_count} sources (textbooks, question banks, practice tests)"
+
+              @step1_state == :done ->
+                "Search complete — proceeding with available materials"
 
               @step1_state == :active ->
                 "Searching textbooks, question banks, and practice tests..."
@@ -1694,41 +1829,10 @@ defmodule FunSheepWeb.CourseDetailLive do
           }
         />
 
-        <%!-- Step 2: Discovering course structure (uses web search results) --%>
-        <.pipeline_step
-          state={@step2_state}
-          icon="hero-academic-cap"
-          title="Discovering course structure"
-          subtitle={
-            cond do
-              @discovery_done ->
-                "Found #{@chapters_count} chapters"
-
-              @step2_state == :active ->
-                "Identifying chapters and sections..."
-
-              true ->
-                "Will use search results to build course structure"
-            end
-          }
-        />
-
-        <%!-- Show discovered chapters inline --%>
-        <div :if={@chapters_count > 0} class="ml-10 -mt-2 mb-1">
-          <div class="flex flex-wrap gap-1.5">
-            <span
-              :for={chapter <- @course.chapters}
-              class="text-[11px] px-2.5 py-1 rounded-full bg-[#E8F8EB] text-[#3DBF55] font-medium"
-            >
-              {chapter.name}
-            </span>
-          </div>
-        </div>
-
-        <%!-- Step 3: OCR (only if materials uploaded) --%>
+        <%!-- Step 2: OCR (only if materials uploaded) --%>
         <.pipeline_step
           :if={@has_ocr}
-          state={@step3_state}
+          state={@step2_state}
           icon="hero-document-text"
           title="Processing uploaded materials"
           subtitle={ocr_subtitle(@course)}
@@ -1759,6 +1863,41 @@ defmodule FunSheepWeb.CourseDetailLive do
           <p class="text-xs text-[#3DBF55] font-medium">
             First questions ready — you can start practising while we finish processing!
           </p>
+        </div>
+
+        <%!-- Step 3: Discovering course structure (uses web search + textbook OCR results) --%>
+        <.pipeline_step
+          state={@step3_state}
+          icon="hero-academic-cap"
+          title="Discovering course structure"
+          sub_step={if @step3_state == :active, do: @sub_step}
+          subtitle={
+            cond do
+              @discovery_done ->
+                "Found #{@chapters_count} chapters"
+
+              @step3_state == :active ->
+                "Analyzing materials and identifying chapters..."
+
+              @step3_state == :pending ->
+                "Will analyze materials to build course structure"
+
+              true ->
+                "Will use search results to build course structure"
+            end
+          }
+        />
+
+        <%!-- Show discovered chapters inline --%>
+        <div :if={@chapters_count > 0} class="ml-10 -mt-2 mb-1">
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              :for={chapter <- @course.chapters}
+              class="text-[11px] px-2.5 py-1 rounded-full bg-[#E8F8EB] text-[#3DBF55] font-medium"
+            >
+              {chapter.name}
+            </span>
+          </div>
         </div>
 
         <%!-- Step 4: Generating questions (AI creates raw questions) --%>
@@ -1802,30 +1941,48 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
       </div>
 
-      <%!-- Live sub-step detail (Claude Code-style) --%>
-      <div :if={@sub_step} class="mt-4 ml-10">
-        <div class="flex items-center gap-2 px-3 py-2 bg-[#F5F5F7] rounded-xl">
-          <div class="w-1.5 h-1.5 rounded-full bg-[#007AFF] animate-pulse shrink-0" />
-          <p class="text-xs text-[#8E8E93] font-mono truncate">{@sub_step}</p>
-        </div>
-      </div>
-
-      <%!-- Helpful tip at bottom (Tier 2b: suggest closing when wait is long) --%>
+      <%!-- What's happening / what to do --%>
       <div class="mt-5 pt-4 border-t border-[#F5F5F7]">
-        <div class="flex items-start gap-2.5">
-          <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
-          <%= if @has_ocr && !@ocr_done && long_wait?(@course) do %>
-            <p class="text-xs text-[#8E8E93]">
-              <span class="font-medium text-[#1C1C1E]">Feel free to close this page.</span>
-              We'll email you when your course is ready. Questions appear automatically as pages are processed.
-            </p>
-          <% else %>
-            <p class="text-xs text-[#8E8E93]">
-              <span class="font-medium text-[#1C1C1E]">You can start using your course now!</span>
-              Schedule a test or explore practice while we finish setting up. Content will appear automatically as it's ready.
-            </p>
-          <% end %>
-        </div>
+        <%= cond do %>
+          <% @show_ctas -> %>
+            <div class="flex items-start gap-2.5">
+              <.icon name="hero-rocket-launch" class="w-4 h-4 text-[#4CD964] shrink-0 mt-0.5" />
+              <div>
+                <p class="text-xs font-medium text-[#1C1C1E] mb-2">
+                  {@question_count} question{if @question_count != 1, do: "s"} ready — you can start now while more are being added.
+                </p>
+                <div class="flex gap-2 flex-wrap">
+                  <.link
+                    navigate={~p"/courses/#{@course.id}/practice"}
+                    class="inline-flex items-center gap-1 text-xs font-medium text-white bg-[#4CD964] hover:bg-[#3DBF55] px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <.icon name="hero-bolt" class="w-3 h-3" /> Quick Practice
+                  </.link>
+                  <.link
+                    navigate={~p"/courses/#{@course.id}/tests/new"}
+                    class="inline-flex items-center gap-1 text-xs font-medium text-[#1C1C1E] bg-[#F5F5F7] hover:bg-[#E5E5EA] px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <.icon name="hero-calendar" class="w-3 h-3" /> Schedule Test
+                  </.link>
+                </div>
+              </div>
+            </div>
+          <% @has_ocr && !@ocr_done && long_wait?(@course) -> %>
+            <div class="flex items-start gap-2.5">
+              <.icon name="hero-clock" class="w-4 h-4 text-[#8E8E93] shrink-0 mt-0.5" />
+              <p class="text-xs text-[#8E8E93]">
+                <span class="font-medium text-[#1C1C1E]">Feel free to close this page.</span>
+                We'll email you when your course is ready. Questions appear automatically as pages are processed.
+              </p>
+            </div>
+          <% true -> %>
+            <div class="flex items-start gap-2.5">
+              <.icon name="hero-light-bulb" class="w-4 h-4 text-[#FFCC00] shrink-0 mt-0.5" />
+              <p class="text-xs text-[#8E8E93]">
+                Building your course structure. Once questions are generated, you can start practising right from this page.
+              </p>
+            </div>
+        <% end %>
       </div>
     </div>
     """
@@ -1835,6 +1992,7 @@ defmodule FunSheepWeb.CourseDetailLive do
   attr :icon, :string, required: true
   attr :title, :string, required: true
   attr :subtitle, :string, required: true
+  attr :sub_step, :string, default: nil
 
   defp pipeline_step(assigns) do
     ~H"""
@@ -1874,7 +2032,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- Content --%>
-      <div>
+      <div class="min-w-0 flex-1">
         <p class={[
           "text-sm font-medium",
           if(@state == :pending, do: "text-[#C7C7CC]", else: "text-[#1C1C1E]")
@@ -1887,6 +2045,11 @@ defmodule FunSheepWeb.CourseDetailLive do
         ]}>
           {@subtitle}
         </p>
+        <%!-- Live detail shown inline for the active step --%>
+        <div :if={@state == :active && @sub_step} class="mt-1.5 flex items-start gap-1.5">
+          <div class="w-1.5 h-1.5 rounded-full bg-[#007AFF] animate-pulse shrink-0 mt-1" />
+          <p class="text-xs text-[#007AFF] leading-snug">{@sub_step}</p>
+        </div>
       </div>
     </div>
     """

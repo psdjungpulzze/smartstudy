@@ -33,6 +33,9 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     case FunSheep.FeatureFlags.require!(:ocr_enabled) do
       {:cancel, reason} ->
         Logger.info("[OCR] Skipped material #{material_id}: #{reason}")
+        # Advance the course counter so EnrichDiscoveryWorker isn't stuck
+        # waiting for OCR that will never run when the kill switch is off.
+        advance_course(course_id)
         {:cancel, reason}
 
       :ok ->
@@ -267,13 +270,27 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     course = Courses.get_course!(course_id)
     metadata = course.metadata || %{}
 
-    discovery_done = metadata["discovery_complete"] == true
+    textbook_kinds = [:textbook, :supplementary_book]
 
-    if discovery_done do
-      Logger.info("[OCR] Both discovery and OCR complete, advancing course #{course_id}")
+    has_textbook_ocr =
+      FunSheep.Content.list_materials_by_course_and_kind(course_id, textbook_kinds)
+      |> Enum.any?(&(&1.ocr_status == :completed))
+
+    if has_textbook_ocr do
+      # EnrichDiscoveryWorker will handle both chapter discovery (from the
+      # actual textbook text) and question extraction. Don't wait for
+      # discovery_complete — EnrichDiscovery IS the discovery step.
+      Logger.info("[OCR] Textbook OCR done, triggering EnrichDiscovery for #{course_id}")
       Courses.advance_to_extraction(course_id)
     else
-      Logger.info("[OCR] Waiting for discovery to complete")
+      discovery_done = metadata["discovery_complete"] == true
+
+      if discovery_done do
+        Logger.info("[OCR] Both discovery and OCR complete, advancing course #{course_id}")
+        Courses.advance_to_extraction(course_id)
+      else
+        Logger.info("[OCR] Waiting for discovery to complete")
+      end
     end
   end
 end

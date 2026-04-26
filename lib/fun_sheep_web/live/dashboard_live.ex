@@ -323,7 +323,9 @@ defmodule FunSheepWeb.DashboardLive do
               {if sc.course, do: sc.course.name, else: "Course"}
             </p>
             <p class="text-xs text-gray-500 mt-0.5">
-              {if sc.course, do: "#{sc.course.subject} · Grade #{sc.course.grade}", else: ""}
+              {if sc.course,
+                do: "#{sc.course.subject} · #{FunSheep.Courses.format_grades(sc.course.grades)}",
+                else: ""}
             </p>
           </a>
         </div>
@@ -1479,13 +1481,19 @@ defmodule FunSheepWeb.DashboardLive do
                 {String.first(s.user_role.display_name || "?")}
               </div>
             </.link>
-            <.link navigate={~p"/social/profile/#{s.user_role.id}"} class="flex-1 min-w-0 hover:underline">
+            <.link
+              navigate={~p"/social/profile/#{s.user_role.id}"}
+              class="flex-1 min-w-0 hover:underline"
+            >
               <p class="text-sm font-bold text-gray-900 dark:text-white truncate">
                 {s.user_role.display_name}
               </p>
               <p class="text-xs text-gray-400">{suggestion_reason(s.reason)}</p>
             </.link>
-            <.link navigate={~p"/social/find"} class="shrink-0 text-xs px-3 py-1 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors">
+            <.link
+              navigate={~p"/social/find"}
+              class="shrink-0 text-xs px-3 py-1 rounded-full bg-[#4CD964] text-white font-bold hover:bg-[#3DBF55] transition-colors"
+            >
               + Follow
             </.link>
           </div>
@@ -1496,9 +1504,22 @@ defmodule FunSheepWeb.DashboardLive do
         </div>
 
         <div class="bg-gray-50 dark:bg-gray-800 px-4 py-2.5">
-          <.link navigate={~p"/social/find"} class="w-full flex items-center justify-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-200 hover:text-[#4CD964] transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          <.link
+            navigate={~p"/social/find"}
+            class="w-full flex items-center justify-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-200 hover:text-[#4CD964] transition-colors"
+          >
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+              />
             </svg>
             Search All Classmates
           </.link>
@@ -1529,8 +1550,7 @@ defmodule FunSheepWeb.DashboardLive do
             <span class="text-2xl">{entry.info.emoji}</span>
             <div class="flex-1 min-w-0">
               <p class="text-xs text-gray-600 dark:text-gray-300">
-                A friend just earned
-                <span class="font-semibold">{entry.info.name}</span>
+                A friend just earned <span class="font-semibold">{entry.info.name}</span>
               </p>
               <p class="text-[10px] text-gray-400">{entry.info.description}</p>
             </div>

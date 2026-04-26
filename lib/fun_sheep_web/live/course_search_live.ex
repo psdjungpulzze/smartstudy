@@ -3,22 +3,23 @@ defmodule FunSheepWeb.CourseSearchLive do
 
   import FunSheepWeb.TextbookBanner
 
-  alias FunSheep.{Accounts, Courses, Assessments}
+  alias FunSheep.{Accounts, Courses, Assessments, Enrollments}
   alias FunSheep.Geo
 
   @impl true
   def mount(_params, _session, socket) do
     user_role_id = socket.assigns.current_user["id"]
 
-    {my_courses, nearby_courses, user_grade, user_school_id, tests_by_course} =
+    {my_courses, enrolled_course_ids, nearby_courses, user_grade, user_school_id, tests_by_course} =
       with {:ok, _} <- Ecto.UUID.cast(user_role_id),
            %{} = user_role <- Accounts.get_user_role(user_role_id) do
         mine = Courses.list_user_courses(user_role_id)
+        enrolled_ids = Enrollments.enrolled_course_ids(user_role_id)
         nearby = Courses.list_nearby_courses(user_role.school_id, user_role.grade, user_role_id)
         tests = Assessments.list_upcoming_grouped_by_course(user_role_id)
-        {mine, nearby, user_role.grade, user_role.school_id, tests}
+        {mine, enrolled_ids, nearby, user_role.grade, user_role.school_id, tests}
       else
-        _ -> {[], [], nil, nil, %{}}
+        _ -> {[], MapSet.new(), [], nil, nil, %{}}
       end
 
     textbook_statuses = Map.new(my_courses, &{&1.id, Courses.textbook_status(&1)})
@@ -32,6 +33,7 @@ defmodule FunSheepWeb.CourseSearchLive do
         search_school_id: "",
         schools: [],
         my_courses: my_courses,
+        enrolled_course_ids: enrolled_course_ids,
         nearby_courses: nearby_courses,
         textbook_statuses: textbook_statuses,
         user_grade: user_grade,
@@ -157,6 +159,68 @@ defmodule FunSheepWeb.CourseSearchLive do
     end
   end
 
+  def handle_event("select_course", %{"id" => course_id}, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+
+    case Enrollments.enroll(user_role_id, course_id) do
+      {:ok, _} ->
+        course = Courses.get_course!(course_id) |> FunSheep.Repo.preload(:school)
+        my_courses = [course | socket.assigns.my_courses]
+        enrolled_course_ids = MapSet.put(socket.assigns.enrolled_course_ids, course_id)
+        nearby_courses = Enum.reject(socket.assigns.nearby_courses, &(&1.id == course_id))
+        results = Enum.reject(socket.assigns.results, &(&1.id == course_id))
+
+        {:noreply,
+         socket
+         |> assign(
+           my_courses: my_courses,
+           enrolled_course_ids: enrolled_course_ids,
+           nearby_courses: nearby_courses,
+           results: results
+         )
+         |> put_flash(:info, "Course added to My Courses!")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not add course.")}
+    end
+  end
+
+  def handle_event("archive_course", %{"id" => course_id}, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+
+    case Enrollments.archive(user_role_id, course_id) do
+      {:ok, _} ->
+        my_courses = Enum.reject(socket.assigns.my_courses, &(&1.id == course_id))
+        enrolled_course_ids = MapSet.delete(socket.assigns.enrolled_course_ids, course_id)
+
+        {:noreply,
+         socket
+         |> assign(my_courses: my_courses, enrolled_course_ids: enrolled_course_ids)
+         |> put_flash(:info, "Course archived.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not archive course.")}
+    end
+  end
+
+  def handle_event("delete_enrollment", %{"id" => course_id}, socket) do
+    user_role_id = socket.assigns.current_user["id"]
+
+    case Enrollments.soft_delete(user_role_id, course_id) do
+      {:ok, _} ->
+        my_courses = Enum.reject(socket.assigns.my_courses, &(&1.id == course_id))
+        enrolled_course_ids = MapSet.delete(socket.assigns.enrolled_course_ids, course_id)
+
+        {:noreply,
+         socket
+         |> assign(my_courses: my_courses, enrolled_course_ids: enrolled_course_ids)
+         |> put_flash(:info, "Course removed.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not remove course.")}
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -202,6 +266,7 @@ defmodule FunSheepWeb.CourseSearchLive do
             tests={Map.get(@tests_by_course, course.id, [])}
             confirm_delete={@confirm_delete}
             textbook_status={Map.get(@textbook_statuses, course.id)}
+            is_enrolled={MapSet.member?(@enrolled_course_ids, course.id)}
           />
         </div>
       </div>
@@ -342,6 +407,7 @@ defmodule FunSheepWeb.CourseSearchLive do
   attr :tests, :list, default: []
   attr :confirm_delete, :string, default: nil
   attr :textbook_status, :map, default: nil
+  attr :is_enrolled, :boolean, default: false
 
   defp expandable_course_row(assigns) do
     test_count = length(assigns.tests)
@@ -391,7 +457,7 @@ defmodule FunSheepWeb.CourseSearchLive do
               {@course.subject}
             </span>
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-cyan-50 text-cyan-600">
-              Grade {@course.grade}
+              {FunSheep.Courses.format_grades(@course.grades)}
             </span>
             <span
               :if={@course.school}
@@ -442,32 +508,53 @@ defmodule FunSheepWeb.CourseSearchLive do
         <%!-- Action buttons - stack on mobile --%>
         <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200">
           <.link
-            navigate={~p"/courses/#{@course.id}/tests/new"}
-            class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-full shadow-md text-xs touch-target flex-1 sm:flex-none text-center"
-          >
-            + Schedule Test
-          </.link>
-          <.link
             navigate={~p"/courses/#{@course.id}"}
             class="bg-white hover:bg-gray-100 text-gray-700 font-bold px-4 py-2.5 sm:py-2 rounded-full border border-gray-200 text-xs touch-target flex-1 sm:flex-none text-center"
           >
             Open Course
           </.link>
-          <div class="flex items-center gap-1 ml-auto">
+          <%!-- Creator actions --%>
+          <div :if={!@is_enrolled} class="flex items-center gap-2 flex-wrap flex-1 sm:flex-none">
             <.link
-              navigate={~p"/courses/#{@course.id}/edit"}
-              class="p-2.5 rounded-full hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-colors touch-target"
-              aria-label="Edit course"
+              navigate={~p"/courses/#{@course.id}/tests/new"}
+              class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-full shadow-md text-xs touch-target flex-1 sm:flex-none text-center"
             >
-              <.icon name="hero-pencil-square" class="w-4 h-4" />
+              + Schedule Test
             </.link>
+            <div class="flex items-center gap-1 ml-auto">
+              <.link
+                navigate={~p"/courses/#{@course.id}/edit"}
+                class="p-2.5 rounded-full hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-colors touch-target"
+                aria-label="Edit course"
+              >
+                <.icon name="hero-pencil-square" class="w-4 h-4" />
+              </.link>
+              <button
+                phx-click="confirm_delete"
+                phx-value-id={@course.id}
+                class="p-2.5 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors touch-target"
+                aria-label="Delete course"
+              >
+                <.icon name="hero-trash" class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <%!-- Enrolled student actions --%>
+          <div :if={@is_enrolled} class="flex items-center gap-2 ml-auto">
             <button
-              phx-click="confirm_delete"
+              phx-click="archive_course"
               phx-value-id={@course.id}
-              class="p-2.5 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors touch-target"
-              aria-label="Delete course"
+              class="text-xs font-bold text-gray-500 hover:text-amber-600 px-3 py-2 sm:py-1.5 rounded-full border border-gray-200 hover:border-amber-200 hover:bg-amber-50 transition-colors touch-target"
             >
-              <.icon name="hero-trash" class="w-4 h-4" />
+              Archive
+            </button>
+            <button
+              phx-click="delete_enrollment"
+              phx-value-id={@course.id}
+              data-confirm="Remove this course from your account? This cannot be undone."
+              class="text-xs font-bold text-gray-400 hover:text-red-500 px-3 py-2 sm:py-1.5 rounded-full border border-gray-200 hover:border-red-200 hover:bg-red-50 transition-colors touch-target"
+            >
+              Delete
             </button>
           </div>
         </div>
@@ -561,12 +648,21 @@ defmodule FunSheepWeb.CourseSearchLive do
           </span>
         </div>
       </div>
-      <.link
-        navigate={~p"/courses/#{@course.id}"}
-        class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-full shadow-md btn-bounce text-sm whitespace-nowrap shrink-0 touch-target"
-      >
-        Open
-      </.link>
+      <div class="flex items-center gap-2 shrink-0">
+        <.link
+          navigate={~p"/courses/#{@course.id}"}
+          class="text-xs font-bold text-gray-600 hover:text-purple-600 px-3 py-2 sm:py-1.5 rounded-full border border-gray-200 hover:border-purple-200 hover:bg-purple-50 transition-colors whitespace-nowrap touch-target"
+        >
+          Preview
+        </.link>
+        <button
+          phx-click="select_course"
+          phx-value-id={@course.id}
+          class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 sm:py-2 rounded-full shadow-md btn-bounce text-xs whitespace-nowrap touch-target"
+        >
+          Select
+        </button>
+      </div>
     </div>
     """
   end

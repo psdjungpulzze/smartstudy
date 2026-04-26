@@ -41,6 +41,38 @@ defmodule FunSheepWeb.TextbookBanner do
     """
   end
 
+  def full_banner(%{status: %{status: :failed}} = assigns) do
+    assigns =
+      assigns
+      |> assign(:tone, tone(:failed))
+      |> assign(:copy, copy(assigns.status))
+
+    ~H"""
+    <div class={[
+      "mb-4 rounded-2xl border p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4",
+      @tone.container,
+      @class
+    ]}>
+      <div class={["w-10 h-10 rounded-full flex items-center justify-center shrink-0", @tone.icon_wrap]}>
+        <.icon name={@tone.icon} class={["w-5 h-5", @tone.icon_color]} />
+      </div>
+      <div class="flex-1 min-w-0">
+        <h3 class={["font-bold text-sm sm:text-base", @tone.title_color]}>{@copy.title}</h3>
+        <p class="text-sm text-gray-700 mt-1 leading-relaxed">{@copy.body}</p>
+      </div>
+      <div class="flex shrink-0 self-stretch sm:self-auto sm:ml-auto">
+        <.cta_button
+          cta_navigate={@cta_navigate}
+          on_cta={@on_cta}
+          course_id={@course_id}
+          label={@copy.cta}
+          tone={@tone}
+        />
+      </div>
+    </div>
+    """
+  end
+
   def full_banner(assigns) do
     assigns =
       assigns
@@ -98,6 +130,19 @@ defmodule FunSheepWeb.TextbookBanner do
   def compact_badge(%{status: %{status: :complete}} = assigns) do
     ~H"""
     <span class={["hidden", @class]}></span>
+    """
+  end
+
+  def compact_badge(%{status: %{status: :failed}} = assigns) do
+    assigns = assign(assigns, :tone, tone(:failed))
+
+    ~H"""
+    <span
+      class={["inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold", @tone.chip, @class]}
+      title="Processing failed"
+    >
+      <.icon name="hero-x-circle" class="w-3 h-3" /> Processing failed
+    </span>
     """
   end
 
@@ -168,6 +213,16 @@ defmodule FunSheepWeb.TextbookBanner do
     }
   end
 
+  defp copy(%{status: :failed}) do
+    %{
+      title: "Textbook processing failed",
+      body:
+        "We couldn't process your uploaded file. This is usually a temporary issue — " <>
+          "try reprocessing, or upload a different copy of the textbook.",
+      cta: "Upload Another Copy"
+    }
+  end
+
   defp copy(%{status: :processing}) do
     %{
       title: "Textbook is being processed",
@@ -223,6 +278,18 @@ defmodule FunSheepWeb.TextbookBanner do
     }
   end
 
+  defp tone(:failed) do
+    %{
+      container: "bg-red-50 border-red-200",
+      icon_wrap: "bg-red-100",
+      icon: "hero-x-circle",
+      icon_color: "text-red-600",
+      title_color: "text-red-900",
+      chip: "bg-red-50 text-red-700",
+      cta: "bg-[#4CD964] hover:bg-[#3DBF55] text-white"
+    }
+  end
+
   defp tone(:processing) do
     %{
       container: "bg-blue-50 border-blue-200",
@@ -248,6 +315,7 @@ defmodule FunSheepWeb.TextbookBanner do
   end
 
   defp short_title(:missing), do: "No textbook"
+  defp short_title(:failed), do: "Processing failed"
   defp short_title(:partial), do: "Textbook incomplete"
   defp short_title(:processing), do: "Processing"
   defp short_title(:complete), do: "Textbook ready"

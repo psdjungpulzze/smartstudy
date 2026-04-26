@@ -578,11 +578,12 @@ defmodule FunSheepWeb.TeacherDashboardLive do
                   <div class="min-w-0">
                     <p class="font-medium text-[#1C1C1E] truncate">{entry.course_name}</p>
                     <p class="text-xs text-[#8E8E93]">
-                      {entry.course_subject} · Grade {entry.course_grade}
+                      {entry.course_subject} · {FunSheep.Courses.format_grades(entry.course_grades)}
                     </p>
                   </div>
                   <span class="text-xs font-semibold text-[#4CD964] bg-[#E8F8EB] rounded-full px-3 py-1 ml-3 shrink-0">
-                    {entry.question_count} {if entry.question_count == 1, do: "question",
+                    {entry.question_count} {if entry.question_count == 1,
+                      do: "question",
                       else: "questions"}
                   </span>
                 </li>

@@ -809,6 +809,48 @@ defmodule FunSheep.Questions do
   ## Practice & Quick Test Queries
 
   @doc """
+  Returns a shuffled list of questions for an exam simulation session.
+
+  ## Options
+    * `:course_id` - required
+    * `:chapter_ids` - optional list of chapter IDs to filter by
+    * `:question_types` - optional list of question type atoms; empty means all types
+    * `:count` - maximum number of questions to return (default 40)
+  """
+  def list_for_exam(opts) do
+    course_id = Keyword.fetch!(opts, :course_id)
+    chapter_ids = Keyword.get(opts, :chapter_ids, [])
+    question_types = Keyword.get(opts, :question_types, [])
+    count = Keyword.get(opts, :count, 40)
+
+    Question
+    |> where([q], q.course_id == ^course_id)
+    |> where([q], q.validation_status in ^@student_visible)
+    |> then(fn q ->
+      if chapter_ids != [], do: where(q, [qq], qq.chapter_id in ^chapter_ids), else: q
+    end)
+    |> then(fn q ->
+      if question_types != [], do: where(q, [qq], qq.question_type in ^question_types), else: q
+    end)
+    |> order_by(fragment("RANDOM()"))
+    |> limit(^count)
+    |> Repo.all()
+  end
+
+  @doc """
+  Counts student-visible questions in scope for an exam simulation.
+  """
+  def count_for_exam(course_id, chapter_ids \\ []) do
+    Question
+    |> where([q], q.course_id == ^course_id)
+    |> where([q], q.validation_status in ^@student_visible)
+    |> then(fn q ->
+      if chapter_ids != [], do: where(q, [qq], qq.chapter_id in ^chapter_ids), else: q
+    end)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
   Lists questions the user has gotten wrong, prioritized by most recently wrong
   and never correctly answered. Optionally filters by chapter.
 
@@ -1630,13 +1672,13 @@ defmodule FunSheep.Questions do
         join: c in Course,
         on: c.id == q.course_id,
         where: m.user_role_id == ^user_role_id,
-        group_by: [c.id, c.name, c.subject, c.grade],
+        group_by: [c.id, c.name, c.subject, c.grades],
         order_by: [desc: count(q.id)],
         select: %{
           course_id: c.id,
           course_name: c.name,
           course_subject: c.subject,
-          course_grade: c.grade,
+          course_grades: c.grades,
           question_count: count(q.id)
         }
       )

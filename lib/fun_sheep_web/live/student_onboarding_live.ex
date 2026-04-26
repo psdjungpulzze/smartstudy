@@ -485,7 +485,9 @@ defmodule FunSheepWeb.StudentOnboardingLive do
                   <p class="font-medium text-sm text-gray-900 dark:text-white truncate">
                     {course.name}
                   </p>
-                  <p class="text-xs text-gray-500">{course.subject} · Grade {course.grade}</p>
+                  <p class="text-xs text-gray-500">
+                    {course.subject} · {FunSheep.Courses.format_grades(course.grades)}
+                  </p>
                 </div>
                 <div class={[
                   "shrink-0 ml-3 w-6 h-6 rounded-full flex items-center justify-center border-2 transition-colors",
@@ -580,7 +582,10 @@ defmodule FunSheepWeb.StudentOnboardingLive do
         >
           {if MapSet.size(@followed_in_onboarding) > 0, do: "Continue →", else: "Skip for now →"}
         </button>
-        <.link navigate={~p"/social/find"} class="text-sm text-center text-gray-400 hover:text-gray-600">
+        <.link
+          navigate={~p"/social/find"}
+          class="text-sm text-center text-gray-400 hover:text-gray-600"
+        >
           Search all classmates →
         </.link>
       </div>

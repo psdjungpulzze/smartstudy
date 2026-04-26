@@ -8,7 +8,7 @@ defmodule FunSheep.Courses do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Courses.{Course, Chapter, CourseEnrollment, Section, Textbook}
+  alias FunSheep.Courses.{Course, Chapter, CourseBundle, CourseEnrollment, Section, Textbook}
 
   ## Courses
 
@@ -93,7 +93,7 @@ defmodule FunSheep.Courses do
   defp maybe_filter_subject(query, _params), do: query
 
   defp maybe_filter_grade(query, %{"grade" => grade}) when grade != "" do
-    where(query, [c], c.grade == ^grade)
+    where(query, [c], fragment("? = ANY(?)", ^grade, c.grades) or c.grades == ^[])
   end
 
   defp maybe_filter_grade(query, _params), do: query
@@ -107,17 +107,26 @@ defmodule FunSheep.Courses do
   defp maybe_exclude_enrolled(query, nil), do: query
 
   defp maybe_exclude_enrolled(query, user_role_id) do
+    alias FunSheep.Enrollments.StudentCourse
+
     case Ecto.UUID.cast(user_role_id) do
       {:ok, uuid} ->
-        enrolled_subquery =
+        ts_subquery =
           from(ts in FunSheep.Assessments.TestSchedule,
             where: ts.user_role_id == ^uuid,
             select: ts.course_id
           )
 
+        sc_subquery =
+          from(sc in StudentCourse,
+            where: sc.user_role_id == ^uuid and sc.status == "active",
+            select: sc.course_id
+          )
+
         from(c in query,
           where: c.created_by_id != ^uuid,
-          where: c.id not in subquery(enrolled_subquery)
+          where: c.id not in subquery(ts_subquery),
+          where: c.id not in subquery(sc_subquery)
         )
 
       :error ->
@@ -128,19 +137,43 @@ defmodule FunSheep.Courses do
   @grade_order ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)
 
   @doc """
+  Formats a grades array into a human-readable label.
+  Returns "Grade K", "Grades 10, 11, 12", or "All Grades" for an empty array.
+  """
+  def format_grades([]), do: "All Grades"
+  def format_grades(nil), do: "All Grades"
+  def format_grades([g]), do: "Grade #{g}"
+
+  def format_grades(grades) when is_list(grades) do
+    ordered =
+      Enum.sort_by(grades, fn g -> Enum.find_index(@grade_order, &(&1 == g)) || 999 end)
+
+    "Grades #{Enum.join(ordered, ", ")}"
+  end
+
+  @doc """
   Lists courses for nearby grades (+-1) at the given school,
   excluding courses the user already owns.
   """
   def list_nearby_courses(school_id, grade, user_role_id) do
+    alias FunSheep.Enrollments.StudentCourse
+
     grades = nearby_grades(grade)
+
+    sc_subquery =
+      from(sc in StudentCourse,
+        where: sc.user_role_id == ^user_role_id and sc.status == "active",
+        select: sc.course_id
+      )
 
     query =
       from(c in Course,
         left_join: ts in FunSheep.Assessments.TestSchedule,
         on: ts.course_id == c.id and ts.user_role_id == ^user_role_id,
-        where: c.grade in ^grades,
+        where: fragment("? && ?", type(^grades, {:array, :string}), c.grades) or c.grades == ^[],
         where: c.created_by_id != ^user_role_id,
         where: is_nil(ts.id),
+        where: c.id not in subquery(sc_subquery),
         order_by: [asc: c.name],
         preload: [:school]
       )
@@ -185,7 +218,10 @@ defmodule FunSheep.Courses do
       end
 
     from(c in Course,
-      where: c.school_id == ^school_id and c.grade in ^grade_list,
+      where:
+        c.school_id == ^school_id and
+          (fragment("? && ?", type(^grade_list, {:array, :string}), c.grades) or
+             c.grades == ^[]),
       order_by: [asc: c.subject, asc: c.name],
       limit: ^limit,
       preload: [:chapters]
@@ -209,7 +245,8 @@ defmodule FunSheep.Courses do
       end
 
     from(c in Course,
-      where: c.grade in ^grade_list,
+      where:
+        fragment("? && ?", type(^grade_list, {:array, :string}), c.grades) or c.grades == ^[],
       order_by: [asc: c.subject, asc: c.name],
       limit: ^limit,
       preload: [:chapters]
@@ -251,16 +288,21 @@ defmodule FunSheep.Courses do
   end
 
   @doc """
-  Lists courses the user is "enrolled in" — either created by them or
-  has test schedules for. Returns courses with school preloaded.
+  Lists courses the user is "enrolled in" — either created by them, has test
+  schedules for, or has an active StudentCourse enrollment. Returns courses
+  with school preloaded.
   """
   def list_user_courses(nil), do: []
 
   def list_user_courses(user_role_id) do
+    alias FunSheep.Enrollments.StudentCourse
+
     from(c in Course,
       left_join: ts in FunSheep.Assessments.TestSchedule,
       on: ts.course_id == c.id and ts.user_role_id == ^user_role_id,
-      where: c.created_by_id == ^user_role_id or not is_nil(ts.id),
+      left_join: sc in StudentCourse,
+      on: sc.course_id == c.id and sc.user_role_id == ^user_role_id and sc.status == "active",
+      where: c.created_by_id == ^user_role_id or not is_nil(ts.id) or not is_nil(sc.id),
       distinct: c.id,
       order_by: [desc: c.inserted_at],
       preload: [:school]
@@ -548,6 +590,7 @@ defmodule FunSheep.Courses do
   Statuses:
     * `:missing`    — no textbook uploaded
     * `:processing` — textbook uploaded, OCR not finished
+    * `:failed`     — textbook uploaded but OCR failed (retry or re-upload)
     * `:partial`    — OCR done but completeness score below threshold
                       (or `ocr_status == :partial`)
     * `:complete`   — OCR done and completeness score ≥ threshold
@@ -556,7 +599,7 @@ defmodule FunSheep.Courses do
   Accepts either a course struct or a course id.
   """
   @spec textbook_status(Course.t() | Ecto.UUID.t()) :: %{
-          status: :missing | :processing | :partial | :complete,
+          status: :missing | :processing | :failed | :partial | :complete,
           material: FunSheep.Content.UploadedMaterial.t() | nil,
           completeness_score: float() | nil,
           notes: String.t() | nil,
@@ -628,7 +671,7 @@ defmodule FunSheep.Courses do
         :processing
 
       m.ocr_status == :failed ->
-        :missing
+        :failed
 
       is_float(m.completeness_score) and m.completeness_score >= @completeness_threshold ->
         :complete
@@ -1110,4 +1153,50 @@ defmodule FunSheep.Courses do
   defp maybe_filter_by_test_type(query, test_type) do
     where(query, [c], c.catalog_test_type == ^test_type)
   end
+
+  # ── Course Enrollments ──────────────────────────────────────────────────────
+
+  @doc """
+  Returns the enrollment record for a user_role and course, or nil if not enrolled.
+  """
+  def get_course_enrollment(user_role_id, course_id) do
+    Repo.one(
+      from e in CourseEnrollment,
+        where: e.user_role_id == ^user_role_id and e.course_id == ^course_id
+    )
+  end
+
+  # ── Course Bundles ──────────────────────────────────────────────────────────
+
+  @doc "Lists all active bundles."
+  def list_active_bundles do
+    Repo.all(from b in CourseBundle, where: b.is_active == true)
+  end
+
+  @doc "Lists active bundles for a given test type (e.g. \"sat\")."
+  def list_bundles_for_test_type(nil), do: []
+  def list_bundles_for_test_type(""), do: []
+
+  def list_bundles_for_test_type(test_type) do
+    Repo.all(
+      from b in CourseBundle,
+        where: b.catalog_test_type == ^test_type and b.is_active == true
+    )
+  end
+
+  def get_bundle!(id), do: Repo.get!(CourseBundle, id)
+
+  def create_bundle(attrs) do
+    %CourseBundle{}
+    |> CourseBundle.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_bundle(%CourseBundle{} = bundle, attrs) do
+    bundle
+    |> CourseBundle.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_bundle(%CourseBundle{} = bundle), do: Repo.delete(bundle)
 end
