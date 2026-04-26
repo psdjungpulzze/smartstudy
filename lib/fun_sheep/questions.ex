@@ -304,6 +304,15 @@ defmodule FunSheep.Questions do
     |> Kernel.||(0)
   end
 
+  def count_chapters_with_questions(course_id) do
+    from(q in Question,
+      where: q.course_id == ^course_id and not is_nil(q.chapter_id),
+      select: count(q.chapter_id, :distinct)
+    )
+    |> Repo.one()
+    |> Kernel.||(0)
+  end
+
   @spec count_pending_by_courses([String.t()]) :: %{String.t() => non_neg_integer()}
   def count_pending_by_courses([]), do: %{}
 

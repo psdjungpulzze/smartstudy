@@ -995,10 +995,12 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   end
 
   defp finalize_course(course_id, new_count) do
-    course = Courses.get_course!(course_id)
+    course = Courses.get_course_with_chapters!(course_id)
     # Counts passed + needs_review (both are student-visible per @student_visible)
     visible = Questions.count_questions_by_course(course_id)
     pending = Questions.count_pending_by_course(course_id)
+    total = visible + pending
+    total_chapters = length(course.chapters)
 
     {status, step} =
       cond do
@@ -1028,7 +1030,24 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
         true ->
           # Pending questions exist — validation worker will flip to ready once done.
-          {"validating", "Validating #{pending} generated questions..."}
+          # Show chapter-level progress when this is a fan-out (multi-chapter) job,
+          # so users see a growing count instead of a frozen "Validating N questions".
+          chapters_done =
+            if total_chapters > 1,
+              do: Questions.count_chapters_with_questions(course_id),
+              else: 0
+
+          step =
+            if total_chapters > 1 and chapters_done > 0 do
+              remaining = total_chapters - chapters_done
+
+              "Generated #{total} questions — #{chapters_done} of #{total_chapters} chapters done" <>
+                if(remaining > 0, do: ", #{remaining} still running...", else: "")
+            else
+              "Validating #{total} generated questions..."
+            end
+
+          {"validating", step}
       end
 
     Courses.update_course(course, %{

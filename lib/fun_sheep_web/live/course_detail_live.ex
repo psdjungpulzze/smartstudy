@@ -1920,13 +1920,18 @@ defmodule FunSheepWeb.CourseDetailLive do
           state={@step4_state}
           icon="hero-light-bulb"
           title="Generating practice questions"
+          sub_step={if @step4_state == :active, do: @processing_sub_step}
           subtitle={
             cond do
               @step4_state == :done ->
-                "#{generated_total(@validation_counts, @question_count)} questions generated"
+                "#{generated_total(@validation_counts, @question_count)} questions ready. More are generated from discovered sources and AI until every concept has full coverage. As students study, additional questions are auto-generated for each student's needs."
 
               @step4_state == :active && generated_total(@validation_counts, @question_count) > 0 ->
-                "#{generated_total(@validation_counts, @question_count)} questions so far, generating more..."
+                "#{generated_total(@validation_counts, @question_count)} questions so far — generating more until each concept has full coverage..."
+
+              @step4_state == :active && @course.processing_step &&
+                  @course.processing_step != "" ->
+                @course.processing_step
 
               @step4_state == :active ->
                 "Creating questions from discovered content..."

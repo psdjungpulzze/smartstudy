@@ -41,16 +41,25 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
     if ocr_pages == [] and not preliminary do
       Logger.info("[Questions] No OCR pages for course #{course_id}, generating from curriculum")
 
-      # Don't finalize yet — set status to "generating" and let AI worker finalize
-      set_generating_status(course, 0)
-
       # No materials uploaded — generate questions purely from course context
-      # (subject, grade, chapter names). This is how we provide questions
-      # even when students don't upload any files.
-      # Target 10 questions per chapter (minimum 60) so every chapter has
-      # meaningful coverage from the start.
+      # (subject, grade, chapter names). Target 10 questions per chapter (minimum 60).
       chapter_count = length(course.chapters)
       target_count = max(chapter_count * 10, 60)
+
+      # Set a chapter-count-aware step so the UI shows real info on page reload,
+      # not a frozen "Generating questions with AI..." with no context.
+      step =
+        if chapter_count > 0,
+          do: "Generating questions for #{chapter_count} chapters...",
+          else: "Generating questions with AI..."
+
+      Courses.update_course(course, %{processing_status: "generating", processing_step: step})
+
+      Phoenix.PubSub.broadcast(
+        FunSheep.PubSub,
+        "course:#{course_id}",
+        {:processing_update, %{status: "generating", step: step}}
+      )
 
       FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
         count: target_count,
