@@ -96,7 +96,13 @@ defmodule FunSheepWeb.AdminCoursesLive do
     attrs = %{
       name: Map.get(params, "name", course.name),
       subject: Map.get(params, "subject", course.subject),
-      grade: Map.get(params, "grade", course.grade),
+      grades:
+        case Map.get(params, "grades") do
+          nil -> course.grades
+          "" -> course.grades
+          g when is_list(g) -> Enum.reject(g, &(&1 == ""))
+          g -> [g]
+        end,
       created_by_id: nilify_empty(Map.get(params, "created_by_id")),
       access_level: nilify_empty(Map.get(params, "access_level")),
       price_cents: parse_integer(Map.get(params, "price_cents")),
@@ -371,13 +377,20 @@ defmodule FunSheepWeb.AdminCoursesLive do
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Grade</label>
-              <input
-                type="text"
-                name="grade"
-                value={@course.grade}
-                class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
-              />
+              <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Grades</label>
+              <select
+                multiple
+                name="grades"
+                class="w-full px-3 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-xl outline-none transition-colors"
+              >
+                <option
+                  :for={g <- ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)}
+                  value={g}
+                  selected={g in (@course.grades || [])}
+                >
+                  {g}
+                </option>
+              </select>
             </div>
           </div>
 

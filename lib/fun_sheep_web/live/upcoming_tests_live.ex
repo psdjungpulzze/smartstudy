@@ -78,7 +78,9 @@ defmodule FunSheepWeb.UpcomingTestsLive do
                 {Map.get(@course_map, course_id).name}
               </h2>
               <p class="text-xs text-gray-400">
-                {Map.get(@course_map, course_id).subject} · Grade {Map.get(@course_map, course_id).grade}
+                {Map.get(@course_map, course_id).subject} · {FunSheep.Courses.format_grades(
+                  Map.get(@course_map, course_id).grades
+                )}
               </p>
             </div>
             <.link
