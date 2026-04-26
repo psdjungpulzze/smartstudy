@@ -162,7 +162,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
             # After from_curriculum per-chapter generation, top off the chapter
             # if AI rejections left it below the minimum. Skip for top-off jobs
             # themselves (args["top_off"] == true) to prevent infinite loops.
-            if mode == "from_curriculum" and chapter and not args["top_off"] do
+            if mode == "from_curriculum" and not is_nil(chapter) and args["top_off"] != true do
               maybe_top_off_chapter(course_id, chapter, mode)
             end
 
