@@ -154,20 +154,6 @@ After all tasks complete, print a summary:
 
 ---
 
-## /course-publish — Publish a completed test
-
-Usage: `/course-publish ACT`
-
-Instructions:
-1. Query the DB for all courses where `catalog_test_type = "<test_type_lowercase>"` and `published_at IS NULL` and `processing_status = "ready"`
-2. For each course, confirm: question count > 0, all chapters have at least 1 question
-3. Run: `update courses set published_at = now() where catalog_test_type = '...' and processing_status = 'ready' and published_at is null`
-4. Report which courses were published and their question counts
-
-If any course has `processing_status != "ready"`, list it as NOT published with its current status — do not publish unfinished courses.
-
----
-
 ## Known Test Profiles
 
 Check `docs/playbooks/standardized-test-course.md` for pre-researched profiles before using WebSearch.
