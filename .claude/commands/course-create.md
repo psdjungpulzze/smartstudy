@@ -1,13 +1,18 @@
-# /course-create — Standardized Test Course Builder
+# /course-create — Course Builder
 
-Creates all DB records for a standardized test course at runtime — no code changes needed.
+Creates all DB records for a course at runtime — no code changes needed.
+
+Supports two course types:
+- **Premium catalog course** — standardized test prep (SAT, ACT, AP, GRE, etc.) with pricing, exam simulation, and score predictor
+- **School course** — regular subject course (Algebra 2, AP Biology for a school, etc.), free and school-linked
 
 ## Usage
 
 ```
 /course-create ACT
 /course-create "GRE Verbal"
-/course-create "HSC Mathematics Advanced"
+/course-create "Algebra 2"
+/course-create "AP Biology"
 
 # With a textbook reference (Amazon URL or direct PDF link)
 /course-create SAT https://www.amazon.com/Official-SAT-Study-Guide-2020/dp/1457312190
@@ -68,6 +73,21 @@ If a textbook URL is provided, proceed to **Step 1a** before continuing to Step 
 **If URL resolution fails** (page unreachable, no ISBN found):
 - Continue without a textbook — log a warning but do not abort course creation
 - Omit the `textbook` key from the spec entirely
+
+### Step 1.5 — Ask course type
+
+**Before doing anything else, ask the user:**
+
+> Is **"[course name]"** a **premium catalog course** (standardized test prep with pricing and exam simulation) or a **regular school course** (free, linked to a school)?
+
+Wait for their answer before continuing.
+
+- If **premium** → continue to Step 2 (existing flow below).
+- If **school course** → jump to the **School Course Path** section at the bottom of this file.
+
+---
+
+## Premium Course Path
 
 ### Step 2 — Check for an existing embedded profile
 
@@ -224,6 +244,93 @@ After all tasks complete, print a summary:
 1. Review the course structure at http://localhost:4000/admin/course-builder
 2. Click "Generate Questions" to start AI question generation
 3. Review generated questions, then click "Publish" to make the course live
+```
+
+---
+
+## School Course Path
+
+Used when the user answers "school course" at Step 1.5. No pricing, no exam simulation, no score predictor.
+
+### School Step 1 — Collect course details
+
+Ask the user for the following. Collect them all in one question if possible:
+
+> To create "**[course name]**" as a school course I need a few details:
+> 1. **Grade** — what grade level? (e.g. 9, 10, 11, 12, College)
+> 2. **School** — which school is this for? (name, or "any" if not school-specific)
+> 3. **Subject** — one-line descriptor (e.g. Mathematics, English, Biology)
+> 4. **Description** — one sentence describing the course (or skip for a default)
+
+Wait for their answers before continuing.
+
+### School Step 2 — Resolve school (if named)
+
+If the user named a specific school, look it up:
+
+```bash
+cd /home/pulzze/Documents/GitHub/personal/funsheep-builder && ~/.asdf/shims/mix funsheep.school.find --name '<school name>'
+```
+
+This returns a `school_id` UUID if found, or an empty result if not. If no match, proceed without a school_id (the course will be visible across all schools).
+
+### School Step 3 — Build the SCHOOL_COURSE_SPEC JSON
+
+```json
+{
+  "course_type": "school",
+  "name": "Algebra 2",
+  "subject": "Mathematics",
+  "grade": "10",
+  "description": "Second-year algebra covering polynomial functions, rational expressions, exponential and logarithmic functions, sequences, and an introduction to statistics.",
+  "school_id": "uuid-or-null",
+  "chapters": [
+    {
+      "name": "Polynomial Functions",
+      "sections": [
+        "Factoring Polynomials",
+        "End Behavior and Zeros",
+        "Polynomial Long Division"
+      ]
+    }
+  ]
+}
+```
+
+**Rules:**
+- `course_type` must be `"school"` — this tells the Mix task to skip premium fields
+- `school_id`: UUID string if resolved, `null` if not school-specific
+- `grade`: string — `"9"`, `"10"`, `"11"`, `"12"`, or `"College"`
+- `subject`: concise lowercase descriptor matching the subject area
+- `chapters`: 4–8 chapters based on the standard curriculum for this course/grade
+- Each chapter should have 4–7 sections — specific skills or units, not vague categories
+- If you're not certain of the curriculum, use WebSearch: `"<course name> <grade> curriculum outline common core"`
+
+### School Step 4 — Run the Mix task
+
+```bash
+cd /home/pulzze/Documents/GitHub/personal/funsheep-builder && ~/.asdf/shims/mix funsheep.course.create --spec '<JSON>'
+```
+
+Same command as the premium path. The `"course_type": "school"` field in the spec tells the task to create a public, unpriced course.
+
+### School Step 5 — Report results
+
+```
+## Course Created: Algebra 2
+
+- Course ID: <uuid>
+- Grade: 10
+- School: Saratoga High School (or "all schools")
+- Chapters: 6 (Polynomial Functions, Rational Expressions, ...)
+- Total Sections: 28
+- Access: Public (free)
+- Status: pending
+
+### Next steps
+1. Review at http://localhost:4000/admin/courses/<id>
+2. Click "Generate Questions" to start AI question generation
+3. Review generated questions, then publish
 ```
 
 ---
