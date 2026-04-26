@@ -61,6 +61,12 @@ defmodule FunSheepWeb.CourseDetailLive do
 
     course_bundles = Courses.list_bundles_for_test_type(course.catalog_test_type)
 
+    is_admin = socket.assigns.current_user && socket.assigns.current_user["role"] == "admin"
+
+    can_edit_course =
+      is_admin or
+        (not is_nil(user_role_id) and user_role_id == course.created_by_id)
+
     {:ok,
      assign(socket,
        page_title: course.name,
@@ -97,7 +103,8 @@ defmodule FunSheepWeb.CourseDetailLive do
        # Paywall / access control
        has_access: has_access,
        enrollment: enrollment,
-       course_bundles: course_bundles
+       course_bundles: course_bundles,
+       can_edit_course: can_edit_course
      )}
   end
 
@@ -926,6 +933,14 @@ defmodule FunSheepWeb.CourseDetailLive do
               url={share_url(~p"/courses/#{@course.id}")}
               style={:icon}
             />
+            <.link
+              :if={@can_edit_course}
+              navigate={~p"/courses/#{@course.id}/edit"}
+              class="p-2.5 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-700 shadow-sm transition-colors touch-target"
+              title="Edit course settings"
+            >
+              <.icon name="hero-pencil-square" class="w-4 h-4" />
+            </.link>
             <button
               phx-click="toggle_upload"
               class={[

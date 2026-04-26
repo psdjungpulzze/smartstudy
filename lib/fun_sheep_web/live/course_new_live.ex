@@ -364,7 +364,7 @@ defmodule FunSheepWeb.CourseNewLive do
     <div class="max-w-xl mx-auto">
       <div class="mb-6">
         <.link
-          navigate={~p"/courses"}
+          navigate={if @editing_course, do: ~p"/courses/#{@editing_course.id}", else: ~p"/courses"}
           class="text-gray-400 hover:text-gray-600 text-sm inline-flex items-center transition-colors font-medium"
         >
           <.icon name="hero-arrow-left" class="w-4 h-4 mr-1" /> Back
