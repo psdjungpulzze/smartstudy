@@ -119,6 +119,11 @@ defmodule FunSheepWeb.Router do
       live "/courses/:course_id/tests/:schedule_id/format", TestFormatLive, :show
       live "/courses/:course_id/tests/:schedule_id/format-test", FormatTestLive, :show
 
+      # Exam Simulation
+      live "/courses/:course_id/exam-simulation", ExamSimulationLive.Index, :index
+      live "/courses/:course_id/exam-simulation/exam", ExamSimulationLive.Exam, :exam
+      live "/courses/:course_id/exam-simulation/results/:session_id", ExamSimulationLive.Results, :results
+
       live "/courses/:course_id/essay/:question_id", EssayLive, :index
       live "/courses/:course_id/memory-span", MemorySpanLive, :index
       live "/courses/:course_id/study/:section_id", StudyHubLive, :show
