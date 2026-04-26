@@ -187,20 +187,43 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
       |> Oban.insert()
     end
 
-    # Collect discovered source summaries to pass as context to discovery
-    sources = Content.list_discovered_sources(course_id)
+    # Route based on whether the course has uploaded textbook materials.
+    #
+    # With textbook uploads: EnrichDiscoveryWorker will run after OCR completes
+    # and do authoritative chapter discovery from the actual textbook content.
+    # Running a web-based CourseDiscovery pass here would mark discovery_complete
+    # prematurely and show "Discovering" and "Processing materials" as
+    # simultaneously active in the UI — confusing and inaccurate.
+    #
+    # Without textbook uploads: no OCR will happen, so CourseDiscoveryWorker
+    # is the only pass and must run now.
+    if uploaded_has_textbook do
+      # If by some race condition OCR is already done, advance immediately.
+      # Normally OCR completes after web search, so this branch is a safety net.
+      course = Courses.get_course!(course_id)
+      ocr_done = course.ocr_total_count == 0 or course.ocr_completed_count >= course.ocr_total_count
 
-    source_context =
-      sources
-      |> Enum.map(fn s ->
-        "- #{s.title} (#{s.source_type}): #{s.description || s.content_preview || ""}"
-      end)
-      |> Enum.join("\n")
+      if ocr_done do
+        Logger.info("[WebDiscovery] OCR already complete, triggering EnrichDiscovery for #{course_id}")
+        Courses.advance_to_extraction(course_id)
+      else
+        Logger.info("[WebDiscovery] Textbook uploaded — skipping web-only discovery; EnrichDiscovery will run after OCR")
+      end
+    else
+      # Web-only course: discovery from web search context is the only pass.
+      sources = Content.list_discovered_sources(course_id)
 
-    # Now trigger course structure discovery with web search context
-    %{course_id: course_id, source_context: source_context}
-    |> FunSheep.Workers.CourseDiscoveryWorker.new()
-    |> Oban.insert()
+      source_context =
+        sources
+        |> Enum.map(fn s ->
+          "- #{s.title} (#{s.source_type}): #{s.description || s.content_preview || ""}"
+        end)
+        |> Enum.join("\n")
+
+      %{course_id: course_id, source_context: source_context}
+      |> FunSheep.Workers.CourseDiscoveryWorker.new()
+      |> Oban.insert()
+    end
 
     :ok
   rescue

@@ -339,16 +339,28 @@ defmodule FunSheep.Workers.PdfOcrPollerWorker do
     course = FunSheep.Courses.get_course!(course_id)
     metadata = course.metadata || %{}
 
-    if metadata["discovery_complete"] == true do
-      FunSheep.Courses.update_course(course, %{
-        processing_status: "extracting",
-        processing_step: "Extracting and generating questions...",
-        metadata: Map.merge(metadata, %{"ocr_complete" => true})
-      })
+    textbook_kinds = [:textbook, :supplementary_book]
+    has_textbook_ocr =
+      FunSheep.Content.list_materials_by_course_and_kind(course_id, textbook_kinds)
+      |> Enum.any?(&(&1.ocr_status == :completed))
 
-      %{course_id: course_id}
-      |> FunSheep.Workers.QuestionExtractionWorker.new()
-      |> Oban.insert()
+    if has_textbook_ocr do
+      # EnrichDiscoveryWorker handles both discovery and extraction for textbook
+      # courses. Don't gate on discovery_complete — EnrichDiscovery IS the
+      # discovery step and runs after OCR finishes.
+      FunSheep.Courses.advance_to_extraction(course_id)
+    else
+      if metadata["discovery_complete"] == true do
+        FunSheep.Courses.update_course(course, %{
+          processing_status: "extracting",
+          processing_step: "Extracting and generating questions...",
+          metadata: Map.merge(metadata, %{"ocr_complete" => true})
+        })
+
+        %{course_id: course_id}
+        |> FunSheep.Workers.QuestionExtractionWorker.new()
+        |> Oban.insert()
+      end
     end
   end
 

@@ -1613,25 +1613,32 @@ defmodule FunSheepWeb.CourseDetailLive do
 
     web_search_done = meta["web_search_complete"] == true
 
-    # Determine step states (web search runs first, then discovery)
+    # Step 1: Web search (always first)
     step1_state =
       cond do
         web_search_done -> :done
         true -> :active
       end
 
+    # Step 2: OCR — runs in parallel with web search, but shown before
+    # discovery because discovery for textbook courses waits for OCR to finish.
     step2_state =
       cond do
-        discovery_done -> :done
-        web_search_done -> :active
-        true -> :pending
+        not has_ocr -> :skip
+        ocr_done -> :done
+        true -> :active
       end
 
+    # Step 3: Discovering course structure — for textbook courses this only
+    # starts after OCR completes (EnrichDiscoveryWorker uses textbook text).
+    # For web-only courses it starts after web search.
     step3_state =
       cond do
-        has_ocr && ocr_done -> :done
-        has_ocr -> :active
-        true -> :skip
+        discovery_done -> :done
+        has_ocr && ocr_done -> :active
+        has_ocr -> :pending
+        web_search_done -> :active
+        true -> :pending
       end
 
     # Split question work into two distinct steps so the UI tells the truth
@@ -1713,42 +1720,10 @@ defmodule FunSheepWeb.CourseDetailLive do
           }
         />
 
-        <%!-- Step 2: Discovering course structure (uses web search results) --%>
-        <.pipeline_step
-          state={@step2_state}
-          icon="hero-academic-cap"
-          title="Discovering course structure"
-          sub_step={if @step2_state == :active, do: @sub_step}
-          subtitle={
-            cond do
-              @discovery_done ->
-                "Found #{@chapters_count} chapters"
-
-              @step2_state == :active ->
-                "Identifying chapters and sections..."
-
-              true ->
-                "Will use search results to build course structure"
-            end
-          }
-        />
-
-        <%!-- Show discovered chapters inline --%>
-        <div :if={@chapters_count > 0} class="ml-10 -mt-2 mb-1">
-          <div class="flex flex-wrap gap-1.5">
-            <span
-              :for={chapter <- @course.chapters}
-              class="text-[11px] px-2.5 py-1 rounded-full bg-[#E8F8EB] text-[#3DBF55] font-medium"
-            >
-              {chapter.name}
-            </span>
-          </div>
-        </div>
-
-        <%!-- Step 3: OCR (only if materials uploaded) --%>
+        <%!-- Step 2: OCR (only if materials uploaded) --%>
         <.pipeline_step
           :if={@has_ocr}
-          state={@step3_state}
+          state={@step2_state}
           icon="hero-document-text"
           title="Processing uploaded materials"
           subtitle={ocr_subtitle(@course)}
@@ -1779,6 +1754,41 @@ defmodule FunSheepWeb.CourseDetailLive do
           <p class="text-xs text-[#3DBF55] font-medium">
             First questions ready — you can start practising while we finish processing!
           </p>
+        </div>
+
+        <%!-- Step 3: Discovering course structure (uses web search + textbook OCR results) --%>
+        <.pipeline_step
+          state={@step3_state}
+          icon="hero-academic-cap"
+          title="Discovering course structure"
+          sub_step={if @step3_state == :active, do: @sub_step}
+          subtitle={
+            cond do
+              @discovery_done ->
+                "Found #{@chapters_count} chapters"
+
+              @step3_state == :active ->
+                "Analyzing materials and identifying chapters..."
+
+              @step3_state == :pending ->
+                "Will analyze materials to build course structure"
+
+              true ->
+                "Will use search results to build course structure"
+            end
+          }
+        />
+
+        <%!-- Show discovered chapters inline --%>
+        <div :if={@chapters_count > 0} class="ml-10 -mt-2 mb-1">
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              :for={chapter <- @course.chapters}
+              class="text-[11px] px-2.5 py-1 rounded-full bg-[#E8F8EB] text-[#3DBF55] font-medium"
+            >
+              {chapter.name}
+            </span>
+          </div>
         </div>
 
         <%!-- Step 4: Generating questions (AI creates raw questions) --%>
