@@ -9,11 +9,15 @@ defmodule FunSheep.Workers.ProcessCourseWorker do
     3. OCR — processes uploaded materials (parallel, only if materials exist)
 
   After discovery + OCR complete, question extraction is triggered.
+
+  If the course has `auto_create_tests: true` and a `catalog_test_type`,
+  TestSchedule records are seeded from upcoming `known_test_dates` for that
+  test type so students see a real test calendar on first visit.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 1
 
-  alias FunSheep.{Content, Courses}
+  alias FunSheep.{Assessments, Content, Courses}
 
   require Logger
 
@@ -55,6 +59,48 @@ defmodule FunSheep.Workers.ProcessCourseWorker do
       end
     end
 
+    # Auto-create TestSchedules from known_test_dates if enabled
+    maybe_create_test_schedules(course)
+
     :ok
   end
+
+  # Creates TestSchedule records for the course creator from upcoming known_test_dates.
+  # Only runs when the course has `auto_create_tests: true` and a catalog_test_type.
+  # Each official date gets a system-level TestSchedule with full course scope.
+  defp maybe_create_test_schedules(%{auto_create_tests: true, catalog_test_type: test_type, created_by_id: creator_id} = course)
+       when is_binary(test_type) and is_binary(creator_id) do
+    upcoming = Courses.list_upcoming_known_dates(test_type)
+
+    if upcoming == [] do
+      # No dates in DB yet — enqueue a one-off sync first, tests will be seeded after
+      Logger.info("[Pipeline] No known_test_dates for #{test_type}, enqueuing TestDateSyncWorker")
+      %{"test_type" => test_type}
+      |> FunSheep.Workers.TestDateSyncWorker.new()
+      |> Oban.insert()
+    else
+      Enum.each(upcoming, fn known_date ->
+        attrs = %{
+          name: known_date.test_name,
+          test_date: known_date.test_date,
+          scope: %{"all_chapters" => true},
+          user_role_id: creator_id,
+          course_id: course.id,
+          schedule_type: :official,
+          is_auto_created: true,
+          known_test_date_id: known_date.id
+        }
+
+        case Assessments.create_test_schedule(attrs) do
+          {:ok, schedule} ->
+            Logger.info("[Pipeline] Auto-created test schedule #{schedule.id} for #{known_date.test_name}")
+
+          {:error, changeset} ->
+            Logger.warning("[Pipeline] Failed to auto-create test schedule: #{inspect(changeset.errors)}")
+        end
+      end)
+    end
+  end
+
+  defp maybe_create_test_schedules(_course), do: :ok
 end

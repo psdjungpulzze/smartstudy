@@ -1204,6 +1204,48 @@ defmodule FunSheep.Courses do
     |> Repo.insert()
   end
 
+  ## Known Test Dates
+
+  alias FunSheep.Courses.KnownTestDate
+
+  @doc """
+  Lists upcoming official test dates for a given test type and region.
+
+  Only returns dates in the future (today or later). Results are ordered
+  by test_date ascending, limited to the next 12 months.
+  """
+  @spec list_upcoming_known_dates(String.t(), String.t()) :: [KnownTestDate.t()]
+  def list_upcoming_known_dates(test_type, region \\ "us") do
+    today = Date.utc_today()
+    cutoff = Date.add(today, 365)
+
+    from(ktd in KnownTestDate,
+      where:
+        ktd.test_type == ^test_type and
+          ktd.region == ^region and
+          ktd.test_date >= ^today and
+          ktd.test_date <= ^cutoff,
+      order_by: ktd.test_date
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Inserts or updates a known test date record.
+
+  Uses (test_type, test_date, region) as the conflict target so records
+  synced multiple times are safely idempotent.
+  """
+  @spec upsert_known_test_date(map()) :: {:ok, KnownTestDate.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_known_test_date(attrs) do
+    %KnownTestDate{}
+    |> KnownTestDate.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: {:replace, [:test_name, :registration_deadline, :late_registration_deadline, :score_release_date, :source_url, :last_synced_at, :updated_at]},
+      conflict_target: [:test_type, :test_date, :region]
+    )
+  end
+
   def update_bundle(%CourseBundle{} = bundle, attrs) do
     bundle
     |> CourseBundle.changeset(attrs)

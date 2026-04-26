@@ -67,14 +67,19 @@ defmodule FunSheepWeb.CourseDetailLive do
       is_admin or
         (not is_nil(user_role_id) and user_role_id == course.created_by_id)
 
+    has_any_attempt = user_role_id && Assessments.has_any_attempt?(user_role_id, course_id)
+    learning_path_state = compute_learning_path_state(upcoming, has_any_attempt)
+
     {:ok,
      assign(socket,
        page_title: course.name,
        course: course,
+       user_role_id: user_role_id,
        question_count: question_count,
        validation_counts: validation_counts,
        upcoming_tests: upcoming,
        past_tests: past,
+       learning_path_state: learning_path_state,
        show_chapters: false,
        # Chapter/section editing state (kept for chapter management)
        chapter_form: nil,
@@ -159,6 +164,28 @@ defmodule FunSheepWeb.CourseDetailLive do
       |> Enum.map(fn ch -> %{id: ch.id, name: ch.name, sections: []} end)
 
     TOCRebase.plan_rebase(pending_toc.chapters, current_chapters, MapSet.new())
+  end
+
+  # Learning path states:
+  # :no_test         — no test scheduled
+  # :test_pending    — test scheduled, zero attempts yet
+  # :has_attempts    — at least one attempt; show weak-concept practice
+  # :approaching     — test within 7 days
+  # :post_test       — most recent test is in the past
+  defp compute_learning_path_state(upcoming, has_any_attempt) do
+    cond do
+      upcoming == [] ->
+        :no_test
+
+      has_any_attempt ->
+        next = List.first(upcoming)
+        days_until = Date.diff(next.schedule.test_date, Date.utc_today())
+
+        if days_until <= 7, do: :approaching, else: :has_attempts
+
+      true ->
+        :test_pending
+    end
   end
 
   defp load_test_schedules(nil, _course_id), do: {[], []}
@@ -269,6 +296,20 @@ defmodule FunSheepWeb.CourseDetailLive do
        question_count: question_count,
        validation_counts: validation_counts
      )}
+  end
+
+  def handle_info({:test_date_selected, _schedule}, socket) do
+    # Reload test schedules and recompute learning path state after a date is picked
+    user_role_id = socket.assigns.user_role_id
+    course_id = socket.assigns.course.id
+    {upcoming, past} = load_test_schedules(user_role_id, course_id)
+    has_any_attempt = user_role_id && Assessments.has_any_attempt?(user_role_id, course_id)
+    learning_path_state = compute_learning_path_state(upcoming, has_any_attempt)
+
+    {:noreply,
+     socket
+     |> assign(upcoming_tests: upcoming, past_tests: past, learning_path_state: learning_path_state)
+     |> put_flash(:info, "Test date set! Start practicing to track your readiness.")}
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -1057,17 +1098,27 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
 
         <%= if @upcoming_tests == [] do %>
-          <div class="bg-white rounded-2xl shadow-md p-8 text-center">
-            <.icon name="hero-calendar" class="w-12 h-12 text-[#8E8E93] mx-auto mb-3" />
-            <p class="text-[#1C1C1E] font-medium mb-1">No upcoming tests</p>
-            <p class="text-sm text-[#8E8E93] mb-4">Schedule your next test to start preparing</p>
-            <.link
-              navigate={~p"/courses/#{@course.id}/tests/new"}
-              class="inline-flex items-center bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors text-sm"
-            >
-              <.icon name="hero-plus" class="w-4 h-4 mr-1" /> Schedule your first test
-            </.link>
-          </div>
+          <%!-- If it's a standardized test, show the date picker; otherwise plain empty state --%>
+          <%= if @course.catalog_test_type && @has_access do %>
+            <.live_component
+              module={FunSheepWeb.TestDatePickerComponent}
+              id={"test-date-picker-#{@course.id}"}
+              course={@course}
+              user_role_id={@user_role_id}
+            />
+          <% else %>
+            <div class="bg-white rounded-2xl shadow-md p-8 text-center">
+              <.icon name="hero-calendar" class="w-12 h-12 text-[#8E8E93] mx-auto mb-3" />
+              <p class="text-[#1C1C1E] font-medium mb-1">No upcoming tests</p>
+              <p class="text-sm text-[#8E8E93] mb-4">Schedule your next test to start preparing</p>
+              <.link
+                navigate={~p"/courses/#{@course.id}/tests/new"}
+                class="inline-flex items-center bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors text-sm"
+              >
+                <.icon name="hero-plus" class="w-4 h-4 mr-1" /> Schedule your first test
+              </.link>
+            </div>
+          <% end %>
         <% else %>
           <div class="space-y-4">
             <.test_card
@@ -1080,9 +1131,100 @@ defmodule FunSheepWeb.CourseDetailLive do
         <% end %>
       </div>
 
-      <%!-- ═══ QUICK ACTIONS ═══ --%>
+      <%!-- ═══ LEARNING PATH (state-aware practice panel) ═══ --%>
       <div :if={@has_access} class="mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Practice</h2>
+
+        <%!-- Primary CTA changes based on learning_path_state --%>
+        <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
+          <%= case @learning_path_state do %>
+            <% :no_test -> %>
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-[#E8F8EB] rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-calendar-days" class="w-6 h-6 text-[#4CD964]" />
+                </div>
+                <div class="flex-1">
+                  <p class="font-semibold text-[#1C1C1E]">Schedule your test date</p>
+                  <p class="text-sm text-[#8E8E93]">Set a target date to start tracking readiness</p>
+                </div>
+                <.link
+                  navigate={~p"/courses/#{@course.id}/tests/new"}
+                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                >
+                  Pick a date
+                </.link>
+              </div>
+
+            <% :test_pending -> %>
+              <% next_test = List.first(@upcoming_tests) %>
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-clipboard-document-check" class="w-6 h-6 text-blue-500" />
+                </div>
+                <div class="flex-1">
+                  <p class="font-semibold text-[#1C1C1E]">Start your first assessment</p>
+                  <p class="text-sm text-[#8E8E93]">
+                    Take a test to measure your starting readiness for
+                    <span class="font-medium text-[#1C1C1E]">{next_test && next_test.schedule.name}</span>
+                  </p>
+                </div>
+                <.link
+                  navigate={
+                    if next_test,
+                      do: ~p"/courses/#{@course.id}/tests/#{next_test.schedule.id}",
+                      else: ~p"/courses/#{@course.id}/quick-test"
+                  }
+                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                >
+                  Start Assessment
+                </.link>
+              </div>
+
+            <% :has_attempts -> %>
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-bolt" class="w-6 h-6 text-amber-500" />
+                </div>
+                <div class="flex-1">
+                  <p class="font-semibold text-[#1C1C1E]">Practice weak concepts</p>
+                  <p class="text-sm text-[#8E8E93]">AI-guided review on your lowest-scoring topics</p>
+                </div>
+                <.link
+                  navigate={~p"/courses/#{@course.id}/quick-test"}
+                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                >
+                  Practice Now
+                </.link>
+              </div>
+
+            <% :approaching -> %>
+              <% next_test = List.first(@upcoming_tests) %>
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-fire" class="w-6 h-6 text-red-500" />
+                </div>
+                <div class="flex-1">
+                  <p class="font-semibold text-[#1C1C1E]">Test coming up soon!</p>
+                  <p class="text-sm text-[#8E8E93]">
+                    <span class="font-medium text-red-600">
+                      {next_test && Date.diff(next_test.schedule.test_date, Date.utc_today())} days
+                    </span>
+                    until {next_test && next_test.schedule.name} — keep practicing!
+                  </p>
+                </div>
+                <.link
+                  navigate={~p"/courses/#{@course.id}/quick-test"}
+                  class="bg-red-500 hover:bg-red-600 text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                >
+                  Cram Now
+                </.link>
+              </div>
+
+            <% _ -> %>
+              <%!-- Fallback --%>
+          <% end %>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <.link
             navigate={~p"/courses/#{@course.id}/quick-test"}

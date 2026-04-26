@@ -97,7 +97,17 @@ config :fun_sheep, Oban,
        {"0 */2 * * *", FunSheep.Workers.StreakAtRiskWorker},
        # Daily at 08:00 UTC — send T-3 and T-1 countdown alerts to students
        # and their guardians for upcoming test schedules.
-       {"0 8 * * *", FunSheep.Workers.TestUpcomingWorker}
+       {"0 8 * * *", FunSheep.Workers.TestUpcomingWorker},
+       # Quarterly on the 1st of Jan/Apr/Jul/Oct at 06:00 UTC — fetch
+       # official test dates from College Board, ACT, ETS, etc. via
+       # Anthropic web search and upsert into known_test_dates.
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "sat"}},
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "act"}},
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "ap"}},
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "gre"}},
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "gmat"}},
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "lsat"}},
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "mcat"}}
      ]}
   ],
   queues: [

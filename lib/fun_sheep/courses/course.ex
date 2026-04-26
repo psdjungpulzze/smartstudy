@@ -46,6 +46,9 @@ defmodule FunSheep.Courses.Course do
     field :currency, :string, default: "usd"
     field :price_label, :string
 
+    # When true, ProcessCourseWorker creates TestSchedule records from known_test_dates
+    field :auto_create_tests, :boolean, default: false
+
     # Community quality scoring fields (Phase 1 — community content validation)
     field :quality_score, :float, default: 0.0
     field :like_count, :integer, default: 0
@@ -120,6 +123,7 @@ defmodule FunSheep.Courses.Course do
       :price_cents,
       :currency,
       :price_label,
+      :auto_create_tests,
       :quality_score,
       :like_count,
       :dislike_count,
