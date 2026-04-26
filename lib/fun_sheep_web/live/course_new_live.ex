@@ -247,16 +247,25 @@ defmodule FunSheepWeb.CourseNewLive do
         assigns.custom_textbook_name
       end
 
-    course_attrs = %{
+    base_attrs = %{
       "name" => assigns.course_name,
       "subject" => assigns.subject,
       "grades" => assigns.selected_grades,
       "description" => assigns.description,
-      "created_by_id" => user_role && user_role.id,
-      "school_id" => user_role && user_role.school_id,
       "textbook_id" => textbook_id,
       "custom_textbook_name" => custom_textbook
     }
+
+    # Don't overwrite created_by_id or school_id when editing an existing course
+    course_attrs =
+      if assigns.editing_course do
+        base_attrs
+      else
+        Map.merge(base_attrs, %{
+          "created_by_id" => user_role && user_role.id,
+          "school_id" => user_role && user_role.school_id
+        })
+      end
 
     course_result =
       case assigns.editing_course do
@@ -266,27 +275,45 @@ defmodule FunSheepWeb.CourseNewLive do
 
     case course_result do
       {:ok, course} ->
-        # Start the processing pipeline — discovers chapters, searches web,
-        # finds textbooks and question banks, generates questions
-        %{course_id: course.id}
-        |> FunSheep.Workers.ProcessCourseWorker.new()
-        |> Oban.insert()
+        socket =
+          if assigns.editing_course do
+            # Editing: only re-run the pipeline if the textbook changed, since
+            # name/grade/description changes don't affect content generation.
+            textbook_changed =
+              course.textbook_id != assigns.editing_course.textbook_id or
+                course.custom_textbook_name != assigns.editing_course.custom_textbook_name
 
-        {flash_msg, redirect_path} =
-          cond do
-            assigns.editing_course ->
-              {"Course updated!", ~p"/courses/#{course.id}"}
+            if textbook_changed do
+              %{course_id: course.id}
+              |> FunSheep.Workers.ProcessCourseWorker.new()
+              |> Oban.insert()
 
-            assigns.flow_mode == :test ->
-              {"Class created! Now let's schedule the test.", ~p"/courses/#{course.id}/tests/new"}
+              put_flash(socket, :info, "Course updated! Re-processing content for new textbook...")
+            else
+              put_flash(socket, :info, "Course updated!")
+            end
+          else
+            # New course: always kick off the full pipeline
+            %{course_id: course.id}
+            |> FunSheep.Workers.ProcessCourseWorker.new()
+            |> Oban.insert()
 
-            true ->
-              {"Course created! Searching for content...", ~p"/courses/#{course.id}"}
+            flash_msg =
+              if assigns.flow_mode == :test,
+                do: "Class created! Now let's schedule the test.",
+                else: "Course created! Searching for content..."
+
+            put_flash(socket, :info, flash_msg)
           end
 
-        socket
-        |> put_flash(:info, flash_msg)
-        |> push_navigate(to: redirect_path)
+        redirect_path =
+          cond do
+            assigns.editing_course -> ~p"/courses/#{course.id}"
+            assigns.flow_mode == :test -> ~p"/courses/#{course.id}/tests/new"
+            true -> ~p"/courses/#{course.id}"
+          end
+
+        push_navigate(socket, to: redirect_path)
 
       {:error, %Ecto.Changeset{} = changeset} ->
         errors = format_changeset_errors(changeset)
