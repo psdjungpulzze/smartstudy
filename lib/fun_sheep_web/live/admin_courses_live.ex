@@ -98,8 +98,8 @@ defmodule FunSheepWeb.AdminCoursesLive do
       subject: Map.get(params, "subject", course.subject),
       grades:
         case Map.get(params, "grades") do
-          nil -> course.grades
-          "" -> course.grades
+          nil -> []
+          "" -> []
           g when is_list(g) -> Enum.reject(g, &(&1 == ""))
           g -> [g]
         end,
@@ -260,6 +260,13 @@ defmodule FunSheepWeb.AdminCoursesLive do
                   >
                     Edit
                   </button>
+                  <.link
+                    :if={c.is_premium_catalog}
+                    navigate={~p"/admin/course-builder"}
+                    class="px-3 py-1 rounded-full text-xs font-medium text-[#4CD964] border border-[#4CD964]/30 hover:bg-[#E8F8EB] mr-2"
+                  >
+                    Build
+                  </.link>
                   <button
                     :if={Map.get(@pending_counts, c.id, 0) > 0}
                     type="button"
@@ -378,19 +385,23 @@ defmodule FunSheepWeb.AdminCoursesLive do
             </div>
             <div>
               <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Grades</label>
-              <select
-                multiple
-                name="grades"
-                class="w-full px-3 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-xl outline-none transition-colors"
-              >
-                <option
+              <%!-- Hidden field ensures grades[] is present even when none are checked --%>
+              <input type="hidden" name="grades[]" value="" />
+              <div class="flex flex-wrap gap-x-3 gap-y-1.5 bg-[#F5F5F7] rounded-xl px-3 py-2">
+                <label
                   :for={g <- ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)}
-                  value={g}
-                  selected={g in (@course.grades || [])}
+                  class="flex items-center gap-1.5 cursor-pointer"
                 >
-                  {g}
-                </option>
-              </select>
+                  <input
+                    type="checkbox"
+                    name="grades[]"
+                    value={g}
+                    checked={g in (@course.grades || [])}
+                    class="w-3.5 h-3.5 accent-[#4CD964] cursor-pointer"
+                  />
+                  <span class="text-sm text-[#1C1C1E]">{g}</span>
+                </label>
+              </div>
             </div>
           </div>
 

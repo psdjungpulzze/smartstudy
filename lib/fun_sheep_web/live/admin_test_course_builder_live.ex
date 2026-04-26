@@ -20,15 +20,22 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:page_title, "Test Course Builder · Admin")
-     |> assign(:spec_json, "")
-     |> assign(:spec_preview, nil)
-     |> assign(:spec_error, nil)
-     |> assign(:create_result, nil)
-     |> assign(:creating, false)
-     |> load_courses()}
+    socket =
+      socket
+      |> assign(:page_title, "Course Builder · Admin")
+      |> assign(:spec_json, "")
+      |> assign(:spec_preview, nil)
+      |> assign(:spec_error, nil)
+      |> assign(:create_result, nil)
+      |> assign(:creating, false)
+      |> assign(:subscribed_course_ids, MapSet.new())
+      |> load_courses()
+
+    # Subscribe to PubSub for any currently-processing courses so progress
+    # updates arrive in real time without polling.
+    socket = subscribe_processing_courses(socket)
+
+    {:ok, socket}
   end
 
   # --- Event Handlers -------------------------------------------------------
@@ -39,6 +46,8 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
 
     case FunSheep.Workers.ProcessCourseWorker.new(%{course_id: course_id}) |> Oban.insert() do
       {:ok, _job} ->
+        socket = subscribe_course(socket, course_id)
+
         {:noreply,
          socket
          |> put_flash(:info, "Question generation enqueued for \"#{course.name}\".")
@@ -49,6 +58,10 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
 
         {:noreply, put_flash(socket, :error, "Failed to enqueue generation job.")}
     end
+  end
+
+  def handle_info({:processing_update, _update}, socket) do
+    {:noreply, load_courses(socket)}
   end
 
   def handle_event("publish_course", %{"course_id" => course_id}, socket) do
@@ -138,6 +151,23 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
     end
   end
 
+  # --- PubSub subscriptions -------------------------------------------------
+
+  defp subscribe_processing_courses(socket) do
+    socket.assigns.courses
+    |> Enum.filter(&(&1.processing_status == "processing"))
+    |> Enum.reduce(socket, fn course, acc -> subscribe_course(acc, course.id) end)
+  end
+
+  defp subscribe_course(socket, course_id) do
+    if MapSet.member?(socket.assigns.subscribed_course_ids, course_id) do
+      socket
+    else
+      Phoenix.PubSub.subscribe(FunSheep.PubSub, "course:#{course_id}")
+      assign(socket, :subscribed_course_ids, MapSet.put(socket.assigns.subscribed_course_ids, course_id))
+    end
+  end
+
   # --- Data Loading ---------------------------------------------------------
 
   defp load_courses(socket) do
@@ -197,7 +227,7 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
     ~H"""
     <div class="p-6 max-w-7xl mx-auto">
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-[#1C1C1E] dark:text-white">Test Course Builder</h1>
+        <h1 class="text-2xl font-bold text-[#1C1C1E] dark:text-white">Course Builder</h1>
         <span class="text-sm text-[#8E8E93]">{length(@courses)} courses</span>
       </div>
 
@@ -233,6 +263,13 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
                     </td>
                     <td class="px-4 py-3">
                       <.status_badge status={course.processing_status} />
+                      <div
+                        :if={course.processing_status == "processing" and not is_nil(course.processing_step)}
+                        class="text-xs text-[#8E8E93] mt-1 max-w-[220px] truncate"
+                        title={course.processing_step}
+                      >
+                        {course.processing_step}
+                      </div>
                     </td>
                     <td class="px-4 py-3 text-right text-[#1C1C1E] dark:text-white font-mono">
                       {Map.get(@question_counts, course.id, 0)}
