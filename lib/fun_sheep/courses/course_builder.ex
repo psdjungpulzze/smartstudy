@@ -13,6 +13,7 @@ defmodule FunSheep.Courses.CourseBuilder do
 
   alias FunSheep.Repo
   alias FunSheep.Courses.{Course, Chapter, Section, CourseBundle, TextbookSearch}
+  alias FunSheep.Questions.Question
   alias FunSheep.Assessments.TestFormatTemplate
   alias FunSheep.Accounts.UserRole
 
@@ -129,13 +130,24 @@ defmodule FunSheep.Courses.CourseBuilder do
 
     if existing do
       Logger.info("[CourseBuilder] Course already exists: #{name} (#{existing.id})")
-      # Update metadata so score_predictor_weights and generation_config are
-      # always current even if the course already existed.
-      updated_metadata = build_metadata(existing.metadata, spec)
+      # Re-apply all spec fields so the course stays in sync with the spec.
+      # Only fields explicitly present in the spec are updated; omitted fields
+      # are left as-is so manual admin edits are not accidentally overwritten.
+      update_attrs =
+        %{metadata: build_metadata(existing.metadata, spec)}
+        |> put_if_in_spec(:grades, spec["grades"])
+        |> put_if_in_spec(:description, spec["description"])
+        |> put_if_in_spec(:price_cents, spec["price_cents"])
+        |> put_if_in_spec(:currency, spec["currency"])
+        |> put_if_in_spec(:price_label, spec["price_label"])
+        |> put_if_in_spec(:subject, spec["subject"])
+        |> put_if_in_spec(:catalog_subject, spec["catalog_subject"] || spec["subject"])
+        |> put_if_in_spec(:catalog_level, spec["catalog_level"])
+        |> put_if_in_spec(:sample_question_count, spec["sample_question_count"])
 
       {:ok, updated} =
         existing
-        |> Course.changeset(%{metadata: updated_metadata})
+        |> Course.changeset(update_attrs)
         |> Repo.update()
 
       updated
@@ -177,9 +189,23 @@ defmodule FunSheep.Courses.CourseBuilder do
   defp maybe_put_meta(map, _key, nil), do: map
   defp maybe_put_meta(map, key, value), do: Map.put(map, key, value)
 
+  defp put_if_in_spec(map, _key, nil), do: map
+  defp put_if_in_spec(map, key, value), do: Map.put(map, key, value)
+
   # --- Chapter + Section creation -------------------------------------------
 
   defp create_chapters!(course, chapters_spec) do
+    spec_names = MapSet.new(chapters_spec, & &1["name"])
+
+    # Reconcile: chapters on this course that are no longer in the spec.
+    # Empty chapters are deleted outright. Chapters that still carry questions
+    # are marked orphaned_at so admins can see them — their questions are
+    # preserved rather than destroyed.
+    Repo.all(from ch in Chapter, where: ch.course_id == ^course.id)
+    |> Enum.each(fn ch ->
+      unless MapSet.member?(spec_names, ch.name), do: reconcile_orphaned_chapter!(ch)
+    end)
+
     chapters_spec
     |> Enum.with_index()
     |> Enum.map(fn {ch_spec, pos} ->
@@ -187,6 +213,27 @@ defmodule FunSheep.Courses.CourseBuilder do
       sections = create_sections!(chapter, ch_spec["sections"] || [])
       {chapter, sections}
     end)
+  end
+
+  defp reconcile_orphaned_chapter!(chapter) do
+    has_questions =
+      Repo.exists?(from q in Question, where: q.chapter_id == ^chapter.id) or
+        Repo.exists?(
+          from q in Question,
+            join: s in Section,
+            on: s.id == q.section_id,
+            where: s.chapter_id == ^chapter.id
+        )
+
+    if has_questions do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      Repo.update_all(from(c in Chapter, where: c.id == ^chapter.id), set: [orphaned_at: now])
+      Logger.warning("[CourseBuilder] Chapter not in spec — marked orphaned (has questions): #{chapter.name}")
+    else
+      Repo.delete_all(from s in Section, where: s.chapter_id == ^chapter.id)
+      Repo.delete!(chapter)
+      Logger.info("[CourseBuilder] Deleted empty chapter not in spec: #{chapter.name}")
+    end
   end
 
   defp find_or_create_chapter!(course, name, position) do
@@ -206,6 +253,22 @@ defmodule FunSheep.Courses.CourseBuilder do
   end
 
   defp create_sections!(chapter, section_names) do
+    spec_names = MapSet.new(section_names)
+
+    # Reconcile: sections within this chapter that are no longer in the spec.
+    # Empty sections are deleted; sections with questions are left (warning only).
+    Repo.all(from s in Section, where: s.chapter_id == ^chapter.id)
+    |> Enum.each(fn s ->
+      unless MapSet.member?(spec_names, s.name) do
+        if Repo.exists?(from q in Question, where: q.section_id == ^s.id) do
+          Logger.warning("[CourseBuilder] Section not in spec has questions, leaving: #{chapter.name} / #{s.name}")
+        else
+          Repo.delete!(s)
+          Logger.info("[CourseBuilder] Deleted empty section not in spec: #{chapter.name} / #{s.name}")
+        end
+      end
+    end)
+
     section_names
     |> Enum.with_index()
     |> Enum.map(fn {section_name, pos} ->
