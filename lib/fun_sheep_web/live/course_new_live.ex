@@ -3,6 +3,7 @@ defmodule FunSheepWeb.CourseNewLive do
 
   alias FunSheep.Accounts
   alias FunSheep.Courses
+  alias FunSheep.Courses.KnownTestProfiles
   alias FunSheep.Courses.TextbookSearch
 
   @grade_options ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)
@@ -28,6 +29,9 @@ defmodule FunSheepWeb.CourseNewLive do
         custom_textbook_name: "",
         textbook_mode: :none,
         show_textbook_section: false,
+        # Test detection & generation
+        detected_profile: nil,
+        generation_brief: "",
         # State
         user_role: user_role,
         editing_course: nil,
@@ -42,6 +46,8 @@ defmodule FunSheepWeb.CourseNewLive do
   def handle_params(%{"id" => course_id}, _url, socket) do
     course = Courses.get_course_with_chapters!(course_id)
 
+    existing_brief = get_in(course.metadata || %{}, ["generation_config", "prompt_context"]) || ""
+
     socket =
       socket
       |> assign(
@@ -50,8 +56,10 @@ defmodule FunSheepWeb.CourseNewLive do
         course_name: course.name,
         subject: course.subject,
         selected_grades: course.grades || [],
-        description: course.description || ""
+        description: course.description || "",
+        generation_brief: existing_brief
       )
+      |> maybe_detect_profile()
       |> prefill_textbook_from_course(course)
 
     {:noreply, socket}
@@ -122,6 +130,8 @@ defmodule FunSheepWeb.CourseNewLive do
       |> maybe_assign(params, "course_name", :course_name)
       |> maybe_assign(params, "subject", :subject)
       |> maybe_assign(params, "description", :description)
+      |> maybe_assign(params, "generation_brief", :generation_brief)
+      |> maybe_detect_profile()
       |> maybe_refresh_textbooks()
 
     {:noreply, socket}
@@ -247,14 +257,23 @@ defmodule FunSheepWeb.CourseNewLive do
         assigns.custom_textbook_name
       end
 
-    base_attrs = %{
-      "name" => assigns.course_name,
-      "subject" => assigns.subject,
-      "grades" => assigns.selected_grades,
-      "description" => assigns.description,
-      "textbook_id" => textbook_id,
-      "custom_textbook_name" => custom_textbook
-    }
+    existing_metadata =
+      if assigns.editing_course, do: assigns.editing_course.metadata || %{}, else: %{}
+
+    generation_metadata = build_generation_metadata(assigns, existing_metadata)
+    catalog_attrs = build_catalog_attrs(assigns)
+
+    base_attrs =
+      %{
+        "name" => assigns.course_name,
+        "subject" => assigns.subject,
+        "grades" => assigns.selected_grades,
+        "description" => assigns.description,
+        "textbook_id" => textbook_id,
+        "custom_textbook_name" => custom_textbook,
+        "metadata" => generation_metadata
+      }
+      |> Map.merge(catalog_attrs)
 
     # Don't overwrite created_by_id or school_id when editing an existing course
     course_attrs =
@@ -328,6 +347,76 @@ defmodule FunSheepWeb.CourseNewLive do
     case Map.get(params, param_key) do
       nil -> socket
       value -> assign(socket, [{assign_key, value}])
+    end
+  end
+
+  defp maybe_detect_profile(socket) do
+    case KnownTestProfiles.detect(socket.assigns.course_name) do
+      {:ok, profile} ->
+        prev_profile = socket.assigns.detected_profile
+
+        socket
+        |> assign(detected_profile: profile)
+        |> then(fn s ->
+          # Auto-fill subject only if blank or if it was previously auto-filled by a profile
+          prev_subject = if prev_profile, do: prev_profile.catalog_subject, else: nil
+
+          if s.assigns.subject == "" or s.assigns.subject == prev_subject do
+            assign(s, subject: profile.catalog_subject)
+          else
+            s
+          end
+        end)
+        |> then(fn s ->
+          brief = profile.generation_config["prompt_context"]
+          assign(s, generation_brief: brief)
+        end)
+
+      :unknown ->
+        assign(socket, detected_profile: nil)
+    end
+  end
+
+  defp build_generation_metadata(assigns, existing_metadata) do
+    profile = assigns.detected_profile
+    brief = assigns.generation_brief
+
+    generation_config =
+      cond do
+        profile ->
+          # Known test: use profile's validation_rules, override prompt_context if user edited brief
+          profile_ctx = profile.generation_config["prompt_context"]
+          prompt = if brief != "" and brief != profile_ctx, do: brief, else: profile_ctx
+
+          %{
+            "prompt_context" => prompt,
+            "validation_rules" => profile.generation_config["validation_rules"]
+          }
+
+        brief != "" ->
+          %{
+            "prompt_context" => brief,
+            "validation_rules" => %{"mcq_option_count" => 4, "answer_labels" => ["A", "B", "C", "D"]}
+          }
+
+        true ->
+          existing_metadata["generation_config"]
+      end
+
+    score_weights =
+      if profile, do: profile.score_predictor_weights, else: existing_metadata["score_predictor_weights"]
+
+    existing_metadata
+    |> then(fn m -> if generation_config, do: Map.put(m, "generation_config", generation_config), else: m end)
+    |> then(fn m -> if score_weights, do: Map.put(m, "score_predictor_weights", score_weights), else: m end)
+  end
+
+  defp build_catalog_attrs(assigns) do
+    if assigns.detected_profile do
+      profile = assigns.detected_profile
+      %{"catalog_test_type" => profile.catalog_test_type, "catalog_subject" => profile.catalog_subject}
+    else
+      %{}
     end
   end
 
@@ -434,6 +523,22 @@ defmodule FunSheepWeb.CourseNewLive do
               </p>
             </div>
 
+            <%!-- Recognized test banner --%>
+            <div
+              :if={@detected_profile}
+              class="flex items-start gap-3 p-3 bg-green-50 border border-green-200 rounded-xl"
+            >
+              <.icon name="hero-check-circle" class="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+              <div>
+                <p class="text-sm font-semibold text-green-800">{@detected_profile.display_name}</p>
+                <p class="text-xs text-green-700 mt-0.5">
+                  {length(@detected_profile.suggested_chapters)} chapters ·
+                  {@detected_profile.generation_config["validation_rules"]["mcq_option_count"]}-option MCQ ·
+                  Questions tailored to official test format
+                </p>
+              </div>
+            </div>
+
             <%!-- Subject --%>
             <div>
               <label class="block text-sm font-medium text-gray-900 mb-1">Subject *</label>
@@ -462,6 +567,32 @@ defmodule FunSheepWeb.CourseNewLive do
                 </button>
               </div>
               <p :if={@errors[:grade]} class="text-sm text-red-500 mt-1">{@errors[:grade]}</p>
+            </div>
+
+            <%!-- Generation Brief --%>
+            <div>
+              <label class="block text-sm font-medium text-gray-900 mb-1">
+                Generation Brief
+                <span class="text-gray-400 font-normal text-xs ml-1">(used by AI to generate questions)</span>
+              </label>
+              <textarea
+                name="generation_brief"
+                phx-debounce="500"
+                rows="4"
+                placeholder={
+                  if @detected_profile,
+                    do: "Auto-filled from test profile. Edit to customize.",
+                    else:
+                      "Describe what this course covers and how questions should be generated.\ne.g., \"Grade 10 Biology — cell biology, genetics, ecology, and evolution. NCEA Level 1 standards. Focus on application and analysis, not recall.\""
+                }
+                class="w-full px-4 py-3 bg-gray-50 text-gray-900 border border-gray-200 focus:border-[#4CD964] rounded-2xl outline-none transition-colors resize-none text-sm"
+              >{@generation_brief}</textarea>
+              <p :if={@detected_profile} class="text-xs text-gray-500 mt-1">
+                Pre-filled from the recognized test profile. Edit only if you want to customize question focus.
+              </p>
+              <p :if={!@detected_profile} class="text-xs text-gray-500 mt-1">
+                The more specific your brief, the better the AI-generated questions will match your course.
+              </p>
             </div>
 
             <%!-- Textbook Selection — shown once subject + grade are filled --%>
