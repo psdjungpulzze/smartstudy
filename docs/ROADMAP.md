@@ -12,9 +12,10 @@ Plans are ordered by impact for a high school student preparing for finals.
 
 | # | Feature | Category | Document | Status |
 |---|---------|----------|----------|--------|
-| 1 | Readiness by Topic — three UX states + teacher/parent views | Learning Engine | [ROADMAP/funsheep-readiness-by-topic.md](ROADMAP/funsheep-readiness-by-topic.md) | Planning |
-| 2 | Custom Fixed-Question Tests | Learning Engine | [ROADMAP/funsheep-custom-fixed-question-tests.md](ROADMAP/funsheep-custom-fixed-question-tests.md) | Planning |
-| 3 | Confidence-Based Scoring (Don't Know / Not Sure / I Know) | Learning Engine | [ROADMAP/confidence-based-scoring.md](ROADMAP/confidence-based-scoring.md) | Research & Proposal |
+| 1 | **Exam Simulation — full timed test with pacing debrief (4th test type)** | Learning Engine | [ROADMAP/funsheep-exam-simulation.md](ROADMAP/funsheep-exam-simulation.md) | **Strategy & Roadmap** |
+| 2 | Readiness by Topic — three UX states + teacher/parent views | Learning Engine | [ROADMAP/funsheep-readiness-by-topic.md](ROADMAP/funsheep-readiness-by-topic.md) | Planning |
+| 3 | Custom Fixed-Question Tests | Learning Engine | [ROADMAP/funsheep-custom-fixed-question-tests.md](ROADMAP/funsheep-custom-fixed-question-tests.md) | Planning |
+| 4 | Confidence-Based Scoring (Don't Know / Not Sure / I Know) | Learning Engine | [ROADMAP/confidence-based-scoring.md](ROADMAP/confidence-based-scoring.md) | Research & Proposal |
 | 4 | Study References — inline practice references + Readiness Study Hub | Learning Engine | [ROADMAP/funsheep-study-references.md](ROADMAP/funsheep-study-references.md) | Planning |
 | 5 | AI-Scored Freeform Grading — 0–10 rubric scoring with explanation for short-answer/free-response | Learning Engine | [ROADMAP/funsheep-scored-freeform-grading.md](ROADMAP/funsheep-scored-freeform-grading.md) | Planning |
 | 6 | Essay Tests — exam-specific rubric grading, auto-save, model responses (AP, GRE, LSAT, Bar, ACT) | Learning Engine | [ROADMAP/funsheep-essay-tests.md](ROADMAP/funsheep-essay-tests.md) | Planning |
