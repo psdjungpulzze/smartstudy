@@ -157,13 +157,32 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   # --- Scrape a single source ---
 
+  @binary_extensions ~w(.pdf .doc .docx .ppt .pptx .xls .xlsx .zip .mp4 .mp3 .wav .png .jpg .jpeg .gif .svg)
+
+  defp binary_url?(url) when is_binary(url) do
+    path = URI.parse(url).path || ""
+    lower = String.downcase(path)
+    Enum.any?(@binary_extensions, &String.ends_with?(lower, &1))
+  end
+
+  defp binary_url?(_), do: false
+
+  defp safe_slice(text, max) when is_binary(text) do
+    if String.valid?(text), do: String.slice(text, 0, max), else: ""
+  end
+
   defp scrape_and_extract(source, course) do
+    if binary_url?(source.url) do
+      Logger.debug("[Scraper] Skipping binary URL: #{source.url}")
+      Content.update_discovered_source(source, %{status: "skipped"})
+      0
+    else
     Content.update_discovered_source(source, %{status: "scraping"})
 
     case fetch_page(source.url) do
       {:ok, text} ->
         Content.update_discovered_source(source, %{
-          scraped_text: String.slice(text, 0, @max_page_size),
+          scraped_text: safe_slice(text, @max_page_size),
           content_size_bytes: byte_size(text),
           status: "scraped"
         })
@@ -199,6 +218,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         Logger.warning("[Scraper] Failed to fetch #{source.url}: #{inspect(reason)}")
         Content.update_discovered_source(source, %{status: "failed"})
         0
+    end
     end
   end
 

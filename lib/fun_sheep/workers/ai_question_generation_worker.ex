@@ -960,12 +960,15 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   defp finalize_course(course_id, new_count) do
     course = Courses.get_course!(course_id)
-    total = Questions.count_questions_by_course(course_id)
+    passed = Questions.count_questions_by_course(course_id)
     pending = Questions.count_pending_by_course(course_id)
 
     {status, step} =
       cond do
-        total == 0 ->
+        passed == 0 and pending == 0 ->
+          # Truly no questions exist — generation produced nothing at all.
+          # (Do NOT fire this when questions are pending: they were just inserted
+          # and haven't been validated yet, so `passed` will be 0 temporarily.)
           Logger.error(
             "[AIGen] Course #{course_id}: AI generation produced 0 questions (#{new_count} new)"
           )
@@ -974,26 +977,20 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
            "Question generation failed — AI service unavailable. Please try again later."}
 
         pending == 0 ->
-          # No pending questions (either new_count == 0 or all newly inserted
-          # questions were immediately validated). Don't re-enter "validating"
-          # — that would trap the course forever if validation never fires.
-          # If the course was already "ready", keep it; otherwise flip to "ready"
-          # now that there's nothing left to validate.
+          # No pending questions — all existing questions are already validated.
           if course.processing_status == "ready" do
-            {"ready", "#{total} questions ready"}
+            {"ready", "#{passed} questions ready"}
           else
             Logger.info(
               "[AIGen] Course #{course_id}: 0 pending after generation (#{new_count} new), marking ready"
             )
 
-            {"ready", "#{total} questions ready"}
+            {"ready", "#{passed} questions ready"}
           end
 
         true ->
-          # Don't flip to ready yet — validation worker will do that once every
-          # pending question has a verdict. Stay in "validating" so the UI can
-          # reflect the extra step and the user isn't shown unvalidated data.
-          {"validating", "Validating #{total} generated questions..."}
+          # Pending questions exist — validation worker will flip to ready once done.
+          {"validating", "Validating #{pending} generated questions..."}
       end
 
     Courses.update_course(course, %{
@@ -1008,7 +1005,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
        %{
          status: status,
          step: step,
-         questions_extracted: total
+         questions_extracted: passed + pending
        }}
     )
   end
