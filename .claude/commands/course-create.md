@@ -69,12 +69,14 @@ If a textbook URL is provided, proceed to **Step 1a** before continuing to Step 
 - Continue without a textbook — log a warning but do not abort course creation
 - Omit the `textbook` key from the spec entirely
 
-### Step 2 — Check for an existing playbook profile
+### Step 2 — Check for an existing embedded profile
 
-Read `docs/playbooks/standardized-test-course.md`.
+Check the **Known Test Profiles** section at the bottom of this file.
 
-- If a profile for the given test name exists in that file, skip to Step 4 using the profile data.
-- If no profile exists, proceed to Step 3.
+- If a profile for the requested test name exists there, use those COURSE_SPEC JSON objects directly — skip to Step 5.
+- If no profile exists, proceed to Step 3 to research the test and Step 4 to build the spec.
+
+> Note: If a textbook URL was provided (Step 1a), inject the resolved `textbook` object into each spec before running (it is omitted from the embedded profiles).
 
 ### Step 3 — Research the test (only when no profile exists)
 
@@ -228,17 +230,226 @@ After all tasks complete, print a summary:
 
 ## Known Test Profiles
 
-Check `docs/playbooks/standardized-test-course.md` for pre-researched profiles before using WebSearch.
+The following profiles are fully researched and ready to use. When a test below is requested, **use these specs directly — skip Steps 3 and 4.** Do not re-research a test that already has a profile.
 
-Currently profiled:
-- SAT (see `priv/repo/seeds/sat_courses.exs` for the existing implementation)
+Specs are shown pretty-printed for readability. Compact to a single line before passing to the Mix task (remove all newlines and extra spaces inside the JSON string).
 
-Tests needing profiling (use WebSearch if these are requested):
-- ACT (Math, English, Reading, Science)
-- GRE (Verbal Reasoning, Quantitative Reasoning)
-- GMAT (Verbal, Quantitative, Integrated Reasoning)
-- LSAT (Logical Reasoning, Analytical Reasoning, Reading Comprehension)
-- MCAT (Biology/Biochemistry, C/P, CARS, Psych/Soc)
-- AP (varies by subject — check College Board)
-- IB (varies by subject and HL/SL)
-- HSC (varies by state and subject)
+If a textbook URL was provided by the user, inject the `textbook` object (resolved in Step 1a) into each spec before running.
+
+---
+
+### SAT (Digital SAT 2024+)
+
+Two courses: **SAT Math** and **SAT Reading & Writing**. Run Math first, then RW with the bundle appended.
+
+The Digital SAT is adaptive (multistage): two modules per section, with Module 2 difficulty calibrated to Module 1 performance. All MCQ use 4 answer choices (A–D). Some Math questions are student-produced response (no answer choices).
+
+**Score range:** 200–800 per section, 400–1600 composite.
+
+#### Course 1 — SAT Math
+
+```json
+{
+  "name": "SAT Math",
+  "test_type": "sat",
+  "subject": "mathematics",
+  "grades": ["10", "11", "12", "College"],
+  "description": "Complete Digital SAT Math preparation covering all four content domains. Adaptive practice identifies and targets your weak areas across Algebra, Advanced Math, Problem-Solving, and Geometry.",
+  "price_cents": 2900,
+  "currency": "usd",
+  "chapters": [
+    {
+      "name": "Algebra",
+      "sections": [
+        "Linear Equations in One Variable",
+        "Linear Equations in Two Variables",
+        "Linear Functions and Graphs",
+        "Systems of Two Linear Equations",
+        "Linear Inequalities",
+        "Word Problems: Setting Up Equations"
+      ]
+    },
+    {
+      "name": "Advanced Math",
+      "sections": [
+        "Quadratic Equations — Factoring",
+        "Quadratic Equations — Completing the Square",
+        "Quadratic Equations — Quadratic Formula",
+        "Quadratic Functions — Vertex and Axis of Symmetry",
+        "Polynomial Functions",
+        "Exponential Functions and Growth",
+        "Function Notation and Composition",
+        "Radical and Absolute Value Functions"
+      ]
+    },
+    {
+      "name": "Problem-Solving & Data Analysis",
+      "sections": [
+        "Ratios, Rates, and Proportions",
+        "Percentages",
+        "Unit Conversion",
+        "Statistics — Central Tendency",
+        "Statistics — Spread and Distribution",
+        "Two-Way Tables",
+        "Probability",
+        "Data Interpretation — Graphs and Charts"
+      ]
+    },
+    {
+      "name": "Geometry & Trigonometry",
+      "sections": [
+        "Lines and Angles",
+        "Triangle Properties",
+        "Area and Perimeter",
+        "Circles — Arc, Sector, Central Angle",
+        "Volume",
+        "Pythagorean Theorem",
+        "Right Triangle Trigonometry",
+        "Unit Circle and Special Angles"
+      ]
+    }
+  ],
+  "exam_simulation": {
+    "time_limit_minutes": 70,
+    "sections": [
+      {
+        "name": "Module 1",
+        "question_type": "multiple_choice",
+        "count": 22,
+        "time_limit_minutes": 35
+      },
+      {
+        "name": "Module 2",
+        "question_type": "multiple_choice",
+        "count": 22,
+        "time_limit_minutes": 35
+      }
+    ]
+  },
+  "score_predictor_weights": {
+    "algebra": 0.35,
+    "advanced_math": 0.35,
+    "problem_solving_data_analysis": 0.15,
+    "geometry_trigonometry": 0.15
+  },
+  "generation_config": {
+    "prompt_context": "Digital SAT Math — adaptive multistage exam, 44 questions across two 22-question modules (35 min each), 70 minutes total, calculator permitted throughout. Questions cover Algebra (35%), Advanced Math (35%), Problem-Solving and Data Analysis (15%), and Geometry and Trigonometry (15%). Most questions are 4-option multiple choice (A–D); approximately 20% are student-produced response with no answer choices.",
+    "validation_rules": {
+      "mcq_option_count": 4,
+      "answer_labels": ["A", "B", "C", "D"]
+    }
+  }
+}
+```
+
+#### Course 2 — SAT Reading & Writing (with bundle)
+
+```json
+{
+  "name": "SAT Reading & Writing",
+  "test_type": "sat",
+  "subject": "english_language",
+  "grades": ["10", "11", "12", "College"],
+  "description": "Complete Digital SAT Reading & Writing preparation covering all four content domains. Adaptive practice sharpens comprehension, rhetoric, and grammar across short, focused passages.",
+  "price_cents": 2900,
+  "currency": "usd",
+  "chapters": [
+    {
+      "name": "Craft & Structure",
+      "sections": [
+        "Words in Context — Meaning",
+        "Words in Context — Tone and Connotation",
+        "Text Structure and Purpose",
+        "Cross-Text Connections"
+      ]
+    },
+    {
+      "name": "Information & Ideas",
+      "sections": [
+        "Central Idea and Details",
+        "Evidence — Textual Support",
+        "Evidence — Graphic and Data Integration",
+        "Inferences"
+      ]
+    },
+    {
+      "name": "Expression of Ideas",
+      "sections": [
+        "Rhetorical Goals and Purpose",
+        "Transitions",
+        "Parallel Structure and Style"
+      ]
+    },
+    {
+      "name": "Standard English Conventions",
+      "sections": [
+        "Punctuation — Commas",
+        "Punctuation — Semicolons and Colons",
+        "Punctuation — Dashes and Parentheses",
+        "Subject-Verb Agreement",
+        "Pronoun-Antecedent Agreement",
+        "Pronoun Case",
+        "Verb Tense and Consistency",
+        "Modifier Placement",
+        "Run-Ons, Fragments, and Sentence Boundaries"
+      ]
+    }
+  ],
+  "exam_simulation": {
+    "time_limit_minutes": 64,
+    "sections": [
+      {
+        "name": "Module 1",
+        "question_type": "multiple_choice",
+        "count": 27,
+        "time_limit_minutes": 32
+      },
+      {
+        "name": "Module 2",
+        "question_type": "multiple_choice",
+        "count": 27,
+        "time_limit_minutes": 32
+      }
+    ]
+  },
+  "score_predictor_weights": {
+    "craft_and_structure": 0.28,
+    "information_and_ideas": 0.26,
+    "expression_of_ideas": 0.20,
+    "standard_english_conventions": 0.26
+  },
+  "generation_config": {
+    "prompt_context": "Digital SAT Reading & Writing — adaptive multistage exam, 54 questions across two 27-question modules (32 min each), 64 minutes total. All questions are 4-option multiple choice (A–D). Each question is paired with a short passage (25–150 words). Content domains: Craft and Structure (28%), Information and Ideas (26%), Expression of Ideas (20%), Standard English Conventions (26%).",
+    "validation_rules": {
+      "mcq_option_count": 4,
+      "answer_labels": ["A", "B", "C", "D"]
+    }
+  },
+  "bundle": {
+    "name": "SAT Full Prep Bundle",
+    "description": "Complete Digital SAT preparation — Math and Reading & Writing. Adaptive practice across all eight content domains, two full-length exam simulations, and AI-powered explanations. Save vs. buying separately.",
+    "price_cents": 4900,
+    "currency": "usd",
+    "course_names": ["SAT Math", "SAT Reading & Writing"]
+  }
+}
+```
+
+---
+
+### Tests Without Embedded Profiles
+
+Use **Steps 3 and 4** (WebSearch + spec construction) for these tests:
+
+| Test | Courses to Create |
+|------|-------------------|
+| ACT | ACT Math, ACT English, ACT Reading, ACT Science (+ bundle) |
+| GRE | GRE Verbal Reasoning, GRE Quantitative Reasoning (+ bundle) |
+| GMAT | GMAT Verbal, GMAT Quantitative, GMAT Integrated Reasoning (+ bundle) |
+| LSAT | LSAT Logical Reasoning, LSAT Analytical Reasoning, LSAT Reading Comprehension (+ bundle) |
+| MCAT | MCAT Biology/Biochemistry, MCAT C/P, MCAT CARS, MCAT Psych/Soc (+ bundle) |
+| AP | Varies by subject — check College Board for current exam format |
+| IB | Varies by subject and HL/SL level |
+| HSC | Varies by state and subject |
+
+Once researched and validated, add new profiles to this file following the SAT format above.
