@@ -216,13 +216,13 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
               <table class="w-full text-sm min-w-[900px]">
                 <thead class="bg-[#F5F5F7] dark:bg-[#1C1C1E] text-[#8E8E93] uppercase text-xs">
                   <tr>
-                    <th class="text-left px-4 py-3">Course</th>
-                    <th class="text-left px-4 py-3">Status</th>
-                    <th class="text-right px-4 py-3">Questions</th>
-                    <th class="text-right px-4 py-3">Coverage</th>
-                    <th class="text-right px-4 py-3">Price</th>
-                    <th class="text-left px-4 py-3">Published</th>
-                    <th class="text-right px-4 py-3">Actions</th>
+                    <th class="text-left px-4 py-3 whitespace-nowrap">Course</th>
+                    <th class="text-left px-4 py-3 whitespace-nowrap">Status</th>
+                    <th class="text-right px-4 py-3 whitespace-nowrap">Questions</th>
+                    <th class="text-right px-4 py-3 whitespace-nowrap">Coverage</th>
+                    <th class="text-right px-4 py-3 whitespace-nowrap">Price</th>
+                    <th class="text-left px-4 py-3 whitespace-nowrap">Published</th>
+                    <th class="text-right px-4 py-3 whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
