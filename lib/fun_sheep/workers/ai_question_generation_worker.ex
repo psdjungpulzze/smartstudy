@@ -394,7 +394,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   defp build_prompt(mode, course, chapter, context, count, difficulty, section_name) do
     subject = course.subject || course.name
-    grade = course.grade
+    grade = List.first(course.grades || []) || ""
     chapter_name = if chapter, do: chapter.name, else: "all chapters"
 
     # When a section (concept) is specified, scope the prompt to that concept.

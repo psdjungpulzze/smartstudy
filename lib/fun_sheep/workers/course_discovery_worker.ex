@@ -121,7 +121,7 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
   defp discover_chapters(course, source_context) do
     textbook_name = get_textbook_name(course)
     subject = course.subject
-    grade = course.grade
+    grade = List.first(course.grades || []) || ""
 
     broadcast(course.id, %{
       sub_step: "Building curriculum analysis for #{subject} (Grade #{grade})..."

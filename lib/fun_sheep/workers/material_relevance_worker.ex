@@ -83,7 +83,7 @@ defmodule FunSheep.Workers.MaterialRelevanceWorker do
     # Build keyword lists from course metadata
     subject_keywords = build_subject_keywords(course.subject)
     chapter_keywords = build_chapter_keywords(course.chapters)
-    grade_keywords = build_grade_keywords(course.grade)
+    grade_keywords = build_grade_keywords(List.first(course.grades || []) || "")
 
     # Score each keyword category
     subject_hits = count_hits(text, subject_keywords)
@@ -115,7 +115,7 @@ defmodule FunSheep.Workers.MaterialRelevanceWorker do
 
         true ->
           {"irrelevant",
-           "This material doesn't appear to match #{course.subject} (Grade #{course.grade}). " <>
+           "This material doesn't appear to match #{course.subject} (Grade #{Enum.join(course.grades || [], ", ")}). " <>
              "It may have been uploaded to the wrong course."}
       end
 

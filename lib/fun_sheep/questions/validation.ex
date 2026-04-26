@@ -208,7 +208,7 @@ defmodule FunSheep.Questions.Validation do
       |> Enum.map_join("\n\n", fn {q, idx} -> format_question(idx, q) end)
 
     """
-    COURSE: #{course.name} (#{course.subject}, grade #{course.grade})
+    COURSE: #{course.name} (#{course.subject}, grade #{Enum.join(course.grades || [], ", ")})
 
     AVAILABLE CHAPTERS:
     #{chapters_block}

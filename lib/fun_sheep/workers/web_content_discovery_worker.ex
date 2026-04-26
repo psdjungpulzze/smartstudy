@@ -52,7 +52,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     course = Courses.get_course_with_chapters!(course_id)
 
     Logger.info(
-      "[WebDiscovery] Starting content discovery for #{course.subject} (#{course.grade})"
+      "[WebDiscovery] Starting content discovery for #{course.subject} (grade #{Enum.join(course.grades || [], ", ")})"
     )
 
     Courses.update_course(course, %{
@@ -299,7 +299,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   defp build_search_queries(course) do
     subject = course.subject || course.name
-    grade = course.grade
+    grade = List.first(course.grades || []) || ""
     textbook_name = get_textbook_name(course)
     chapter_names = Enum.map(course.chapters, & &1.name) |> Enum.take(5)
 

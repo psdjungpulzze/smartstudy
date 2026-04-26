@@ -536,7 +536,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
 
   defp discover_chapters_from_materials(course, ocr_text, filename_chapters) do
     subject = course.subject
-    grade = course.grade
+    grade = List.first(course.grades || []) || ""
 
     truncated_text =
       if String.length(ocr_text) > @prompt_char_budget do

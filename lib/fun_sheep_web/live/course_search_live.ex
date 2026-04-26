@@ -638,7 +638,7 @@ defmodule FunSheepWeb.CourseSearchLive do
             {@course.subject}
           </span>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-cyan-50 text-cyan-600">
-            Grade {@course.grade}
+            Grade {Enum.join(@course.grades || [], ", ")}
           </span>
           <span
             :if={@course.school}

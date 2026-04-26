@@ -114,7 +114,7 @@ defmodule FunSheep.Workers.SectionRegenerationWorker do
       end
 
     """
-    Course: #{course.subject}, Grade #{course.grade}#{textbook}
+    Course: #{course.subject}, Grade #{Enum.join(course.grades || [], ", ")}#{textbook}
     Chapter: #{chapter.name}
 
     List 5-10 specific concepts or sections that belong in this chapter.
