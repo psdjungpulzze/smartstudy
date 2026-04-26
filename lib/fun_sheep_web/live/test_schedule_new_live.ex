@@ -424,14 +424,14 @@ defmodule FunSheepWeb.TestScheduleNewLive do
           <.icon name="hero-arrow-left" class="w-6 h-6" />
         </.link>
         <div>
-          <h1 class="text-3xl font-bold text-[#1C1C1E]">
+          <h1 class="text-2xl sm:text-3xl font-bold text-[#1C1C1E]">
             {if @live_action == :edit, do: "Edit Test", else: "New Test"}
           </h1>
           <p class="text-sm text-[#8E8E93]">{@course.name}</p>
         </div>
       </div>
 
-      <div class="bg-white rounded-2xl shadow-md p-8">
+      <div class="bg-white rounded-2xl shadow-md p-4 sm:p-8">
         <%!-- Test type toggle (new tests only) --%>
         <div :if={@live_action == :new} class="flex rounded-xl bg-[#F5F5F7] p-1 mb-6">
           <button
@@ -439,7 +439,7 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             phx-click="set_test_type"
             phx-value-type="adaptive"
             class={[
-              "flex-1 py-2 text-sm font-medium rounded-lg transition-colors",
+              "flex-1 py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors",
               if(@test_type == :adaptive,
                 do: "bg-white shadow-sm text-[#1C1C1E]",
                 else: "text-[#8E8E93] hover:text-[#1C1C1E]"
@@ -453,7 +453,7 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             phx-click="set_test_type"
             phx-value-type="custom"
             class={[
-              "flex-1 py-2 text-sm font-medium rounded-lg transition-colors",
+              "flex-1 py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors",
               if(@test_type == :custom,
                 do: "bg-white shadow-sm text-[#1C1C1E]",
                 else: "text-[#8E8E93] hover:text-[#1C1C1E]"
@@ -643,17 +643,17 @@ defmodule FunSheepWeb.TestScheduleNewLive do
             </div>
           </div>
 
-          <div class="flex items-center justify-end gap-4 pt-4">
+          <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4">
             <.link
               navigate={~p"/courses/#{@course_id}/tests"}
-              class="px-6 py-2 border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
+              class="px-6 py-2.5 sm:py-2 text-center border border-[#E5E5EA] text-[#1C1C1E] font-medium rounded-full hover:bg-[#F5F5F7] transition-colors"
             >
               Cancel
             </.link>
             <button
               type="submit"
               phx-disable-with="Saving..."
-              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2 rounded-full shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-6 py-2.5 sm:py-2 rounded-full shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {cond do
                 @live_action == :edit -> "Save Changes"
@@ -666,7 +666,7 @@ defmodule FunSheepWeb.TestScheduleNewLive do
       </div>
 
       <%!-- Test Format (adaptive only, optional) --%>
-      <div :if={@test_type == :adaptive} class="bg-white rounded-2xl shadow-md p-8 mt-6">
+      <div :if={@test_type == :adaptive} class="bg-white rounded-2xl shadow-md p-4 sm:p-8 mt-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-1">Test Format</h2>
         <p class="text-sm text-[#8E8E93] mb-4">
           Paste the format you gave students — you can parse it into sections after saving

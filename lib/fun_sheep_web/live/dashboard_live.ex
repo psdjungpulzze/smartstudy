@@ -334,7 +334,7 @@ defmodule FunSheepWeb.DashboardLive do
       <%!-- ── Greeting + Sheep ── --%>
       <div class="flex items-center justify-between gap-3 animate-slide-up">
         <div class="min-w-0">
-          <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 truncate">
+          <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 break-words">
             {greeting()}, {@current_user["display_name"]}!
           </h1>
           <p class="text-gray-500 font-medium text-sm mt-0.5">
