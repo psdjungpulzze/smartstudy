@@ -177,48 +177,48 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       Content.update_discovered_source(source, %{status: "skipped"})
       0
     else
-    Content.update_discovered_source(source, %{status: "scraping"})
+      Content.update_discovered_source(source, %{status: "scraping"})
 
-    case fetch_page(source.url) do
-      {:ok, text} ->
-        Content.update_discovered_source(source, %{
-          scraped_text: safe_slice(text, @max_page_size),
-          content_size_bytes: byte_size(text),
-          status: "scraped"
-        })
+      case fetch_page(source.url) do
+        {:ok, text} ->
+          Content.update_discovered_source(source, %{
+            scraped_text: safe_slice(text, @max_page_size),
+            content_size_bytes: byte_size(text),
+            status: "scraped"
+          })
 
-        # Extract questions from the scraped text
-        questions = extract_questions_from_text(text, course, source)
+          # Extract questions from the scraped text
+          questions = extract_questions_from_text(text, course, source)
 
-        # Insert questions
-        grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
+          # Insert questions
+          grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
 
-        {inserted, inserted_ids} =
-          Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
-            case insert_question(q, course, grounding_ref) do
-              {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
-              {:error, _} -> {count, ids}
-            end
-          end)
+          {inserted, inserted_ids} =
+            Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
+              case insert_question(q, course, grounding_ref) do
+                {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
+                {:error, _} -> {count, ids}
+              end
+            end)
 
-        FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
-          course_id: course.id
-        )
+          FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
+            course_id: course.id
+          )
 
-        FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
+          FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
 
-        Content.update_discovered_source(source, %{
-          status: "processed",
-          questions_extracted: inserted
-        })
+          Content.update_discovered_source(source, %{
+            status: "processed",
+            questions_extracted: inserted
+          })
 
-        inserted
+          inserted
 
-      {:error, reason} ->
-        Logger.warning("[Scraper] Failed to fetch #{source.url}: #{inspect(reason)}")
-        Content.update_discovered_source(source, %{status: "failed"})
-        0
-    end
+        {:error, reason} ->
+          Logger.warning("[Scraper] Failed to fetch #{source.url}: #{inspect(reason)}")
+          Content.update_discovered_source(source, %{status: "failed"})
+          0
+      end
     end
   end
 
@@ -584,8 +584,8 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       textbook_names = Enum.map(textbook_sources, & &1.title) |> Enum.join(", ")
 
       # Scale per-chapter count by source richness — more textbooks discovered
-      # means more curricular coverage to draw from. Floor at 5, cap at 20.
-      per_chapter = textbook_sources |> length() |> Kernel.+(4) |> min(20) |> max(5)
+      # means more curricular coverage to draw from. Floor at 10, cap at 30.
+      per_chapter = textbook_sources |> length() |> Kernel.+(10) |> min(30) |> max(10)
 
       Logger.info(
         "[Scraper] Generating #{per_chapter} questions/chapter from known textbooks: #{textbook_names}"

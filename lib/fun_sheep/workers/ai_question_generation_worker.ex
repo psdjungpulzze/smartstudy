@@ -45,6 +45,10 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
 
   @system_prompt "You are an expert educational question writer. Generate practice questions based on the subject, grade, and instructions provided. Always return ONLY a valid JSON array of question objects — no prose, no markdown fences."
 
+  # Minimum questions per chapter after initial generation. Chapters below this
+  # get a targeted top-off job enqueued before the course moves to "validating".
+  @min_questions_per_chapter 15
+
   @llm_opts %{
     model: "gpt-4o-mini",
     max_tokens: 4_000,
@@ -94,96 +98,93 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       Logger.info("[AIGen] Skipped cancelled course #{course_id}")
       :ok
     else
+      # For curriculum mode without a specific chapter, fan out one job per
+      # chapter so large courses (20+ chapters) don't exhaust a single Oban
+      # job's execution window. Each chapter job runs independently, retries
+      # independently, and calls finalize_course when it completes.
+      if mode == "from_curriculum" and is_nil(chapter_id) and course.chapters != [] do
+        chapter_count = length(course.chapters)
+        # Each chapter gets at least @min_questions_per_chapter + 5 so the
+        # top-off check rarely needs to fire. The div(count, chapter_count)
+        # path lets callers request more if they want, but the floor is the
+        # minimum + buffer.
+        per_chapter = max(div(count, chapter_count), @min_questions_per_chapter + 5)
 
-    # For curriculum mode without a specific chapter, generate per-chapter
-    # so questions get properly tagged to their topic
-    if mode == "from_curriculum" and is_nil(chapter_id) and course.chapters != [] do
-      per_chapter = max(div(count, length(course.chapters)), 3)
-      chapter_count = length(course.chapters)
+        Logger.info(
+          "[AIGen] Fanning out #{chapter_count} per-chapter jobs (#{per_chapter} each) for course #{course_id}"
+        )
 
-      total_inserted =
-        course.chapters
-        |> Enum.with_index(1)
-        |> Enum.reduce(0, fn {ch, idx}, acc ->
-          broadcast(course_id, %{
-            sub_step:
-              "Generating questions for chapter #{idx}/#{chapter_count}: #{String.slice(ch.name, 0, 40)}..."
-          })
+        broadcast(course_id, %{
+          sub_step: "Generating questions for #{chapter_count} chapters..."
+        })
 
-          context = build_context(course, ch, args)
-          prompt = build_prompt(mode, course, ch, context, per_chapter, difficulty)
-
-          case send_to_ai(prompt, course, ch) do
-            {:ok, questions} ->
-              inserted =
-                insert_questions(questions, course, ch, context[:figures] || [],
-                  mode: mode,
-                  grounding_material_ids: context[:grounding_material_ids] || []
-                )
-
-              broadcast(course_id, %{
-                sub_step: "Created #{inserted} questions for #{String.slice(ch.name, 0, 40)}"
-              })
-
-              acc + inserted
-
-            {:error, _reason} ->
-              acc
-          end
+        Enum.each(course.chapters, fn ch ->
+          __MODULE__.enqueue(course_id, chapter_id: ch.id, count: per_chapter, mode: mode)
         end)
 
-      Logger.info(
-        "[AIGen] Inserted #{total_inserted} curriculum questions across #{length(course.chapters)} chapters"
-      )
+        Courses.update_course(
+          Courses.get_course!(course_id),
+          %{
+            processing_status: "generating",
+            processing_step: "Generating questions for #{chapter_count} chapters..."
+          }
+        )
 
-      finalize_course(course_id, total_inserted)
-      :ok
-    else
-      chapter = if chapter_id, do: Courses.get_chapter!(chapter_id)
-      progress_event = regeneration_base_event(course_id, chapter, count)
+        :ok
+      else
+        chapter = if chapter_id, do: Courses.get_chapter!(chapter_id)
+        progress_event = regeneration_base_event(course_id, chapter, count)
 
-      progress_event = maybe_phase(progress_event, :preparing, "Preparing chapter context", 1)
-      context = build_context(course, chapter, args)
-      prompt = build_prompt(mode, course, chapter, context, count, difficulty, section_name)
+        progress_event = maybe_phase(progress_event, :preparing, "Preparing chapter context", 1)
+        context = build_context(course, chapter, args)
+        prompt = build_prompt(mode, course, chapter, context, count, difficulty, section_name)
 
-      progress_event = maybe_phase(progress_event, :generating, "Generating questions with AI", 2)
+        progress_event =
+          maybe_phase(progress_event, :generating, "Generating questions with AI", 2)
 
-      case send_to_ai(prompt, course, chapter) do
-        {:ok, questions} ->
-          progress_event = maybe_phase(progress_event, :saving, "Saving questions", 3)
+        case send_to_ai(prompt, course, chapter) do
+          {:ok, questions} ->
+            progress_event = maybe_phase(progress_event, :saving, "Saving questions", 3)
 
-          inserted =
-            insert_questions(questions, course, chapter, context[:figures] || [],
-              progress: progress_event,
-              mode: mode,
-              grounding_material_ids: context[:grounding_material_ids] || []
+            inserted =
+              insert_questions(questions, course, chapter, context[:figures] || [],
+                progress: progress_event,
+                mode: mode,
+                grounding_material_ids: context[:grounding_material_ids] || []
+              )
+
+            Logger.info(
+              "[AIGen] Inserted #{inserted} AI-generated questions for course #{course_id}"
             )
 
-          Logger.info(
-            "[AIGen] Inserted #{inserted} AI-generated questions for course #{course_id}"
-          )
+            if progress_event, do: Progress.succeeded(progress_event, "questions", inserted)
 
-          if progress_event, do: Progress.succeeded(progress_event, "questions", inserted)
+            # After from_curriculum per-chapter generation, top off the chapter
+            # if AI rejections left it below the minimum. Skip for top-off jobs
+            # themselves (args["top_off"] == true) to prevent infinite loops.
+            if mode == "from_curriculum" and chapter and not args["top_off"] do
+              maybe_top_off_chapter(course_id, chapter, mode)
+            end
 
-          finalize_course(course_id, inserted)
-          :ok
+            finalize_course(course_id, inserted)
+            :ok
 
-        {:error, reason} ->
-          Logger.error("[AIGen] Failed to generate questions: #{inspect(reason)}")
+          {:error, reason} ->
+            Logger.error("[AIGen] Failed to generate questions: #{inspect(reason)}")
 
-          if progress_event do
-            Progress.failed(
-              progress_event,
-              :ai_unavailable,
-              "AI service unavailable — please try again."
-            )
-          end
+            if progress_event do
+              Progress.failed(
+                progress_event,
+                :ai_unavailable,
+                "AI service unavailable — please try again."
+              )
+            end
 
-          # Still finalize so the course doesn't stay stuck in "generating"
-          finalize_course(course_id, 0)
-          {:error, reason}
+            # Still finalize so the course doesn't stay stuck in "generating"
+            finalize_course(course_id, 0)
+            {:error, reason}
+        end
       end
-    end
     end
   end
 
@@ -229,6 +230,10 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
       # Difficulty-targeted generation: produces questions at exactly this
       # level to re-fill a depleted {section, difficulty} bucket.
       |> maybe_put(:difficulty, opts[:difficulty])
+      # Internal flag: marks a top-off job so it doesn't recursively enqueue
+      # another top-off if it also ends up generating fewer questions than
+      # ideal (avoids infinite loop).
+      |> maybe_put(:top_off, opts[:top_off])
 
     args
     |> __MODULE__.new()
@@ -954,21 +959,54 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   defp normalize_difficulty("hard"), do: :hard
   defp normalize_difficulty(_), do: :medium
 
+  # Check a single chapter after its per-chapter job completes. If AI
+  # rejections left it below @min_questions_per_chapter, enqueue one top-off
+  # job (flagged top_off: true so it doesn't recurse).
+  defp maybe_top_off_chapter(course_id, chapter, mode) do
+    current =
+      from(q in Question,
+        where:
+          q.course_id == ^course_id and
+            q.chapter_id == ^chapter.id and
+            q.validation_status != :failed,
+        select: count(q.id)
+      )
+      |> Repo.one()
+      |> Kernel.||(0)
+
+    if current < @min_questions_per_chapter do
+      needed = @min_questions_per_chapter - current + 5
+
+      Logger.info(
+        "[AIGen] Top-off '#{String.slice(chapter.name, 0, 50)}': #{current} now, requesting #{needed} more"
+      )
+
+      __MODULE__.enqueue(course_id,
+        chapter_id: chapter.id,
+        count: needed,
+        mode: mode,
+        top_off: true
+      )
+    end
+  end
+
   defp broadcast(course_id, data) do
     Phoenix.PubSub.broadcast(FunSheep.PubSub, "course:#{course_id}", {:processing_update, data})
   end
 
   defp finalize_course(course_id, new_count) do
     course = Courses.get_course!(course_id)
-    passed = Questions.count_questions_by_course(course_id)
+    # Counts passed + needs_review (both are student-visible per @student_visible)
+    visible = Questions.count_questions_by_course(course_id)
     pending = Questions.count_pending_by_course(course_id)
 
     {status, step} =
       cond do
-        passed == 0 and pending == 0 ->
-          # Truly no questions exist — generation produced nothing at all.
+        visible == 0 and pending == 0 ->
+          # Truly no questions exist — generation produced nothing at all, and
+          # every inserted question failed hard validation.
           # (Do NOT fire this when questions are pending: they were just inserted
-          # and haven't been validated yet, so `passed` will be 0 temporarily.)
+          # and haven't been validated yet, so `visible` will be 0 temporarily.)
           Logger.error(
             "[AIGen] Course #{course_id}: AI generation produced 0 questions (#{new_count} new)"
           )
@@ -979,13 +1017,13 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
         pending == 0 ->
           # No pending questions — all existing questions are already validated.
           if course.processing_status == "ready" do
-            {"ready", "#{passed} questions ready"}
+            {"ready", "#{visible} questions ready"}
           else
             Logger.info(
               "[AIGen] Course #{course_id}: 0 pending after generation (#{new_count} new), marking ready"
             )
 
-            {"ready", "#{passed} questions ready"}
+            {"ready", "#{visible} questions ready"}
           end
 
         true ->
@@ -1005,7 +1043,7 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
        %{
          status: status,
          step: step,
-         questions_extracted: passed + pending
+         questions_extracted: visible + pending
        }}
     )
   end
@@ -1131,9 +1169,19 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   end
 
   defp sat_difficulty_note(nil), do: "Mix of easy (30%), medium (40%), and hard (30%)."
-  defp sat_difficulty_note("easy"), do: "easy — SAT Module 1 baseline level. Recall or direct application of a single rule or formula."
-  defp sat_difficulty_note("medium"), do: "medium — SAT Module 1/2 mid-range. Apply a concept in a concrete context, one or two logical steps."
-  defp sat_difficulty_note("hard"), do: "hard — SAT Module 2 hardest tier. Multi-step reasoning, synthesis across sub-skills, non-obvious setup."
+
+  defp sat_difficulty_note("easy"),
+    do:
+      "easy — SAT Module 1 baseline level. Recall or direct application of a single rule or formula."
+
+  defp sat_difficulty_note("medium"),
+    do:
+      "medium — SAT Module 1/2 mid-range. Apply a concept in a concrete context, one or two logical steps."
+
+  defp sat_difficulty_note("hard"),
+    do:
+      "hard — SAT Module 2 hardest tier. Multi-step reasoning, synthesis across sub-skills, non-obvious setup."
+
   defp sat_difficulty_note(d), do: d
 
   defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)

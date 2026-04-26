@@ -47,8 +47,13 @@ defmodule FunSheep.Workers.QuestionExtractionWorker do
       # No materials uploaded — generate questions purely from course context
       # (subject, grade, chapter names). This is how we provide questions
       # even when students don't upload any files.
+      # Target 10 questions per chapter (minimum 60) so every chapter has
+      # meaningful coverage from the start.
+      chapter_count = length(course.chapters)
+      target_count = max(chapter_count * 10, 60)
+
       FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
-        count: 30,
+        count: target_count,
         mode: "from_curriculum"
       )
 

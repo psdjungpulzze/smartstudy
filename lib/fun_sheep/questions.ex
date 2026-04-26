@@ -23,11 +23,13 @@ defmodule FunSheep.Questions do
     Repo.all(Question)
   end
 
-  # Questions that are safe to show students: fully validated. Pending and
-  # needs_review are hidden so students never see an unvetted question; failed
-  # are hidden for obvious reasons. Admin queries should use the `_all`
-  # variants below.
-  @student_visible [:passed]
+  # Questions safe to show students. `passed` = fully validated; `needs_review`
+  # = flagged for optional human review but structurally sound (answer_correct
+  # and completeness both pass in the validator report). With auto-correction
+  # disabled, AI-generated questions land in `needs_review` by default, so
+  # excluding them would make all AI-generated courses empty for students.
+  # `failed` and `pending` remain hidden.
+  @student_visible [:passed, :needs_review]
 
   # North Star invariant I-1: a question enters adaptive flows only when it
   # carries a fine-grained skill tag (section_id set AND classification

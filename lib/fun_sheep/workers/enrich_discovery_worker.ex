@@ -239,7 +239,7 @@ defmodule FunSheep.Workers.EnrichDiscoveryWorker do
     Enum.each(chapter_ids, fn chapter_id ->
       FunSheep.Workers.AIQuestionGenerationWorker.enqueue(course_id,
         chapter_id: chapter_id,
-        count: 10,
+        count: 30,
         mode: "from_material"
       )
     end)
