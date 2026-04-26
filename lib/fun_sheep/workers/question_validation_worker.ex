@@ -100,6 +100,22 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       maybe_finalize_course(course_id)
       :ok
     else
+      # For SAT courses, run lightweight structural pre-validation before
+      # sending to the LLM validator. Questions that fail structural checks
+      # (wrong option count, empty stem, etc.) are marked :failed immediately
+      # with a clear reason — no LLM call needed, cheaper and faster.
+      course =
+        if course_id do
+          Repo.get(Course, course_id)
+        end
+
+      questions =
+        if course && course.catalog_test_type == "sat" do
+          pre_filter_sat_questions(questions, course)
+        else
+          questions
+        end
+
       batches = Enum.chunk_every(questions, @batch_size)
 
       # Track sub-batch outcomes so we can distinguish "partial success"
@@ -491,6 +507,159 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       :ok
     end
   end
+
+  # --- SAT structural pre-validation ---
+
+  # Filters a list of SAT questions by structural rules BEFORE the LLM validator runs.
+  # Questions that fail are marked :failed immediately; questions that pass are returned
+  # for the regular LLM-based validation flow.
+  #
+  # This is cheaper than sending malformed questions to the LLM, and the error
+  # messages are more actionable ("exactly 4 options required" vs. "completeness: fail").
+  defp pre_filter_sat_questions(questions, course) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Enum.filter(questions, fn q ->
+      case validate_sat_question(q, course) do
+        :ok ->
+          true
+
+        {:error, reason} ->
+          report = %{
+            "error" => "sat_structural_validation_failed",
+            "reason" => reason,
+            "marked_at" => DateTime.to_iso8601(now)
+          }
+
+          from(sq in Question, where: sq.id == ^q.id and sq.validation_status == :pending)
+          |> Repo.update_all(
+            set: [
+              validation_status: :failed,
+              validation_score: 0.0,
+              validation_report: report,
+              validated_at: now,
+              updated_at: now
+            ]
+          )
+
+          Logger.warning(
+            "[Validation] SAT pre-validation failed for question #{q.id} (course #{course.id}): #{reason}"
+          )
+
+          false
+      end
+    end)
+  end
+
+  @doc """
+  Validates structural rules for a single SAT question.
+  Returns `:ok` or `{:error, reason}`.
+
+  Rules applied:
+  - All SAT questions: question stem must not be empty
+  - MCQ: exactly 4 options present (A, B, C, D)
+  - MCQ: exactly 1 answer marked as correct (answer field must be A/B/C/D)
+  - Reading & Writing passage questions: passage between 10 and 200 words
+    (detected by presence of a blank-line separator in the stem)
+  - Numeric short-answer: answer must parse to a number
+  """
+  @spec validate_sat_question(Question.t(), Course.t()) :: :ok | {:error, String.t()}
+  def validate_sat_question(question, _course) do
+    with :ok <- check_non_empty_stem(question),
+         :ok <- check_mcq_options(question),
+         :ok <- check_mcq_answer(question),
+         :ok <- check_rw_passage_length(question),
+         :ok <- check_numeric_answer(question) do
+      :ok
+    end
+  end
+
+  defp check_non_empty_stem(question) do
+    stem = question.content || ""
+
+    if String.trim(stem) == "" do
+      {:error, "question stem is empty"}
+    else
+      :ok
+    end
+  end
+
+  defp check_mcq_options(%Question{question_type: :multiple_choice} = question) do
+    options = question.options || %{}
+    required_keys = ["A", "B", "C", "D"]
+    present_keys = Map.keys(options) |> Enum.map(&String.upcase/1) |> Enum.sort()
+
+    if Enum.sort(required_keys) == present_keys do
+      :ok
+    else
+      {:error, "MCQ must have exactly 4 options (A, B, C, D); found: #{inspect(present_keys)}"}
+    end
+  end
+
+  defp check_mcq_options(_question), do: :ok
+
+  defp check_mcq_answer(%Question{question_type: :multiple_choice} = question) do
+    answer = question.answer || ""
+
+    if String.upcase(String.trim(answer)) in ["A", "B", "C", "D"] do
+      :ok
+    else
+      {:error, "MCQ answer must be A, B, C, or D; got: #{inspect(answer)}"}
+    end
+  end
+
+  defp check_mcq_answer(_question), do: :ok
+
+  # For Reading & Writing questions: if the question stem contains a blank-line
+  # separator (passage + question pattern), verify the passage word count is
+  # between 10 and 200 words.
+  defp check_rw_passage_length(%Question{question_type: :multiple_choice} = question) do
+    content = question.content || ""
+
+    case String.split(content, ~r/\n\n+/, parts: 2) do
+      [passage, _question_stem] ->
+        word_count = passage |> String.split(~r/\s+/) |> length()
+
+        cond do
+          word_count < 10 ->
+            {:error, "Reading & Writing passage is too short (#{word_count} words; minimum 10)"}
+
+          word_count > 200 ->
+            {:error, "Reading & Writing passage is too long (#{word_count} words; maximum 200)"}
+
+          true ->
+            :ok
+        end
+
+      # No blank-line separator — single-stem question, no passage length to check
+      [_single_part] ->
+        :ok
+    end
+  end
+
+  defp check_rw_passage_length(_question), do: :ok
+
+  # For student-produced response (numeric short answer), validate the answer parses.
+  defp check_numeric_answer(%Question{question_type: :short_answer} = question) do
+    answer = String.trim(question.answer || "")
+
+    if answer == "" do
+      {:error, "numeric short-answer question has an empty answer"}
+    else
+      case Float.parse(answer) do
+        {_n, ""} ->
+          :ok
+
+        _ ->
+          case Integer.parse(answer) do
+            {_n, ""} -> :ok
+            _ -> {:error, "numeric short-answer answer '#{answer}' does not parse to a number"}
+          end
+      end
+    end
+  end
+
+  defp check_numeric_answer(_question), do: :ok
 
   defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

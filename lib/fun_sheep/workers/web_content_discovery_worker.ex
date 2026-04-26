@@ -264,6 +264,32 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   # --- Search Query Building ---
 
+  defp build_search_queries(%{catalog_test_type: "sat"} = course) do
+    # SAT courses use targeted, domain-specific search queries for each section.
+    # Generic queries ("grade X practice questions") produce irrelevant hits for
+    # standardised tests — we need College Board / Khan Academy / Albert sources
+    # scoped to each exact skill area instead.
+    course.chapters
+    |> Enum.flat_map(fn chapter ->
+      Enum.flat_map(chapter.sections || [], fn section ->
+        sat_search_queries(section.name, course.catalog_subject)
+      end)
+    end)
+    |> then(fn per_section ->
+      # Add course-level queries in case there are no sections yet
+      if per_section == [] do
+        [
+          {"digital SAT #{course.subject || course.name} practice questions", "question_bank"},
+          {"SAT #{course.subject || course.name} Khan Academy practice", "question_bank"},
+          {"College Board digital SAT #{course.subject || course.name} sample questions",
+           "practice_test"}
+        ]
+      else
+        per_section
+      end
+    end)
+  end
+
   defp build_search_queries(course) do
     subject = course.subject || course.name
     grade = course.grade
@@ -541,6 +567,41 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     |> String.replace(~r/^Chapter\s*\d+\s*[:\-]\s*/i, "")
     |> String.replace(~r/^Unit\s*\d+\s*[:\-]\s*/i, "")
     |> String.trim()
+  end
+
+  # --- SAT-specific query generation ---
+
+  # Generates 3 targeted search queries for a single SAT section name.
+  # Queries are scoped to official/trusted SAT prep sources (College Board,
+  # Khan Academy, Albert) to maximise the relevance of discovered content.
+  defp sat_search_queries(section_name, "mathematics") do
+    clean = clean_chapter_name(section_name)
+
+    [
+      {"SAT math practice questions #{clean}", "question_bank"},
+      {"digital SAT algebra #{clean} practice problems answers", "question_bank"},
+      {"Khan Academy SAT math #{clean}", "question_bank"}
+    ]
+  end
+
+  defp sat_search_queries(section_name, "reading_writing") do
+    clean = clean_chapter_name(section_name)
+
+    [
+      {"SAT reading writing practice questions #{clean}", "question_bank"},
+      {"digital SAT English #{clean} practice problems answers", "question_bank"},
+      {"Khan Academy SAT reading writing #{clean}", "question_bank"}
+    ]
+  end
+
+  defp sat_search_queries(section_name, _catalog_subject) do
+    clean = clean_chapter_name(section_name)
+
+    [
+      {"SAT practice questions #{clean}", "question_bank"},
+      {"digital SAT #{clean} practice problems", "question_bank"},
+      {"College Board SAT #{clean} sample questions", "practice_test"}
+    ]
   end
 
   defp broadcast(course_id, data) do

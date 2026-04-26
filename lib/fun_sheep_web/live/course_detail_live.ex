@@ -49,6 +49,18 @@ defmodule FunSheepWeb.CourseDetailLive do
         params["upload"] in ["1", "true"] or
         textbook_status.status == :missing
 
+    # Paywall: determine whether the current user can access full course content.
+    # Free/public courses are always accessible. For premium catalog courses,
+    # the user needs an enrollment (à-la-carte purchase) or an active subscription.
+    enrollment = if user_role_id, do: Courses.get_course_enrollment(user_role_id, course.id)
+
+    has_access =
+      course.access_level == "public" or
+        not is_nil(enrollment) or
+        (user_role_id && FunSheep.Billing.has_qualifying_subscription?(user_role_id, course.access_level))
+
+    course_bundles = Courses.list_bundles_for_test_type(course.catalog_test_type)
+
     {:ok,
      assign(socket,
        page_title: course.name,
@@ -81,7 +93,11 @@ defmodule FunSheepWeb.CourseDetailLive do
        # so the render stays readable.
        toc_state: toc_state,
        # Community quality signals
-       user_reaction: user_reaction
+       user_reaction: user_reaction,
+       # Paywall / access control
+       has_access: has_access,
+       enrollment: enrollment,
+       course_bundles: course_bundles
      )}
   end
 
@@ -754,6 +770,17 @@ defmodule FunSheepWeb.CourseDetailLive do
     {:noreply, put_flash(socket, :info, message)}
   end
 
+  # ── Paywall enrollment events ──────────────────────────────────────────
+
+  def handle_event("enroll_single", _params, socket) do
+    course = socket.assigns.course
+    {:noreply, redirect(socket, to: "/billing/checkout?course_id=#{course.id}")}
+  end
+
+  def handle_event("enroll_bundle", %{"bundle-id" => bundle_id}, socket) do
+    {:noreply, redirect(socket, to: "/billing/checkout?bundle_id=#{bundle_id}")}
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────
 
   defp share_test_text(schedule, course, score) do
@@ -995,8 +1022,15 @@ defmodule FunSheepWeb.CourseDetailLive do
         show_sources={@show_sources}
       />
 
-      <%!-- ═══ UPCOMING TESTS (Hero Section) ═══ --%>
-      <div class="mb-6">
+      <%!-- ═══ PAYWALL (premium catalog courses without access) ═══ --%>
+      <.paywall_gate
+        :if={not @has_access}
+        course={@course}
+        course_bundles={@course_bundles}
+      />
+
+      <%!-- ═══ UPCOMING TESTS (Hero Section) ═══ (only shown when access granted) --%>
+      <div :if={@has_access} class="mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-semibold text-[#1C1C1E]">Upcoming Tests</h2>
           <.link
@@ -1032,7 +1066,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ QUICK ACTIONS ═══ --%>
-      <div class="mb-6">
+      <div :if={@has_access} class="mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Practice</h2>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <.link
@@ -1077,7 +1111,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ PAST TESTS ═══ --%>
-      <div :if={@past_tests != []} class="mb-6">
+      <div :if={@has_access and @past_tests != []} class="mb-6">
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Recent Tests</h2>
         <div class="bg-white rounded-2xl shadow-md overflow-hidden">
           <div
@@ -1112,7 +1146,7 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
 
       <%!-- ═══ CHAPTER MANAGEMENT (Hidden by default, toggled via gear icon) ═══ --%>
-      <div :if={@show_chapters} id="chapter-management" phx-hook="ScrollIntoView" class="mb-6">
+      <div :if={@has_access and @show_chapters} id="chapter-management" phx-hook="ScrollIntoView" class="mb-6">
         <.chapter_management
           course={@course}
           chapter_form={@chapter_form}
@@ -1125,6 +1159,75 @@ defmodule FunSheepWeb.CourseDetailLive do
       </div>
     </div>
     """
+  end
+
+  # ── Paywall Gate Component ─────────────────────────────────────────────
+
+  attr :course, :map, required: true
+  attr :course_bundles, :list, default: []
+
+  defp paywall_gate(assigns) do
+    ~H"""
+    <div class="rounded-2xl border-2 border-[#4CD964] bg-white dark:bg-gray-800 p-8 text-center max-w-lg mx-auto my-8">
+      <div class="text-4xl mb-4">🔒</div>
+      <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2"><%= @course.name %></h2>
+      <p class="text-gray-500 dark:text-gray-400 mb-6">
+        Enroll to access all questions, adaptive practice, and exam simulations.
+      </p>
+
+      <div class="space-y-3">
+        <button
+          phx-click="enroll_single"
+          class="w-full bg-[#4CD964] hover:bg-[#3DBF55] text-white font-semibold py-3 px-6 rounded-full shadow-md transition-colors"
+        >
+          Get <%= @course.name %> — <%= format_price(@course.price_cents, @course.currency) %>
+        </button>
+
+        <%= for bundle <- @course_bundles do %>
+          <button
+            phx-click="enroll_bundle"
+            phx-value-bundle-id={bundle.id}
+            class="w-full border-2 border-[#4CD964] text-[#4CD964] hover:bg-[#4CD964] hover:text-white font-semibold py-3 px-6 rounded-full transition-colors"
+          >
+            <%= bundle.name %> — <%= format_price(bundle.price_cents, bundle.currency) %>
+            <%= if savings = savings_label(@course, bundle) do %>
+              <span class="text-sm opacity-75 ml-1">(Save <%= savings %>)</span>
+            <% end %>
+          </button>
+        <% end %>
+      </div>
+
+      <p class="text-xs text-gray-400 mt-4">
+        Preview: <%= @course.sample_question_count %> free questions per section included.
+      </p>
+    </div>
+    """
+  end
+
+  defp format_price(nil, _currency), do: "Free"
+
+  defp format_price(cents, currency) do
+    dollars = div(cents, 100)
+    cents_remainder = rem(cents, 100)
+    symbol = if currency == "usd", do: "$", else: String.upcase(currency || "USD")
+
+    if cents_remainder == 0 do
+      "#{symbol}#{dollars}"
+    else
+      "#{symbol}#{dollars}.#{String.pad_leading(Integer.to_string(cents_remainder), 2, "0")}"
+    end
+  end
+
+  defp savings_label(course, bundle) do
+    if course.price_cents do
+      # Bundles contain this course plus at least one other; compare full-price
+      # single-course cost vs bundle cost to show savings.
+      savings = course.price_cents * length(bundle.course_ids) - bundle.price_cents
+
+      if savings > 0 do
+        format_price(savings, course.currency)
+      end
+    end
   end
 
   # ── Test Card Component ────────────────────────────────────────────────

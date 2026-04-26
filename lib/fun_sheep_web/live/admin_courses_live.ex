@@ -97,7 +97,11 @@ defmodule FunSheepWeb.AdminCoursesLive do
       name: Map.get(params, "name", course.name),
       subject: Map.get(params, "subject", course.subject),
       grade: Map.get(params, "grade", course.grade),
-      created_by_id: nilify_empty(Map.get(params, "created_by_id"))
+      created_by_id: nilify_empty(Map.get(params, "created_by_id")),
+      access_level: nilify_empty(Map.get(params, "access_level")),
+      price_cents: parse_integer(Map.get(params, "price_cents")),
+      currency: nilify_empty(Map.get(params, "currency")),
+      price_label: nilify_empty(Map.get(params, "price_label"))
     }
 
     case Admin.update_course(course, attrs, actor) do
@@ -134,6 +138,18 @@ defmodule FunSheepWeb.AdminCoursesLive do
   defp nilify_empty(nil), do: nil
   defp nilify_empty(""), do: nil
   defp nilify_empty(v), do: v
+
+  defp parse_integer(nil), do: nil
+  defp parse_integer(""), do: nil
+
+  defp parse_integer(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} -> n
+      :error -> nil
+    end
+  end
+
+  defp parse_integer(v) when is_integer(v), do: v
 
   defp error_summary(%Ecto.Changeset{errors: errors}) do
     errors
@@ -380,6 +396,51 @@ defmodule FunSheepWeb.AdminCoursesLive do
                 {u.email} ({u.role})
               </option>
             </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Access Level</label>
+            <select
+              name="access_level"
+              class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+            >
+              <%= for level <- ~w(public preview standard premium professional) do %>
+                <option value={level} selected={@course.access_level == level}><%= level %></option>
+              <% end %>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Price (cents)</label>
+              <input
+                type="number"
+                name="price_cents"
+                value={@course.price_cents}
+                placeholder="e.g. 2900"
+                class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+              />
+              <p class="text-xs text-[#8E8E93] mt-1">Leave blank = free</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Currency</label>
+              <input
+                type="text"
+                name="currency"
+                value={@course.currency || "usd"}
+                class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-[#1C1C1E] mb-1">Price Label</label>
+              <input
+                type="text"
+                name="price_label"
+                value={@course.price_label}
+                placeholder="e.g. One-time purchase"
+                class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
+              />
+            </div>
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-2">

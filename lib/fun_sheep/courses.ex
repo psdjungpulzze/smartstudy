@@ -8,7 +8,7 @@ defmodule FunSheep.Courses do
 
   import Ecto.Query, warn: false
   alias FunSheep.Repo
-  alias FunSheep.Courses.{Course, Chapter, CourseEnrollment, Section, Textbook}
+  alias FunSheep.Courses.{Course, Chapter, CourseBundle, CourseEnrollment, Section, Textbook}
 
   ## Courses
 
@@ -1133,4 +1133,50 @@ defmodule FunSheep.Courses do
   defp maybe_filter_by_test_type(query, test_type) do
     where(query, [c], c.catalog_test_type == ^test_type)
   end
+
+  # ── Course Enrollments ──────────────────────────────────────────────────────
+
+  @doc """
+  Returns the enrollment record for a user_role and course, or nil if not enrolled.
+  """
+  def get_course_enrollment(user_role_id, course_id) do
+    Repo.one(
+      from e in CourseEnrollment,
+        where: e.user_role_id == ^user_role_id and e.course_id == ^course_id
+    )
+  end
+
+  # ── Course Bundles ──────────────────────────────────────────────────────────
+
+  @doc "Lists all active bundles."
+  def list_active_bundles do
+    Repo.all(from b in CourseBundle, where: b.is_active == true)
+  end
+
+  @doc "Lists active bundles for a given test type (e.g. \"sat\")."
+  def list_bundles_for_test_type(nil), do: []
+  def list_bundles_for_test_type(""), do: []
+
+  def list_bundles_for_test_type(test_type) do
+    Repo.all(
+      from b in CourseBundle,
+        where: b.catalog_test_type == ^test_type and b.is_active == true
+    )
+  end
+
+  def get_bundle!(id), do: Repo.get!(CourseBundle, id)
+
+  def create_bundle(attrs) do
+    %CourseBundle{}
+    |> CourseBundle.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_bundle(%CourseBundle{} = bundle, attrs) do
+    bundle
+    |> CourseBundle.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_bundle(%CourseBundle{} = bundle), do: Repo.delete(bundle)
 end

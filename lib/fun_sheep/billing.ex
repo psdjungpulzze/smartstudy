@@ -602,6 +602,19 @@ defmodule FunSheep.Billing do
     Map.get(@plan_catalog_types, to_string(plan), [])
   end
 
+  @doc """
+  Returns true if the user's active subscription grants access to a course
+  with the given access_level. Used by the paywall gate in CourseDetailLive.
+
+  Delegates to `subscription_grants_access?/2` using a minimal course-like
+  map so the rank logic stays in one place.
+  """
+  @spec has_qualifying_subscription?(binary(), String.t() | nil) :: boolean()
+  def has_qualifying_subscription?(user_role_id, access_level) do
+    sub = get_subscription(user_role_id)
+    subscription_grants_access?(sub, %{access_level: access_level || "public"})
+  end
+
   defp plan_id_for("monthly"), do: "plan_monthly"
   defp plan_id_for("annual"), do: "plan_annual"
   defp plan_id_for(_), do: "plan_free"

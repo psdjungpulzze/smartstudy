@@ -362,7 +362,37 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
     end
   end
 
-  defp build_prompt(mode, course, chapter, context, count, difficulty, section_name \\ nil) do
+  # Header clause declares the default so subsequent specific clauses don't trigger
+  # the "default arg in multi-clause function" compiler warning.
+  defp build_prompt(mode, course, chapter, context, count, difficulty, section_name \\ nil)
+
+  # SAT-specific prompt — dispatched before the generic prompt when the
+  # course has catalog_test_type "sat". Enforces Digital SAT format rules:
+  # 4-option MCQ for all domains; short passage context for Reading & Writing;
+  # numeric-response for Math when appropriate; College Board difficulty tiers.
+  defp build_prompt(
+         _mode,
+         %{catalog_test_type: "sat"} = course,
+         chapter,
+         context,
+         count,
+         difficulty,
+         section_name
+       ) do
+    chapter_name = if chapter, do: chapter.name, else: "all chapters"
+    topic = section_name || chapter_name
+
+    sat_prompt(
+      course.catalog_subject,
+      chapter_name,
+      topic,
+      context,
+      count,
+      difficulty
+    )
+  end
+
+  defp build_prompt(mode, course, chapter, context, count, difficulty, section_name) do
     subject = course.subject || course.name
     grade = course.grade
     chapter_name = if chapter, do: chapter.name, else: "all chapters"
@@ -912,6 +942,132 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
        }}
     )
   end
+
+  # --- SAT-specific prompt helpers ---
+
+  @sat_format_json_instruction """
+
+  IMPORTANT: Return your response as a JSON array of question objects. Each object must have:
+  - "content": the question stem (and passage when applicable — see format rules below)
+  - "answer": the correct answer letter (always "A", "B", "C", or "D" for SAT MCQ)
+  - "question_type": always "multiple_choice" for SAT (use "short_answer" only for Math student-produced response)
+  - "options": an object with exactly four keys {"A": "...", "B": "...", "C": "...", "D": "..."}
+  - "difficulty": one of "easy", "medium", "hard"
+  - "explanation": 1–2 sentences explaining why the answer is correct with reference to the skill tested
+
+  Return ONLY the JSON array, no other text.
+  """
+
+  defp sat_prompt("mathematics", chapter_name, topic, context, count, difficulty) do
+    difficulty_note = sat_difficulty_note(difficulty)
+
+    material_section =
+      if context[:material_text] && context.material_text != "" do
+        """
+        Reference material:
+        ---
+        #{context.material_text}
+        ---
+
+        """
+      else
+        ""
+      end
+
+    """
+    You are an expert Digital SAT Math question writer.
+    Domain: #{chapter_name}
+    Skill: #{topic}
+
+    DIGITAL SAT MATH FORMAT RULES (follow exactly):
+    - Every question MUST have exactly 4 answer options labelled A, B, C, D.
+    - Exactly one option is correct. The other three are plausible distractors reflecting common errors.
+    - Questions may be conceptual, algebraic, or word-problem style — vary the format.
+    - Do NOT include questions that require a graph, figure, or table unless you embed the data directly in the question stem.
+    - Do NOT write questions that are subjective, ambiguous, or have more than one defensible correct answer.
+    - Do NOT reference external context or material not provided in the question stem.
+
+    DIFFICULTY: #{difficulty_note}
+
+    #{material_section}Generate #{count} Digital SAT Math questions for the skill "#{topic}" in the domain "#{chapter_name}".
+    Follow the format rules above. Vary difficulty as instructed.
+    #{@sat_format_json_instruction}
+    """
+  end
+
+  defp sat_prompt("reading_writing", chapter_name, topic, context, count, difficulty) do
+    difficulty_note = sat_difficulty_note(difficulty)
+
+    material_section =
+      if context[:material_text] && context.material_text != "" do
+        """
+        Source passages you may adapt (do not copy verbatim):
+        ---
+        #{context.material_text}
+        ---
+
+        """
+      else
+        ""
+      end
+
+    """
+    You are an expert Digital SAT Reading & Writing question writer.
+    Domain: #{chapter_name}
+    Skill: #{topic}
+
+    DIGITAL SAT READING & WRITING FORMAT RULES (follow exactly):
+    - Each question is based on a short passage (25–150 words). Write the passage in the "content" field BEFORE the question stem, separated by a blank line.
+    - Passages should be nonfiction prose: academic, journalistic, or scientific in register.
+    - Every question MUST have exactly 4 answer options labelled A, B, C, D.
+    - Exactly one option is correct. The other three must be plausible but clearly wrong based on the passage.
+    - Do NOT write questions that rely on external knowledge beyond what is stated in the passage.
+    - Do NOT write subjective questions or questions with multiple defensible answers.
+    - Vary passage topics: science, humanities, social science, literature.
+
+    DIFFICULTY: #{difficulty_note}
+
+    #{material_section}Generate #{count} Digital SAT Reading & Writing questions for the skill "#{topic}" in the domain "#{chapter_name}".
+    Follow the format rules above.
+    #{@sat_format_json_instruction}
+    """
+  end
+
+  defp sat_prompt(_catalog_subject, chapter_name, topic, context, count, difficulty) do
+    difficulty_note = sat_difficulty_note(difficulty)
+
+    material_section =
+      if context[:material_text] && context.material_text != "" do
+        """
+        Reference material:
+        ---
+        #{context.material_text}
+        ---
+
+        """
+      else
+        ""
+      end
+
+    """
+    You are an expert Digital SAT question writer.
+    Domain: #{chapter_name}
+    Skill: #{topic}
+
+    Generate #{count} Digital SAT practice questions for "#{topic}".
+    DIFFICULTY: #{difficulty_note}
+
+    #{material_section}Each question must have exactly 4 options (A–D) with one correct answer.
+    Do not write ambiguous or subjective questions.
+    #{@sat_format_json_instruction}
+    """
+  end
+
+  defp sat_difficulty_note(nil), do: "Mix of easy (30%), medium (40%), and hard (30%)."
+  defp sat_difficulty_note("easy"), do: "easy — SAT Module 1 baseline level. Recall or direct application of a single rule or formula."
+  defp sat_difficulty_note("medium"), do: "medium — SAT Module 1/2 mid-range. Apply a concept in a concrete context, one or two logical steps."
+  defp sat_difficulty_note("hard"), do: "hard — SAT Module 2 hardest tier. Multi-step reasoning, synthesis across sub-skills, non-obvious setup."
+  defp sat_difficulty_note(d), do: d
 
   defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end

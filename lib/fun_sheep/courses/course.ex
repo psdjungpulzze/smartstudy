@@ -41,6 +41,11 @@ defmodule FunSheep.Courses.Course do
     field :published_at, :utc_datetime
     field :sample_question_count, :integer, default: 10
 
+    # Pricing fields (for à-la-carte premium catalog purchases)
+    field :price_cents, :integer
+    field :currency, :string, default: "usd"
+    field :price_label, :string
+
     # Community quality scoring fields (Phase 1 — community content validation)
     field :quality_score, :float, default: 0.0
     field :like_count, :integer, default: 0
@@ -113,6 +118,9 @@ defmodule FunSheep.Courses.Course do
       :published_at,
       :published_by_id,
       :sample_question_count,
+      :price_cents,
+      :currency,
+      :price_label,
       :quality_score,
       :like_count,
       :dislike_count,
