@@ -18,6 +18,7 @@ defmodule FunSheep.Questions.Validation do
 
   alias FunSheep.{Courses, Repo}
   alias FunSheep.Questions.Question
+  alias FunSheep.Scraper.SourceReputation
 
   require Logger
 
@@ -119,18 +120,31 @@ defmodule FunSheep.Questions.Validation do
   @spec apply_verdict(Question.t(), map()) ::
           {:ok, Question.t()} | {:error, Ecto.Changeset.t()}
   def apply_verdict(%Question{} = question, verdict) when is_map(verdict) do
-    # Phase 7: a verdict produced by `missing_verdict/0` means the
-    # validator LLM returned nothing for this row. Treat that as a
-    # transient validator failure — leave the question :pending and
-    # let the StuckValidationSweeperWorker re-queue it, INSTEAD of
-    # burning a genuine :failed slot on a row that has never been
-    # properly reviewed. The April audit had 65 such rows permanently
-    # marked :failed for a content issue that was really a validator
-    # bug.
+    thresholds =
+      case question.source_tier do
+        tier when is_integer(tier) -> SourceReputation.thresholds_for_tier(tier)
+        _ -> %{passed_threshold: @passed_threshold, review_threshold: @review_threshold}
+      end
+
+    apply_verdict(question, verdict, thresholds)
+  end
+
+  @doc """
+  Variant that accepts explicit per-tier thresholds.
+  Used by `QuestionValidationWorker` to apply per-source-tier pass/review cutoffs,
+  and by tests to verify tier-specific threshold behaviour without URL lookup.
+  """
+  @spec apply_verdict(Question.t(), map(), map()) ::
+          {:ok, Question.t()} | {:error, Ecto.Changeset.t()}
+  def apply_verdict(%Question{} = question, verdict, thresholds)
+      when is_map(verdict) and is_map(thresholds) do
+    # A verdict produced by `missing_verdict/0` means the validator LLM returned
+    # nothing for this row. Treat as a transient failure — leave :pending for
+    # StuckValidationSweeperWorker to re-queue instead of permanently marking :failed.
     if validator_produced_no_verdict?(verdict) do
       mark_pending_retry(question, verdict)
     else
-      {status, score} = derive_status(verdict)
+      {status, score} = derive_status(verdict, thresholds)
 
       course = load_course(question.course_id)
       valid_chapter_ids = MapSet.new(course.chapters, & &1.id)
@@ -306,10 +320,13 @@ defmodule FunSheep.Questions.Validation do
 
   # --- Verdict application ---
 
-  defp derive_status(%{"verdict" => "approve"} = v) do
-    score = topic_score(v)
+  defp derive_status(verdict, thresholds \\ nil)
 
-    if score >= @passed_threshold do
+  defp derive_status(%{"verdict" => "approve"} = v, thresholds) do
+    score = topic_score(v)
+    passed_t = get_threshold(thresholds, :passed_threshold, @passed_threshold)
+
+    if score >= passed_t do
       {:passed, score}
     else
       # Assistant said approve but score is low — trust the score, flag for review
@@ -317,17 +334,21 @@ defmodule FunSheep.Questions.Validation do
     end
   end
 
-  defp derive_status(%{"verdict" => "needs_fix"} = v) do
+  defp derive_status(%{"verdict" => "needs_fix"} = v, thresholds) do
     score = topic_score(v)
+    review_t = get_threshold(thresholds, :review_threshold, @review_threshold)
 
     cond do
-      score >= @review_threshold -> {:needs_review, score}
+      score >= review_t -> {:needs_review, score}
       true -> {:failed, score}
     end
   end
 
-  defp derive_status(%{"verdict" => "reject"} = v), do: {:failed, topic_score(v)}
-  defp derive_status(v), do: {:needs_review, topic_score(v)}
+  defp derive_status(%{"verdict" => "reject"} = v, _thresholds), do: {:failed, topic_score(v)}
+  defp derive_status(v, _thresholds), do: {:needs_review, topic_score(v)}
+
+  defp get_threshold(nil, _key, default), do: default
+  defp get_threshold(%{} = map, key, default), do: Map.get(map, key, default)
 
   defp topic_score(%{"topic_relevance_score" => s}) when is_number(s), do: s * 1.0
   defp topic_score(_), do: 0.0

@@ -14,6 +14,12 @@ defmodule FunSheepWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Mobile app REST API — Bearer token auth, versioned under /api/v1
+  pipeline :mobile_api do
+    plug :accepts, ["json"]
+    plug FunSheepWeb.Plugs.ApiAuth
+  end
+
   # Dev-only binary upload receiver. Needs session (for DevAuth) but no CSRF
   # — the URL-embedded HMAC token is the auth mechanism for this endpoint.
   pipeline :local_upload do
@@ -122,7 +128,10 @@ defmodule FunSheepWeb.Router do
       # Exam Simulation
       live "/courses/:course_id/exam-simulation", ExamSimulationLive.Index, :index
       live "/courses/:course_id/exam-simulation/exam", ExamSimulationLive.Exam, :exam
-      live "/courses/:course_id/exam-simulation/results/:session_id", ExamSimulationLive.Results, :results
+
+      live "/courses/:course_id/exam-simulation/results/:session_id",
+           ExamSimulationLive.Results,
+           :results
 
       live "/courses/:course_id/essay/:question_id", EssayLive, :index
       live "/courses/:course_id/memory-span", MemorySpanLive, :index
@@ -163,7 +172,6 @@ defmodule FunSheepWeb.Router do
     # Cloud Run's ingress limit or the BEAM heap.
     post "/uploads/sign", UploadController, :sign
     post "/uploads/finalize", UploadController, :finalize
-
   end
 
   # Local-backend PUT receiver — only active when storage_backend is
@@ -195,9 +203,11 @@ defmodule FunSheepWeb.Router do
       live "/users", AdminUsersLive, :index
       live "/users/:id", AdminUserDetailLive, :show
       live "/courses", AdminCoursesLive, :index
+      live "/courses/:id", AdminCourseShowLive, :show
       live "/courses/:id/sections", AdminCourseSectionsLive, :index
       live "/materials", AdminMaterialsLive, :index
       live "/source-health", AdminSourceHealthLive, :index
+      live "/web-pipeline", AdminWebPipelineLive, :index
       live "/questions/review", AdminQuestionReviewLive, :index
       live "/audit-log", AdminAuditLogLive, :index
       live "/settings/mfa", AdminMfaSettingsLive, :index
@@ -211,6 +221,7 @@ defmodule FunSheepWeb.Router do
       live "/geo", AdminGeoLive, :index
       live "/health", AdminHealthLive, :index
       live "/course-builder", AdminTestCourseBuilderLive, :index
+      live "/source-registry", AdminSourceRegistryLive, :index
     end
   end
 
@@ -250,6 +261,41 @@ defmodule FunSheepWeb.Router do
 
     post "/interactor", WebhookController, :interactor
     post "/agent-tools", WebhookController, :tool_callback
+  end
+
+  # ── Mobile REST API v1 ──────────────────────────────────────────────────────
+  #
+  # Auth routes — no Bearer token required (these issue the token)
+  scope "/api/v1/auth", FunSheepWeb.API.V1 do
+    pipe_through :api
+
+    get "/authorize_url", AuthController, :authorize_url
+    post "/token", AuthController, :token
+    post "/refresh", AuthController, :refresh
+  end
+
+  # Authenticated mobile API routes — require Bearer token
+  scope "/api/v1", FunSheepWeb.API.V1 do
+    pipe_through :mobile_api
+
+    # Current user
+    get "/users/me", UsersController, :me
+    put "/users/me", UsersController, :update
+
+    # Enrolled courses
+    get "/courses", CoursesController, :index
+    get "/courses/:id", CoursesController, :show
+
+    # Practice
+    get "/courses/:course_id/practice/questions", PracticeController, :questions
+    post "/practice/answers", PracticeController, :record_answers
+
+    # Notifications
+    get "/notifications", NotificationsController, :index
+    post "/notifications/:id/read", NotificationsController, :mark_read
+    post "/notifications/read-all", NotificationsController, :mark_all_read
+    post "/notifications/push_tokens", NotificationsController, :register_token
+    delete "/notifications/push_tokens/:token", NotificationsController, :deactivate_token
   end
 
   # Dev-only routes (login bypass)

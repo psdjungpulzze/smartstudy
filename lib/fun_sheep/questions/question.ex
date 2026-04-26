@@ -86,6 +86,15 @@ defmodule FunSheep.Questions.Question do
     # Comprehension group fields — set when question belongs to a stimulus group
     field :group_sequence, :integer
 
+    # SHA-256 fingerprint of normalized content — used for web-scraped
+    # deduplication (partial unique index on course_id + fingerprint).
+    field :content_fingerprint, :string
+
+    # Trust tier of the web source (1–4 per FunSheep.Scraper.SourceReputation).
+    # nil for AI-generated questions. Used to apply per-tier validation thresholds
+    # so questions from official test makers (tier 1) aren't unfairly rejected.
+    field :source_tier, :integer
+
     belongs_to :essay_rubric_template, FunSheep.Essays.EssayRubricTemplate
     belongs_to :question_group, FunSheep.Questions.QuestionGroup
     belongs_to :course, FunSheep.Courses.Course
@@ -142,7 +151,9 @@ defmodule FunSheep.Questions.Question do
       :essay_word_limit,
       :essay_source_documents,
       :question_group_id,
-      :group_sequence
+      :group_sequence,
+      :content_fingerprint,
+      :source_tier
     ])
     |> validate_required([:content, :answer, :question_type, :difficulty, :course_id])
     |> foreign_key_constraint(:course_id)

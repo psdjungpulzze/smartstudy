@@ -7,6 +7,7 @@ defmodule FunSheep.Content.DiscoveredSource do
   Each found source is recorded here with its URL, type, and processing status.
 
   Source types:
+  - "official" — official resource from the test maker or governing body
   - "textbook" — a known textbook (e.g., Campbell Biology, Pearson AP prep)
   - "question_bank" — online question collections, practice problems
   - "practice_test" — full practice exams, past papers
@@ -37,6 +38,9 @@ defmodule FunSheep.Content.DiscoveredSource do
     field :search_query, :string
     field :confidence_score, :float, default: 0.0
     field :error_message, :string
+    field :discovery_strategy, :string, default: "web_search"
+    field :scrape_attempts, :integer, default: 0
+    field :last_scraped_at, :utc_datetime
 
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :section, FunSheep.Courses.Section
@@ -61,13 +65,16 @@ defmodule FunSheep.Content.DiscoveredSource do
       :search_query,
       :confidence_score,
       :error_message,
+      :discovery_strategy,
+      :scrape_attempts,
+      :last_scraped_at,
       :course_id,
       :section_id
     ])
     |> validate_required([:source_type, :title, :course_id])
     |> validate_inclusion(
       :source_type,
-      ~w(textbook question_bank practice_test study_guide curriculum video)
+      ~w(official textbook question_bank practice_test study_guide curriculum video)
     )
     |> validate_inclusion(:status, ~w(discovered scraping scraped processed failed skipped))
     |> foreign_key_constraint(:course_id)

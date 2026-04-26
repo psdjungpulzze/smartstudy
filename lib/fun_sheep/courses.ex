@@ -1241,7 +1241,17 @@ defmodule FunSheep.Courses do
     %KnownTestDate{}
     |> KnownTestDate.changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace, [:test_name, :registration_deadline, :late_registration_deadline, :score_release_date, :source_url, :last_synced_at, :updated_at]},
+      on_conflict:
+        {:replace,
+         [
+           :test_name,
+           :registration_deadline,
+           :late_registration_deadline,
+           :score_release_date,
+           :source_url,
+           :last_synced_at,
+           :updated_at
+         ]},
       conflict_target: [:test_type, :test_date, :region]
     )
   end

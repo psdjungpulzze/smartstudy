@@ -549,14 +549,66 @@ defmodule FunSheep.Questions do
   Admin list of all questions, optionally filtered by validation_status atom.
   Pass `nil` to fetch all regardless of status.
   """
-  def list_all_questions_for_admin(status \\ nil) do
+  def list_all_questions_for_admin(status \\ nil, tier \\ nil) do
     Question
     |> then(fn q ->
       if status, do: where(q, [q], q.validation_status == ^status), else: q
     end)
+    |> then(fn q ->
+      if tier, do: where(q, [q], q.source_tier == ^tier), else: q
+    end)
     |> order_by([q], desc: q.inserted_at)
     |> preload([:chapter, :section, :course])
     |> Repo.all()
+  end
+
+  @doc """
+  Bulk-approves all web-scraped Tier-1 questions currently in needs_review.
+  Returns `{:ok, count}` with the number of questions approved.
+  """
+  def bulk_approve_web_tier1_questions(reviewer_id \\ nil) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    ids =
+      from(q in Question,
+        where:
+          q.validation_status == :needs_review and
+            q.source_type == :web_scraped and
+            q.source_tier == 1,
+        select: q.id
+      )
+      |> Repo.all()
+
+    decision = %{
+      "admin_decision" => %{
+        "action" => "bulk_approve_tier1",
+        "reviewer_id" => reviewer_id,
+        "at" => DateTime.to_iso8601(now)
+      }
+    }
+
+    {count, _} =
+      from(q in Question, where: q.id in ^ids)
+      |> Repo.update_all(
+        set: [
+          validation_status: :passed,
+          validated_at: now
+        ]
+      )
+
+    # Stamp validation_report on each approved question (preserves existing keys)
+    Enum.each(ids, fn id ->
+      case Repo.get(Question, id) do
+        %Question{} = q ->
+          merged = Map.merge(q.validation_report || %{}, decision)
+          Repo.update_all(from(qq in Question, where: qq.id == ^id),
+            set: [validation_report: merged]
+          )
+        _ -> :ok
+      end
+    end)
+
+    {:ok, count}
   end
 
   @doc "Returns a map of validation_status => count across all questions."
@@ -1701,6 +1753,88 @@ defmodule FunSheep.Questions do
       pending: Map.get(counts, :pending, 0),
       failed: Map.get(counts, :failed, 0),
       by_course: by_course
+    }
+  end
+
+  @doc """
+  Returns a pipeline audit summary for a single course.
+
+  Joins `discovered_sources` and `questions` to produce an aggregate report
+  covering source status counts and per-domain extraction stats.
+  """
+  @spec pipeline_audit_for_course(binary()) :: map()
+  def pipeline_audit_for_course(course_id) do
+    alias FunSheep.Content.DiscoveredSource
+
+    source_counts =
+      from(ds in DiscoveredSource,
+        where: ds.course_id == ^course_id,
+        group_by: ds.status,
+        select: {ds.status, count(ds.id)}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    sources_discovered = Enum.sum(Map.values(source_counts))
+    sources_scraped = Map.get(source_counts, "scraped", 0) + Map.get(source_counts, "processed", 0)
+    sources_failed = Map.get(source_counts, "failed", 0)
+
+    question_counts =
+      from(q in Question,
+        where: q.course_id == ^course_id and q.source_type == :web_scraped,
+        group_by: q.validation_status,
+        select: {q.validation_status, count(q.id)}
+      )
+      |> Repo.all()
+      |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+    questions_extracted = Enum.sum(Map.values(question_counts))
+    questions_passed = Map.get(question_counts, "passed", 0)
+    questions_needs_review = Map.get(question_counts, "needs_review", 0)
+    questions_failed = Map.get(question_counts, "failed", 0)
+
+    by_domain =
+      from(ds in DiscoveredSource,
+        left_join: q in Question,
+        on:
+          q.course_id == ds.course_id and q.source_url == ds.url and
+            q.source_type == :web_scraped,
+        where: ds.course_id == ^course_id,
+        group_by: [
+          fragment("split_part(split_part(?, '://', 2), '/', 1)", ds.url),
+          ds.discovery_strategy
+        ],
+        select: %{
+          domain: fragment("split_part(split_part(?, '://', 2), '/', 1)", ds.url),
+          strategy: ds.discovery_strategy,
+          sources: count(ds.id, :distinct),
+          extracted: count(q.id),
+          passed:
+            sum(
+              fragment(
+                "CASE WHEN ? = 'passed' THEN 1 ELSE 0 END",
+                q.validation_status
+              )
+            )
+        },
+        order_by: [desc: count(q.id)]
+      )
+      |> Repo.all()
+      |> Enum.map(fn row ->
+        passed = row.passed || 0
+        pass_rate = if row.extracted > 0, do: Float.round(passed / row.extracted, 2), else: 0.0
+        Map.merge(row, %{passed: passed, pass_rate: pass_rate})
+      end)
+
+    %{
+      sources_discovered: sources_discovered,
+      sources_scraped: sources_scraped,
+      sources_failed: sources_failed,
+      questions_extracted: questions_extracted,
+      questions_passed: questions_passed,
+      questions_needs_review: questions_needs_review,
+      questions_failed: questions_failed,
+      by_domain: by_domain
     }
   end
 end
