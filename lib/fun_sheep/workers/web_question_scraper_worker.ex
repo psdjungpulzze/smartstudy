@@ -157,22 +157,25 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   # --- Scrape a single source ---
 
-  @binary_extensions ~w(.doc .docx .ppt .pptx .xls .xlsx .zip .mp4 .mp3 .wav .png .jpg .jpeg .gif .svg)
+  # Formats handled by the Office XML text extractor (download + parse inline)
+  @document_extensions ~w(.docx .pptx .xlsx)
 
-  defp binary_url?(url) when is_binary(url) do
-    path = URI.parse(url).path || ""
-    lower = String.downcase(path)
-    Enum.any?(@binary_extensions, &String.ends_with?(lower, &1))
+  # Formats that require a binary converter we don't have — skip permanently
+  @skip_extensions ~w(.doc .ppt .xls .zip .mp4 .mp3 .wav .png .jpg .jpeg .gif .svg)
+
+  defp url_ext(url) when is_binary(url) do
+    uri = URI.parse(url)
+    path = uri.path || ""
+    path |> Path.extname() |> String.downcase()
   end
 
-  defp binary_url?(_), do: false
+  defp url_ext(_), do: ""
 
-  defp pdf_url?(url) when is_binary(url) do
-    path = URI.parse(url).path || ""
-    String.ends_with?(String.downcase(path), ".pdf")
-  end
+  defp pdf_url?(url), do: url_ext(url) == ".pdf"
 
-  defp pdf_url?(_), do: false
+  defp document_url?(url), do: url_ext(url) in @document_extensions
+
+  defp skip_url?(url), do: url_ext(url) in @skip_extensions
 
   defp safe_slice(text, max) when is_binary(text) do
     if String.valid?(text), do: String.slice(text, 0, max), else: ""
@@ -186,8 +189,14 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         Logger.info("[Scraper] PDF source, downloading for OCR: #{source.url}")
         attach_pdf_source(source, course)
 
-      binary_url?(source.url) ->
-        Logger.debug("[Scraper] Skipping non-PDF binary URL: #{source.url}")
+      document_url?(source.url) ->
+        # Office XML document (DOCX/PPTX/XLSX) — download, extract text inline,
+        # then feed into the same AI question extractor as HTML pages.
+        Logger.info("[Scraper] Document source (#{url_ext(source.url)}): #{source.url}")
+        extract_document_source(source, course)
+
+      skip_url?(source.url) ->
+        Logger.debug("[Scraper] Skipping unsupported format (#{url_ext(source.url)}): #{source.url}")
         Content.update_discovered_source(source, %{status: "skipped"})
         0
 
@@ -305,6 +314,62 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
       {:ok, %{status: status}} -> {:error, {:http_status, status}}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Download an Office XML document (DOCX/PPTX/XLSX), extract plain text
+  # inline, then run the AI question extractor on it — same flow as HTML pages
+  # but without needing the OCR pipeline.
+  defp extract_document_source(source, course) do
+    filename =
+      (URI.parse(source.url).path || "document")
+      |> String.split("/")
+      |> List.last()
+      |> URI.decode()
+
+    with {:ok, bytes} <- fetch_pdf_bytes(source.url),
+         {:ok, text} <- FunSheep.Documents.TextExtractor.extract(bytes, filename) do
+      Content.update_discovered_source(source, %{
+        scraped_text: safe_slice(text, @max_page_size),
+        content_size_bytes: byte_size(bytes),
+        status: "scraped"
+      })
+
+      questions = extract_questions_from_text(text, course, source)
+      grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
+
+      {inserted, inserted_ids} =
+        Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
+          case insert_question(q, course, grounding_ref) do
+            {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
+            {:error, _} -> {count, ids}
+          end
+        end)
+
+      FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids, course_id: course.id)
+      FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
+
+      Content.update_discovered_source(source, %{
+        status: "processed",
+        questions_extracted: inserted
+      })
+
+      Logger.info(
+        "[Scraper] Document extracted #{inserted} questions from #{filename} (#{byte_size(bytes)} bytes)"
+      )
+
+      inserted
+    else
+      {:error, :unsupported_binary_format} ->
+        Logger.info("[Scraper] Old binary format, skipping: #{source.url}")
+        Content.update_discovered_source(source, %{status: "skipped"})
+        0
+
+      {:error, reason} ->
+        error_msg = inspect(reason)
+        Logger.warning("[Scraper] Document extraction failed for #{source.url}: #{error_msg}")
+        Content.update_discovered_source(source, %{status: "failed", error_message: error_msg})
+        0
     end
   end
 
