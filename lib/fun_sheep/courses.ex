@@ -64,7 +64,11 @@ defmodule FunSheep.Courses do
     sections_query = from(s in Section, order_by: s.position)
 
     chapters_query =
-      from(c in Chapter, order_by: c.position, preload: [sections: ^sections_query])
+      from(c in Chapter,
+        where: is_nil(c.orphaned_at),
+        order_by: c.position,
+        preload: [sections: ^sections_query]
+      )
 
     Course
     |> Repo.get!(id)
@@ -355,12 +359,20 @@ defmodule FunSheep.Courses do
         # Still work to do — shouldn't usually reach here, worker guards it
         {:ok, course}
 
-      passed > 0 ->
+      passed + needs_review > 0 ->
+        # Course has usable questions: either fully passed or flagged for
+        # optional human review. Both statuses are student-visible (see
+        # @student_visible in Questions). Only `failed` questions are blocked.
+        total_ready = passed + needs_review
+
         update_course(course, %{
           processing_status: "ready",
           processing_step:
-            "Processing complete! #{passed} questions validated and ready." <>
-              if(needs_review > 0, do: " (#{needs_review} flagged for review)", else: "")
+            "Processing complete! #{total_ready} questions ready." <>
+              if(needs_review > 0 and passed == 0,
+                do: " (pending admin review)",
+                else: if(needs_review > 0, do: " (#{needs_review} flagged for review)", else: "")
+              )
         })
         |> tap(fn _ ->
           broadcast_finalization(course_id, "ready", passed, needs_review, failed)
