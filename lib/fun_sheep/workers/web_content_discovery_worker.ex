@@ -22,14 +22,14 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   require Logger
 
-  @system_prompt "You are a web search assistant for educational content. Given a search query, return structured information about the most relevant results. Return ONLY a JSON array, no other text."
-
-  @llm_opts %{
-    model: "gpt-4o-mini",
-    max_tokens: 2_000,
-    temperature: 0.1,
-    source: "web_content_discovery_worker"
-  }
+  # Anthropic web search — real crawl, no hallucination
+  @anthropic_api_url "https://api.anthropic.com/v1/messages"
+  @anthropic_api_version "2023-06-01"
+  # claude-haiku-4-5: fast, cheap, supports web_search_20250305
+  @search_model "claude-haiku-4-5-20251001"
+  # Server-side tool: Anthropic executes the search; single round-trip, real URLs
+  @search_tool_type "web_search_20250305"
+  @search_beta "web-search-2025-03-05"
 
   @search_sites [
     "quizlet.com",
@@ -452,35 +452,78 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     end
   end
 
-  # --- Web Search Execution ---
+  # --- Web Search Execution (Anthropic web_search_20250305 — real crawl) ---
 
   defp search_web(query) do
-    # Use AI agent to perform web search and return structured results
     prompt = """
-    Search the web for: "#{query}"
+    Search the web for educational resources matching this query: "#{query}"
 
-    Return a JSON array of the top 5-10 most relevant results. Each result should have:
-    - "title": the page title
-    - "url": the full URL
-    - "snippet": a brief description of the content
-    - "publisher": the website/publisher name
-    - "confidence": how relevant this is (0.0 to 1.0)
+    Return a JSON array of up to 10 results you actually found via web search. Each item:
+    - "title": the real page title from the search result
+    - "url": the actual URL from the search result
+    - "snippet": brief description of what the page contains
+    - "publisher": website or domain name
 
-    Focus on pages that actually contain practice questions, test banks, or study materials.
-    Skip results that are just ads, paywalls with no preview, or irrelevant pages.
+    Only include pages that genuinely contain practice questions, quizzes, test banks,
+    study guides, or past exam papers. Omit pure ads or pages with no educational content.
 
-    Return ONLY the JSON array.
+    Return ONLY the JSON array, no other text.
     """
 
-    case ai_client().call(@system_prompt, prompt, @llm_opts) do
-      {:ok, response} ->
-        parse_search_response_text(response, query)
+    api_key = Application.fetch_env!(:fun_sheep, :anthropic_api_key)
+
+    body = %{
+      model: @search_model,
+      max_tokens: 4096,
+      tools: [%{type: @search_tool_type, name: "web_search", max_uses: 3}],
+      messages: [%{role: "user", content: prompt}]
+    }
+
+    headers = [
+      {"x-api-key", api_key},
+      {"anthropic-version", @anthropic_api_version},
+      {"anthropic-beta", @search_beta},
+      {"content-type", "application/json"}
+    ]
+
+    case Req.post(@anthropic_api_url,
+           json: body,
+           headers: headers,
+           receive_timeout: 90_000,
+           retry: false,
+           finch: FunSheep.Finch
+         ) do
+      {:ok, %{status: 200, body: resp}} ->
+        text = extract_text_from_response(resp)
+        parse_search_response_text(text, query)
+
+      {:ok, %{status: status, body: resp_body}} ->
+        Logger.warning(
+          "[WebDiscovery] Anthropic search HTTP #{status} for '#{query}': #{inspect(resp_body)}"
+        )
+
+        {:error, {:http_status, status}}
 
       {:error, reason} ->
         Logger.warning("[WebDiscovery] Search failed for '#{query}': #{inspect(reason)}")
         {:error, reason}
     end
   end
+
+  # Extracts the final text block from an Anthropic response.
+  # When using server-side tools the content array contains tool_use, tool_result,
+  # and text blocks — we want the last text block (Claude's final reply).
+  defp extract_text_from_response(%{"content" => content}) when is_list(content) do
+    content
+    |> Enum.filter(&(&1["type"] == "text"))
+    |> List.last()
+    |> case do
+      %{"text" => text} -> text
+      _ -> ""
+    end
+  end
+
+  defp extract_text_from_response(_), do: ""
 
   defp parse_search_response_text(text, query) do
     cleaned =
@@ -498,7 +541,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
               url: r["url"],
               snippet: r["snippet"],
               publisher: r["publisher"],
-              confidence: r["confidence"] || 0.5,
+              confidence: r["confidence"] || 0.8,
               search_query: query
             }
           end)
@@ -506,7 +549,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
         {:ok, parsed}
 
       _ ->
-        Logger.error("[WebDiscovery] Failed to parse search response text")
+        Logger.error("[WebDiscovery] Failed to parse search response for '#{query}': #{inspect(String.slice(text, 0, 200))}")
         {:error, :parse_failed}
     end
   end
@@ -537,7 +580,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
       {:ok, {:drop, r, reason}} ->
         Logger.debug(
-          "[WebDiscovery] Dropped hallucinated URL #{inspect(r[:url])}: #{inspect(reason)}"
+          "[WebDiscovery] Dropped unreachable URL #{inspect(r[:url])}: #{inspect(reason)}"
         )
 
         []
@@ -711,5 +754,4 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     )
   end
 
-  defp ai_client, do: Application.get_env(:fun_sheep, :ai_client_impl, FunSheep.AI.Client)
 end
