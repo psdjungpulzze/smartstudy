@@ -8,15 +8,66 @@ Creates all DB records for a standardized test course at runtime — no code cha
 /course-create ACT
 /course-create "GRE Verbal"
 /course-create "HSC Mathematics Advanced"
+
+# With a textbook reference (Amazon URL or direct PDF link)
+/course-create SAT https://www.amazon.com/Official-SAT-Study-Guide-2020/dp/1457312190
+/course-create "AP Biology" https://example.com/campbell-biology.pdf
 ```
+
+Textbook URLs are optional. When provided, the course is linked to the textbook so question generation can draw from its content (PDF) or its metadata improves web discovery queries (Amazon).
 
 ---
 
 ## Step-by-step Instructions
 
-### Step 1 — Parse the test name from `$ARGUMENTS`
+### Step 1 — Parse arguments from `$ARGUMENTS`
 
-The argument is the test name (e.g. `ACT`, `GRE`, `HSC Mathematics Advanced`).
+Split on whitespace. The first token(s) form the test name; any token starting with `http` is a textbook URL.
+
+- Test name: everything before the URL (e.g. `"SAT"`, `"GRE Verbal"`)
+- Textbook URL: optional, one of:
+  - **Amazon URL** — `amazon.com/...` — for book metadata (title, ISBN, author)
+  - **Direct PDF URL** — ending in `.pdf` or clearly a file — for full-content OCR
+
+If a textbook URL is provided, proceed to **Step 1a** before continuing to Step 2.
+
+### Step 1a — Resolve textbook URL (only when a URL was provided)
+
+**Amazon URL:**
+1. Use WebFetch to load the Amazon product page
+2. Extract from the HTML:
+   - Book title from `<span id="productTitle">` or the `<title>` tag
+   - ISBN-13 from the product details section (look for "ISBN-13" label)
+   - Author from `#bylineInfo .author`
+3. Search OpenLibrary with: `TextbookSearch.search_openlibrary(subject, title)` pattern:
+   - Use WebFetch on `https://openlibrary.org/search.json?q=<title>&limit=3&lang=en`
+   - Match by ISBN if available, otherwise take the first result
+   - Extract: `openlibrary_key`, `isbn`, `author`, `publisher`
+4. Build the `textbook` object for the spec:
+   ```json
+   {
+     "amazon_url": "https://www.amazon.com/...",
+     "title": "The Official SAT Study Guide 2020",
+     "author": "College Board",
+     "isbn": "1457312190",
+     "openlibrary_key": "/works/OL..."
+   }
+   ```
+
+**Direct PDF URL:**
+1. No pre-fetching needed — the CourseBuilder will download and OCR it at creation time
+2. Build the `textbook` object for the spec:
+   ```json
+   {
+     "pdf_url": "https://example.com/sat-guide.pdf",
+     "title": "Official SAT Study Guide"
+   }
+   ```
+   The title is optional but helpful for logging. Infer it from the URL filename if not provided.
+
+**If URL resolution fails** (page unreachable, no ISBN found):
+- Continue without a textbook — log a warning but do not abort course creation
+- Omit the `textbook` key from the spec entirely
 
 ### Step 2 — Check for an existing playbook profile
 
@@ -91,6 +142,27 @@ Construct one or more `COURSE_SPEC` objects (one per section of the test, e.g. A
   }
 }
 ```
+
+**Textbook field (optional):** Include when the user provided a URL. Use one of these two shapes:
+
+```json
+// Amazon URL — resolved to OpenLibrary metadata, linked as course.textbook_id
+"textbook": {
+  "amazon_url": "https://www.amazon.com/Official-SAT-Study-Guide-2020/dp/1457312190",
+  "title": "The Official SAT Study Guide 2020",
+  "author": "College Board",
+  "isbn": "1457312190",
+  "openlibrary_key": "/works/OL12345M"
+}
+
+// Direct PDF — downloaded and queued for OCR, questions generated from actual content
+"textbook": {
+  "pdf_url": "https://example.com/sat-prep-book.pdf",
+  "title": "Official SAT Study Guide"
+}
+```
+
+If URL resolution failed (Amazon blocked, PDF unreachable), omit the `textbook` key entirely — never include a broken URL.
 
 **Rules for building the spec:**
 - `test_type` must be lowercase, no spaces (e.g. `"act"`, `"gre"`, `"hsc"`, `"lsat"`)

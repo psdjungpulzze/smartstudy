@@ -12,8 +12,9 @@ defmodule FunSheep.Courses.CourseBuilder do
   """
 
   alias FunSheep.Repo
-  alias FunSheep.Courses.{Course, Chapter, Section, CourseBundle}
+  alias FunSheep.Courses.{Course, Chapter, Section, CourseBundle, TextbookSearch}
   alias FunSheep.Assessments.TestFormatTemplate
+  alias FunSheep.Accounts.UserRole
 
   import Ecto.Query
 
@@ -66,6 +67,7 @@ defmodule FunSheep.Courses.CourseBuilder do
   @spec preview_spec(map()) :: map()
   def preview_spec(spec) when is_map(spec) do
     chapters = spec["chapters"] || []
+    textbook = spec["textbook"]
 
     %{
       name: spec["name"],
@@ -80,28 +82,37 @@ defmodule FunSheep.Courses.CourseBuilder do
         Enum.reduce(chapters, 0, fn ch, acc -> acc + length(ch["sections"] || []) end),
       has_exam_simulation: not is_nil(spec["exam_simulation"]),
       has_bundle: not is_nil(spec["bundle"]),
+      has_textbook: not is_nil(textbook),
+      textbook_title: textbook && (textbook["title"] || textbook["pdf_url"] || textbook["amazon_url"]),
       price_cents: spec["price_cents"]
     }
   end
 
   @doc """
   Creates a full course structure from a validated spec map inside a single
-  DB transaction.
+  DB transaction, then attaches any textbook reference outside the transaction
+  (since it may require network I/O).
 
-  Returns `{:ok, %{course: course, chapters: [{chapter, [section]}], template: template_or_nil, bundle: bundle_or_nil}}`
+  Returns `{:ok, %{course: course, chapters: [{chapter, [section]}], template: template_or_nil, bundle: bundle_or_nil, textbook: textbook_or_nil}}`
   or `{:error, reason}`.
 
   Idempotent — existing records are skipped rather than duplicated.
   """
   @spec create_from_spec(map()) :: {:ok, map()} | {:error, term()}
   def create_from_spec(spec) when is_map(spec) do
-    Repo.transaction(fn ->
-      course = find_or_create_course!(spec)
-      chapters = create_chapters!(course, spec["chapters"] || [])
-      template = maybe_create_format_template!(course, spec["exam_simulation"])
-      bundle = maybe_create_bundle!(spec["bundle"], course)
-      %{course: course, chapters: chapters, template: template, bundle: bundle}
-    end)
+    with {:ok, result} <-
+           Repo.transaction(fn ->
+             course = find_or_create_course!(spec)
+             chapters = create_chapters!(course, spec["chapters"] || [])
+             template = maybe_create_format_template!(course, spec["exam_simulation"])
+             bundle = maybe_create_bundle!(spec["bundle"], course)
+             %{course: course, chapters: chapters, template: template, bundle: bundle}
+           end) do
+      # Textbook attachment runs outside the transaction — it may do HTTP I/O
+      # and we don't want a network timeout to roll back the course structure.
+      textbook = attach_textbook(result.course, spec["textbook"])
+      {:ok, Map.put(result, :textbook, textbook)}
+    end
   end
 
   # --- Course creation ------------------------------------------------------
@@ -309,4 +320,185 @@ defmodule FunSheep.Courses.CourseBuilder do
   end
 
   defp infer_test_type([]), do: nil
+
+  # --- Textbook attachment (runs outside DB transaction) --------------------
+
+  # No textbook in spec — nothing to do.
+  defp attach_textbook(_course, nil), do: nil
+
+  defp attach_textbook(course, spec) when is_map(spec) do
+    cond do
+      pdf_url = spec["pdf_url"] ->
+        case attach_pdf_textbook(course, pdf_url) do
+          {:ok, material} ->
+            Logger.info("[CourseBuilder] PDF textbook queued for OCR: #{material.id}")
+            %{type: :pdf, material_id: material.id, file_name: material.file_name}
+
+          {:error, reason} ->
+            Logger.warning("[CourseBuilder] PDF textbook attachment failed: #{inspect(reason)}")
+            nil
+        end
+
+      true ->
+        # Amazon URL or plain metadata — resolve to a Textbook record via OpenLibrary
+        case attach_metadata_textbook(course, spec) do
+          {:ok, textbook} ->
+            Logger.info("[CourseBuilder] Textbook linked: #{textbook.title} (#{textbook.id})")
+            %{type: :metadata, textbook_id: textbook.id, title: textbook.title}
+
+          {:error, reason} ->
+            Logger.warning("[CourseBuilder] Metadata textbook attachment failed: #{inspect(reason)}")
+            nil
+        end
+    end
+  end
+
+  # Download a PDF from a URL, store in GCS, create an UploadedMaterial record,
+  # and enqueue OCRMaterialWorker. Returns {:ok, material} or {:error, reason}.
+  defp attach_pdf_textbook(course, pdf_url) do
+    with {:ok, admin_role_id} <- fetch_admin_role_id(),
+         {:ok, pdf_bytes} <- download_url(pdf_url),
+         filename <- pdf_filename_from_url(pdf_url),
+         storage_key <- "materials/#{Ecto.UUID.generate()}/#{filename}",
+         {:ok, _} <- FunSheep.Storage.put(storage_key, pdf_bytes),
+         {:ok, material} <-
+           FunSheep.Content.create_uploaded_material(%{
+             file_path: storage_key,
+             file_name: filename,
+             file_type: "application/pdf",
+             file_size: byte_size(pdf_bytes),
+             material_kind: :textbook,
+             user_role_id: admin_role_id,
+             course_id: course.id,
+             ocr_status: :pending
+           }) do
+      FunSheep.Workers.OCRMaterialWorker.new(%{
+        material_id: material.id,
+        course_id: course.id
+      })
+      |> Oban.insert()
+
+      {:ok, material}
+    end
+  end
+
+  # Resolve an Amazon URL or plain metadata to an OpenLibrary-backed Textbook
+  # record and link it to the course via textbook_id.
+  defp attach_metadata_textbook(course, spec) do
+    title = spec["title"] || title_from_amazon_url(spec["amazon_url"])
+
+    if is_nil(title) do
+      {:error, :no_title}
+    else
+      subject = course.catalog_subject || course.subject
+
+      result =
+        cond do
+          # Caller already resolved the openlibrary_key — fast path
+          spec["openlibrary_key"] ->
+            FunSheep.Courses.find_or_create_textbook(%{
+              title: title,
+              author: spec["author"],
+              isbn: spec["isbn"],
+              subject: subject,
+              grades: spec["grades"] || [],
+              openlibrary_key: spec["openlibrary_key"]
+            })
+
+          # Have an ISBN — try OpenLibrary ISBN lookup
+          spec["isbn"] ->
+            isbn = spec["isbn"]
+            ol_results = TextbookSearch.search_openlibrary(subject, title)
+
+            match = Enum.find(ol_results, fn r -> r.isbn == isbn end) || List.first(ol_results)
+
+            if match do
+              FunSheep.Courses.find_or_create_textbook(
+                Map.put(match, :subject, subject)
+                |> Map.put(:grades, spec["grades"] || [])
+              )
+            else
+              {:error, :not_found_on_openlibrary}
+            end
+
+          # Title only — search OpenLibrary
+          true ->
+            ol_results = TextbookSearch.search_openlibrary(subject, title)
+
+            case List.first(ol_results) do
+              nil ->
+                {:error, :not_found_on_openlibrary}
+
+              match ->
+                FunSheep.Courses.find_or_create_textbook(
+                  Map.merge(match, %{subject: subject, grades: spec["grades"] || []})
+                )
+            end
+        end
+
+      case result do
+        {:ok, textbook} ->
+          FunSheep.Courses.update_course(course, %{textbook_id: textbook.id})
+          {:ok, textbook}
+
+        other ->
+          other
+      end
+    end
+  end
+
+  # Extract a human-readable title from the slug segment of an Amazon URL.
+  # e.g. "https://amazon.com/Official-SAT-Study-Guide-2020/dp/1457312190"
+  #       → "Official SAT Study Guide 2020"
+  defp title_from_amazon_url(nil), do: nil
+
+  defp title_from_amazon_url(url) do
+    uri = URI.parse(url)
+
+    slug =
+      uri.path
+      |> String.split("/")
+      |> Enum.find(fn segment ->
+        # The title slug sits before "/dp/" — it contains hyphens and is NOT an ASIN (10 uppercase alphanum)
+        String.length(segment) > 10 and not Regex.match?(~r/^[A-Z0-9]{10}$/, segment)
+      end)
+
+    if slug do
+      slug
+      |> String.replace("-", " ")
+      |> String.trim()
+    end
+  end
+
+  defp pdf_filename_from_url(url) do
+    path = URI.parse(url).path || "textbook.pdf"
+    basename = Path.basename(path)
+    if String.ends_with?(basename, ".pdf"), do: basename, else: basename <> ".pdf"
+  end
+
+  defp download_url(url) do
+    case Req.get(url, receive_timeout: 60_000, max_redirects: 5) do
+      {:ok, %{status: 200, body: body}} when is_binary(body) and byte_size(body) > 0 ->
+        {:ok, body}
+
+      {:ok, %{status: status}} ->
+        {:error, {:http_error, status}}
+
+      {:error, reason} ->
+        {:error, {:request_failed, reason}}
+    end
+  end
+
+  defp fetch_admin_role_id do
+    case Repo.one(
+           from ur in UserRole,
+             where: ur.role == :admin,
+             order_by: [asc: ur.inserted_at],
+             select: ur.id,
+             limit: 1
+         ) do
+      nil -> {:error, :no_admin_user}
+      id -> {:ok, id}
+    end
+  end
 end

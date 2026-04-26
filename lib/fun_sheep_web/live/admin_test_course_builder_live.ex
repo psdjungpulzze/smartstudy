@@ -345,6 +345,9 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
               <div :if={@spec_preview.has_exam_simulation}>
                 <span class="text-[#8E8E93]">Exam template:</span> Yes
               </div>
+              <div :if={@spec_preview.has_textbook}>
+                <span class="text-[#8E8E93]">Textbook:</span> {@spec_preview.textbook_title}
+              </div>
               <div :if={@spec_preview.has_bundle}>
                 <span class="text-[#8E8E93]">Bundle:</span> Yes
               </div>
