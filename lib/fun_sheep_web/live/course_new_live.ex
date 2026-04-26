@@ -33,6 +33,11 @@ defmodule FunSheepWeb.CourseNewLive do
         detected_profile: nil,
         generation_brief: "",
         generation_brief_auto: false,
+        # Premium catalog options (shown when detected_profile is set)
+        is_premium_catalog: false,
+        access_level: "public",
+        price_cents: nil,
+        auto_create_tests: false,
         # State
         user_role: user_role,
         editing_course: nil,
@@ -58,7 +63,11 @@ defmodule FunSheepWeb.CourseNewLive do
         subject: course.subject,
         selected_grades: course.grades || [],
         description: course.description || "",
-        generation_brief: existing_brief
+        generation_brief: existing_brief,
+        is_premium_catalog: course.is_premium_catalog || false,
+        access_level: course.access_level || "public",
+        price_cents: course.price_cents,
+        auto_create_tests: course.auto_create_tests || false
       )
       |> maybe_detect_profile()
       |> prefill_textbook_from_course(course)
@@ -233,6 +242,33 @@ defmodule FunSheepWeb.CourseNewLive do
     {:noreply,
      assign(socket, textbook_mode: :none)
      |> maybe_refresh_textbooks()}
+  end
+
+  def handle_event("toggle_premium_catalog", _params, socket) do
+    new_val = !socket.assigns.is_premium_catalog
+    # Reset price/level if toggling off
+    socket =
+      if new_val,
+        do: assign(socket, is_premium_catalog: true, access_level: "premium"),
+        else: assign(socket, is_premium_catalog: false, access_level: "public", price_cents: nil, auto_create_tests: false)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("update_access_level", %{"value" => level}, socket) do
+    {:noreply, assign(socket, access_level: level)}
+  end
+
+  def handle_event("update_price_cents", %{"value" => value}, socket) do
+    parsed = case Integer.parse(value) do
+      {n, _} when n >= 0 -> n
+      _ -> nil
+    end
+    {:noreply, assign(socket, price_cents: parsed)}
+  end
+
+  def handle_event("toggle_auto_create_tests", _params, socket) do
+    {:noreply, assign(socket, auto_create_tests: !socket.assigns.auto_create_tests)}
   end
 
   def handle_event("save_course", _params, socket) do
@@ -437,7 +473,23 @@ defmodule FunSheepWeb.CourseNewLive do
   defp build_catalog_attrs(assigns) do
     if assigns.detected_profile do
       profile = assigns.detected_profile
-      %{"catalog_test_type" => profile.catalog_test_type, "catalog_subject" => profile.catalog_subject}
+
+      base = %{
+        "catalog_test_type" => profile.catalog_test_type,
+        "catalog_subject" => profile.catalog_subject,
+        "auto_create_tests" => assigns.auto_create_tests
+      }
+
+      if assigns.is_premium_catalog do
+        Map.merge(base, %{
+          "is_premium_catalog" => true,
+          "access_level" => assigns.access_level,
+          "price_cents" => assigns.price_cents,
+          "sample_question_count" => 10
+        })
+      else
+        base
+      end
     else
       %{}
     end
@@ -628,6 +680,15 @@ defmodule FunSheepWeb.CourseNewLive do
               selected_textbook={@selected_textbook}
               custom_textbook_name={@custom_textbook_name}
               textbook_mode={@textbook_mode}
+            />
+
+            <%!-- Premium catalog options — only for recognized standardized tests --%>
+            <.premium_catalog_options
+              :if={@detected_profile}
+              is_premium_catalog={@is_premium_catalog}
+              access_level={@access_level}
+              price_cents={@price_cents}
+              auto_create_tests={@auto_create_tests}
             />
           </div>
 
@@ -936,4 +997,91 @@ defmodule FunSheepWeb.CourseNewLive do
   end
 
   defp textbook_field(_, _), do: nil
+
+  # ── Premium Catalog Options Component ────────────────────────────────────
+
+  attr :is_premium_catalog, :boolean, default: false
+  attr :access_level, :string, default: "public"
+  attr :price_cents, :integer, default: nil
+  attr :auto_create_tests, :boolean, default: false
+
+  defp premium_catalog_options(assigns) do
+    ~H"""
+    <div class="mt-4 space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+      <p class="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+        Catalog & Test Options
+      </p>
+
+      <%!-- Premium catalog toggle --%>
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Publish as premium catalog</p>
+          <p class="text-xs text-gray-500 mt-0.5">
+            Students pay once to access this course. First 10 questions are free.
+          </p>
+        </div>
+        <button
+          type="button"
+          phx-click="toggle_premium_catalog"
+          class={"relative inline-flex h-6 w-11 items-center rounded-full transition-colors #{if @is_premium_catalog, do: "bg-[#4CD964]", else: "bg-gray-200"}"}
+          role="switch"
+          aria-checked={to_string(@is_premium_catalog)}
+        >
+          <span class={"inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform #{if @is_premium_catalog, do: "translate-x-6", else: "translate-x-1"}"} />
+        </button>
+      </div>
+
+      <%!-- Access level + price (shown when premium enabled) --%>
+      <div :if={@is_premium_catalog} class="space-y-3 pt-1">
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">Access level</label>
+          <select
+            phx-change="update_access_level"
+            name="value"
+            class="w-full px-3 py-2 bg-white border border-gray-200 rounded-full text-sm text-gray-900 focus:border-[#4CD964] outline-none"
+          >
+            <option value="preview" selected={@access_level == "preview"}>Preview (free sample only)</option>
+            <option value="standard" selected={@access_level == "standard"}>Standard</option>
+            <option value="premium" selected={@access_level == "premium"}>Premium</option>
+            <option value="professional" selected={@access_level == "professional"}>Professional</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">
+            One-time price (USD cents) <span class="text-gray-400 font-normal">e.g. 999 = $9.99</span>
+          </label>
+          <input
+            type="number"
+            phx-change="update_price_cents"
+            name="value"
+            value={@price_cents}
+            min="0"
+            placeholder="e.g. 999"
+            class="w-full px-4 py-2 bg-white border border-gray-200 rounded-full text-sm text-gray-900 focus:border-[#4CD964] outline-none"
+          />
+        </div>
+      </div>
+
+      <%!-- Auto-create upcoming test schedules --%>
+      <div class="flex items-center justify-between pt-1">
+        <div>
+          <p class="text-sm font-medium text-gray-900">Auto-create upcoming test dates</p>
+          <p class="text-xs text-gray-500 mt-0.5">
+            We'll create test schedules from official College Board / ACT dates when the course is published.
+          </p>
+        </div>
+        <button
+          type="button"
+          phx-click="toggle_auto_create_tests"
+          class={"relative inline-flex h-6 w-11 items-center rounded-full transition-colors #{if @auto_create_tests, do: "bg-[#4CD964]", else: "bg-gray-200"}"}
+          role="switch"
+          aria-checked={to_string(@auto_create_tests)}
+        >
+          <span class={"inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform #{if @auto_create_tests, do: "translate-x-6", else: "translate-x-1"}"} />
+        </button>
+      </div>
+    </div>
+    """
+  end
 end

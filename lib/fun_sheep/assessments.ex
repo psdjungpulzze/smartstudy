@@ -976,4 +976,19 @@ defmodule FunSheep.Assessments do
       true -> :low
     end
   end
+
+  @doc """
+  Returns true if the user has made at least one question attempt in this course.
+
+  Used to determine the learning path state (no_test → test_pending → has_attempts).
+  """
+  @spec has_any_attempt?(binary(), binary()) :: boolean()
+  def has_any_attempt?(user_role_id, course_id) do
+    from(qa in QuestionAttempt,
+      join: q in assoc(qa, :question),
+      where: qa.user_role_id == ^user_role_id and q.course_id == ^course_id,
+      limit: 1
+    )
+    |> Repo.exists?()
+  end
 end

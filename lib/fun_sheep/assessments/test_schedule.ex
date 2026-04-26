@@ -26,9 +26,15 @@ defmodule FunSheep.Assessments.TestSchedule do
     field :target_set_by, Ecto.Enum, values: [:student, :guardian]
     field :target_set_at, :utc_datetime
 
+    # Schedule classification: standard (student-created), official (auto-created
+    # from known_test_dates), simulation (full mock exam session)
+    field :schedule_type, Ecto.Enum, values: [:standard, :official, :simulation], default: :standard
+    field :is_auto_created, :boolean, default: false
+
     belongs_to :user_role, FunSheep.Accounts.UserRole
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :format_template, FunSheep.Assessments.TestFormatTemplate
+    belongs_to :known_test_date, FunSheep.Courses.KnownTestDate
 
     has_many :readiness_scores, FunSheep.Assessments.ReadinessScore
     has_many :study_guides, FunSheep.Learning.StudyGuide
@@ -52,7 +58,10 @@ defmodule FunSheep.Assessments.TestSchedule do
       :external_synced_at,
       :target_readiness_score,
       :target_set_by,
-      :target_set_at
+      :target_set_at,
+      :schedule_type,
+      :is_auto_created,
+      :known_test_date_id
     ])
     |> validate_required([:name, :test_date, :scope, :user_role_id, :course_id])
     |> validate_number(:target_readiness_score,
@@ -62,5 +71,6 @@ defmodule FunSheep.Assessments.TestSchedule do
     |> foreign_key_constraint(:user_role_id)
     |> foreign_key_constraint(:course_id)
     |> foreign_key_constraint(:format_template_id)
+    |> foreign_key_constraint(:known_test_date_id)
   end
 end
