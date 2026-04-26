@@ -2102,13 +2102,13 @@ defmodule FunSheepWeb.CourseDetailLive do
 
   defp validation_subtitle(:active, counts, _q) do
     pending = Map.get(counts, :pending, 0)
-    passed = Map.get(counts, :passed, 0)
-    total = generated_total(counts, passed)
+    done = Map.get(counts, :passed, 0) + Map.get(counts, :needs_review, 0)
+    total = generated_total(counts, done)
 
     cond do
       total == 0 -> "Preparing to validate..."
       pending == 0 -> "Finalizing validation..."
-      true -> "Validated #{passed}/#{total} — #{pending} remaining"
+      true -> "Validated #{done}/#{total} — #{pending} remaining"
     end
   end
 
@@ -2116,7 +2116,8 @@ defmodule FunSheepWeb.CourseDetailLive do
 
   defp validation_percent(counts) do
     total = generated_total(counts, 0)
-    if total == 0, do: 0, else: min(round(Map.get(counts, :passed, 0) / total * 100), 100)
+    done = Map.get(counts, :passed, 0) + Map.get(counts, :needs_review, 0)
+    if total == 0, do: 0, else: min(round(done / total * 100), 100)
   end
 
   attr :course, :map, required: true

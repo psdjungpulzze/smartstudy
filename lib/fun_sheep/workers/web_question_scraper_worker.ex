@@ -157,7 +157,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   # --- Scrape a single source ---
 
-  @binary_extensions ~w(.pdf .doc .docx .ppt .pptx .xls .xlsx .zip .mp4 .mp3 .wav .png .jpg .jpeg .gif .svg)
+  @binary_extensions ~w(.doc .docx .ppt .pptx .xls .xlsx .zip .mp4 .mp3 .wav .png .jpg .jpeg .gif .svg)
 
   defp binary_url?(url) when is_binary(url) do
     path = URI.parse(url).path || ""
@@ -167,58 +167,144 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   defp binary_url?(_), do: false
 
+  defp pdf_url?(url) when is_binary(url) do
+    path = URI.parse(url).path || ""
+    String.ends_with?(String.downcase(path), ".pdf")
+  end
+
+  defp pdf_url?(_), do: false
+
   defp safe_slice(text, max) when is_binary(text) do
     if String.valid?(text), do: String.slice(text, 0, max), else: ""
   end
 
   defp scrape_and_extract(source, course) do
-    if binary_url?(source.url) do
-      Logger.debug("[Scraper] Skipping binary URL: #{source.url}")
-      Content.update_discovered_source(source, %{status: "skipped"})
+    cond do
+      pdf_url?(source.url) ->
+        # PDF file — download and route through OCR pipeline rather than skipping.
+        # This handles sources like SAT practice test PDFs from College Board.
+        Logger.info("[Scraper] PDF source, downloading for OCR: #{source.url}")
+        attach_pdf_source(source, course)
+
+      binary_url?(source.url) ->
+        Logger.debug("[Scraper] Skipping non-PDF binary URL: #{source.url}")
+        Content.update_discovered_source(source, %{status: "skipped"})
+        0
+
+      true ->
+        Content.update_discovered_source(source, %{status: "scraping"})
+
+        case fetch_page(source.url) do
+          {:ok, text} ->
+            Content.update_discovered_source(source, %{
+              scraped_text: safe_slice(text, @max_page_size),
+              content_size_bytes: byte_size(text),
+              status: "scraped"
+            })
+
+            # Extract questions from the scraped text
+            questions = extract_questions_from_text(text, course, source)
+
+            # Insert questions
+            grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
+
+            {inserted, inserted_ids} =
+              Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
+                case insert_question(q, course, grounding_ref) do
+                  {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
+                  {:error, _} -> {count, ids}
+                end
+              end)
+
+            FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
+              course_id: course.id
+            )
+
+            FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
+
+            Content.update_discovered_source(source, %{
+              status: "processed",
+              questions_extracted: inserted
+            })
+
+            inserted
+
+          {:error, reason} ->
+            error_msg = inspect(reason)
+            Logger.warning("[Scraper] Failed to fetch #{source.url}: #{error_msg}")
+
+            Content.update_discovered_source(source, %{
+              status: "failed",
+              error_message: error_msg
+            })
+
+            0
+        end
+    end
+  end
+
+  # Download a PDF discovered source and add it as an UploadedMaterial for OCR.
+  # Returns 0 (questions are not extracted synchronously — they come from the OCR pipeline).
+  defp attach_pdf_source(source, course) do
+    filename =
+      (URI.parse(source.url).path || "document.pdf")
+      |> String.split("/")
+      |> List.last()
+      |> URI.decode()
+      |> then(fn f -> if String.ends_with?(String.downcase(f), ".pdf"), do: f, else: f <> ".pdf" end)
+
+    with {:ok, pdf_bytes} <- fetch_pdf_bytes(source.url),
+         storage_key = "materials/#{Ecto.UUID.generate()}/#{filename}",
+         {:ok, _} <- FunSheep.Storage.put(storage_key, pdf_bytes, content_type: "application/pdf"),
+         {:ok, material} <-
+           FunSheep.Content.create_uploaded_material(%{
+             file_path: storage_key,
+             file_name: filename,
+             file_type: "application/pdf",
+             file_size: byte_size(pdf_bytes),
+             material_kind: :sample_questions,
+             user_role_id: course.created_by_id,
+             course_id: course.id,
+             ocr_status: :pending
+           }) do
+      FunSheep.Workers.OCRMaterialWorker.new(%{
+        material_id: material.id,
+        course_id: course.id
+      })
+      |> Oban.insert()
+
+      Content.update_discovered_source(source, %{status: "processed"})
+
+      Logger.info(
+        "[Scraper] PDF queued for OCR: material=#{material.id}, source=#{source.id}, bytes=#{byte_size(pdf_bytes)}"
+      )
+
       0
     else
-      Content.update_discovered_source(source, %{status: "scraping"})
+      {:error, reason} ->
+        error_msg = inspect(reason)
 
-      case fetch_page(source.url) do
-        {:ok, text} ->
-          Content.update_discovered_source(source, %{
-            scraped_text: safe_slice(text, @max_page_size),
-            content_size_bytes: byte_size(text),
-            status: "scraped"
-          })
+        Logger.warning(
+          "[Scraper] PDF download/storage failed for #{source.url}: #{error_msg}"
+        )
 
-          # Extract questions from the scraped text
-          questions = extract_questions_from_text(text, course, source)
+        Content.update_discovered_source(source, %{status: "failed", error_message: error_msg})
+        0
+    end
+  end
 
-          # Insert questions
-          grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
-
-          {inserted, inserted_ids} =
-            Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
-              case insert_question(q, course, grounding_ref) do
-                {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
-                {:error, _} -> {count, ids}
-              end
-            end)
-
-          FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids,
-            course_id: course.id
-          )
-
-          FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
-
-          Content.update_discovered_source(source, %{
-            status: "processed",
-            questions_extracted: inserted
-          })
-
-          inserted
-
-        {:error, reason} ->
-          Logger.warning("[Scraper] Failed to fetch #{source.url}: #{inspect(reason)}")
-          Content.update_discovered_source(source, %{status: "failed"})
-          0
-      end
+  defp fetch_pdf_bytes(url) do
+    case Req.get(url,
+           headers: [
+             {"user-agent",
+              "Mozilla/5.0 (compatible; FunSheep StudyBot/1.0; +https://funsheep.app)"}
+           ],
+           receive_timeout: 60_000,
+           max_redirects: 5
+         ) do
+      {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
+      {:ok, %{status: status}} -> {:error, {:http_status, status}}
+      {:error, reason} -> {:error, reason}
     end
   end
 

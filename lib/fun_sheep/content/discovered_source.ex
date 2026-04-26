@@ -36,6 +36,7 @@ defmodule FunSheep.Content.DiscoveredSource do
     field :scraped_text, :string
     field :search_query, :string
     field :confidence_score, :float, default: 0.0
+    field :error_message, :string
 
     belongs_to :course, FunSheep.Courses.Course
     belongs_to :section, FunSheep.Courses.Section
@@ -59,6 +60,7 @@ defmodule FunSheep.Content.DiscoveredSource do
       :scraped_text,
       :search_query,
       :confidence_score,
+      :error_message,
       :course_id,
       :section_id
     ])
