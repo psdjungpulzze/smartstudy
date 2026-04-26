@@ -10,8 +10,7 @@ defmodule FunSheepWeb.CourseSearchLive do
   def mount(_params, _session, socket) do
     user_role_id = socket.assigns.current_user["id"]
 
-    {my_courses, enrolled_course_ids, nearby_courses, user_grade, user_school_id,
-     tests_by_course} =
+    {my_courses, enrolled_course_ids, nearby_courses, user_grade, user_school_id, tests_by_course} =
       with {:ok, _} <- Ecto.UUID.cast(user_role_id),
            %{} = user_role <- Accounts.get_user_role(user_role_id) do
         mine = Courses.list_user_courses(user_role_id)
@@ -458,7 +457,7 @@ defmodule FunSheepWeb.CourseSearchLive do
               {@course.subject}
             </span>
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold bg-cyan-50 text-cyan-600">
-              Grade {@course.grade}
+              {FunSheep.Courses.format_grades(@course.grades)}
             </span>
             <span
               :if={@course.school}

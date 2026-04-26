@@ -93,7 +93,7 @@ defmodule FunSheep.Courses do
   defp maybe_filter_subject(query, _params), do: query
 
   defp maybe_filter_grade(query, %{"grade" => grade}) when grade != "" do
-    where(query, [c], c.grade == ^grade)
+    where(query, [c], fragment("? = ANY(?)", ^grade, c.grades) or c.grades == ^[])
   end
 
   defp maybe_filter_grade(query, _params), do: query
@@ -137,6 +137,21 @@ defmodule FunSheep.Courses do
   @grade_order ~w(K 1 2 3 4 5 6 7 8 9 10 11 12 College)
 
   @doc """
+  Formats a grades array into a human-readable label.
+  Returns "Grade K", "Grades 10, 11, 12", or "All Grades" for an empty array.
+  """
+  def format_grades([]), do: "All Grades"
+  def format_grades(nil), do: "All Grades"
+  def format_grades([g]), do: "Grade #{g}"
+
+  def format_grades(grades) when is_list(grades) do
+    ordered =
+      Enum.sort_by(grades, fn g -> Enum.find_index(@grade_order, &(&1 == g)) || 999 end)
+
+    "Grades #{Enum.join(ordered, ", ")}"
+  end
+
+  @doc """
   Lists courses for nearby grades (+-1) at the given school,
   excluding courses the user already owns.
   """
@@ -155,7 +170,7 @@ defmodule FunSheep.Courses do
       from(c in Course,
         left_join: ts in FunSheep.Assessments.TestSchedule,
         on: ts.course_id == c.id and ts.user_role_id == ^user_role_id,
-        where: c.grade in ^grades,
+        where: fragment("? && ?", type(^grades, {:array, :string}), c.grades) or c.grades == ^[],
         where: c.created_by_id != ^user_role_id,
         where: is_nil(ts.id),
         where: c.id not in subquery(sc_subquery),
@@ -203,7 +218,10 @@ defmodule FunSheep.Courses do
       end
 
     from(c in Course,
-      where: c.school_id == ^school_id and c.grade in ^grade_list,
+      where:
+        c.school_id == ^school_id and
+          (fragment("? && ?", type(^grade_list, {:array, :string}), c.grades) or
+             c.grades == ^[]),
       order_by: [asc: c.subject, asc: c.name],
       limit: ^limit,
       preload: [:chapters]
@@ -227,7 +245,8 @@ defmodule FunSheep.Courses do
       end
 
     from(c in Course,
-      where: c.grade in ^grade_list,
+      where:
+        fragment("? && ?", type(^grade_list, {:array, :string}), c.grades) or c.grades == ^[],
       order_by: [asc: c.subject, asc: c.name],
       limit: ^limit,
       preload: [:chapters]

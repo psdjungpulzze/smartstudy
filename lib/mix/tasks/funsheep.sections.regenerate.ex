@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Funsheep.Sections.Regenerate do
     course = Courses.get_course!(course_id)
 
     Mix.shell().info(
-      "Regenerating sections for: #{course.name} (#{course.subject}, grade #{course.grade})"
+      "Regenerating sections for: #{course.name} (#{course.subject}, grades #{FunSheep.Courses.format_grades(course.grades)})"
     )
 
     {:ok, count} = SectionRegenerationWorker.enqueue_for_course(course_id)

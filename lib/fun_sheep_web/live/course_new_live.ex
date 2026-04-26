@@ -18,7 +18,7 @@ defmodule FunSheepWeb.CourseNewLive do
         grade_options: @grade_options,
         course_name: "",
         subject: "",
-        selected_grade: user_role && user_role.grade,
+        selected_grades: if(user_role && user_role.grade, do: [user_role.grade], else: []),
         description: "",
         errors: %{},
         # Textbook selection
@@ -49,7 +49,7 @@ defmodule FunSheepWeb.CourseNewLive do
         editing_course: course,
         course_name: course.name,
         subject: course.subject,
-        selected_grade: course.grade,
+        selected_grades: course.grades || [],
         description: course.description || ""
       )
       |> prefill_textbook_from_course(course)
@@ -122,17 +122,22 @@ defmodule FunSheepWeb.CourseNewLive do
       |> maybe_assign(params, "course_name", :course_name)
       |> maybe_assign(params, "subject", :subject)
       |> maybe_assign(params, "description", :description)
-      |> maybe_assign(params, "selected_grade", :selected_grade)
       |> maybe_refresh_textbooks()
 
     {:noreply, socket}
+  end
+
+  def handle_event("toggle_grade", %{"grade" => grade}, socket) do
+    grades = socket.assigns.selected_grades
+    updated = if grade in grades, do: List.delete(grades, grade), else: [grade | grades]
+    {:noreply, socket |> assign(selected_grades: updated) |> maybe_refresh_textbooks()}
   end
 
   # ── Textbook Events ──────────────────────────────────────────────────────
 
   def handle_event("textbook_search", %{"textbook_query" => query}, socket) do
     subject = socket.assigns.subject
-    grade = socket.assigns.selected_grade
+    grade = List.first(socket.assigns.selected_grades)
 
     textbooks =
       if subject != "" do
@@ -245,7 +250,7 @@ defmodule FunSheepWeb.CourseNewLive do
     course_attrs = %{
       "name" => assigns.course_name,
       "subject" => assigns.subject,
-      "grade" => assigns.selected_grade,
+      "grades" => assigns.selected_grades,
       "description" => assigns.description,
       "created_by_id" => user_role && user_role.id,
       "school_id" => user_role && user_role.school_id,
@@ -301,9 +306,9 @@ defmodule FunSheepWeb.CourseNewLive do
 
   defp maybe_refresh_textbooks(socket) do
     subject = socket.assigns.subject
-    grade = socket.assigns.selected_grade
+    grade = List.first(socket.assigns.selected_grades)
 
-    if subject != "" and grade != nil and grade != "" do
+    if subject != "" and grade != nil do
       textbooks = TextbookSearch.search(subject, grade, socket.assigns.textbook_search)
       assign(socket, textbooks: textbooks, show_textbook_section: true)
     else
@@ -338,7 +343,7 @@ defmodule FunSheepWeb.CourseNewLive do
       end
 
     errors =
-      if is_nil(assigns.selected_grade) or assigns.selected_grade == "" do
+      if assigns.selected_grades == [] do
         Map.put(errors, :grade, "Grade level is required")
       else
         errors
@@ -402,37 +407,34 @@ defmodule FunSheepWeb.CourseNewLive do
               </p>
             </div>
 
-            <%!-- Subject + Grade row --%>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label class="block text-sm font-medium text-gray-900 mb-1">Subject *</label>
-                <input
-                  type="text"
-                  value={@subject}
-                  name="subject"
-                  placeholder="e.g., Biology, Mathematics"
-                  class={"w-full px-4 py-3 bg-gray-50 text-gray-900 border rounded-full outline-none transition-colors #{if @errors[:subject], do: "border-red-400", else: "border-gray-200 focus:border-[#4CD964]"}"}
-                />
-                <p :if={@errors[:subject]} class="text-sm text-red-500 mt-1">{@errors[:subject]}</p>
-              </div>
+            <%!-- Subject --%>
+            <div>
+              <label class="block text-sm font-medium text-gray-900 mb-1">Subject *</label>
+              <input
+                type="text"
+                value={@subject}
+                name="subject"
+                placeholder="e.g., Biology, Mathematics"
+                class={"w-full px-4 py-3 bg-gray-50 text-gray-900 border rounded-full outline-none transition-colors #{if @errors[:subject], do: "border-red-400", else: "border-gray-200 focus:border-[#4CD964]"}"}
+              />
+              <p :if={@errors[:subject]} class="text-sm text-red-500 mt-1">{@errors[:subject]}</p>
+            </div>
 
-              <div>
-                <label class="block text-sm font-medium text-gray-900 mb-1">Grade Level *</label>
-                <select
-                  name="selected_grade"
-                  class={"w-full px-4 py-3 bg-gray-50 text-gray-900 border rounded-full outline-none transition-colors appearance-none #{if @errors[:grade], do: "border-red-400", else: "border-gray-200 focus:border-[#4CD964]"}"}
+            <%!-- Grade Level --%>
+            <div>
+              <label class="block text-sm font-medium text-gray-900 mb-2">Grade Level *</label>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  :for={grade <- @grade_options}
+                  type="button"
+                  phx-click="toggle_grade"
+                  phx-value-grade={grade}
+                  class={"px-3 py-1.5 rounded-full text-sm font-medium border transition-colors #{if grade in @selected_grades, do: "bg-[#4CD964] border-[#4CD964] text-white", else: "bg-white border-gray-200 text-gray-700 hover:border-[#4CD964]"}"}
                 >
-                  <option value="">Select grade</option>
-                  <option
-                    :for={grade <- @grade_options}
-                    value={grade}
-                    selected={grade == @selected_grade}
-                  >
-                    {grade}
-                  </option>
-                </select>
-                <p :if={@errors[:grade]} class="text-sm text-red-500 mt-1">{@errors[:grade]}</p>
+                  {grade}
+                </button>
               </div>
+              <p :if={@errors[:grade]} class="text-sm text-red-500 mt-1">{@errors[:grade]}</p>
             </div>
 
             <%!-- Textbook Selection — shown once subject + grade are filled --%>

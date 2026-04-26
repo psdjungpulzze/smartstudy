@@ -1672,13 +1672,13 @@ defmodule FunSheep.Questions do
         join: c in Course,
         on: c.id == q.course_id,
         where: m.user_role_id == ^user_role_id,
-        group_by: [c.id, c.name, c.subject, c.grade],
+        group_by: [c.id, c.name, c.subject, c.grades],
         order_by: [desc: count(q.id)],
         select: %{
           course_id: c.id,
           course_name: c.name,
           course_subject: c.subject,
-          course_grade: c.grade,
+          course_grades: c.grades,
           question_count: count(q.id)
         }
       )

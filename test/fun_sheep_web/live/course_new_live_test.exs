@@ -57,8 +57,9 @@ defmodule FunSheepWeb.CourseNewLiveTest do
 
         view
         |> element("#course-form")
-        |> render_change(%{"course_name" => "AP Chemistry", "subject" => "Chemistry", "selected_grade" => "11"})
+        |> render_change(%{"course_name" => "AP Chemistry", "subject" => "Chemistry"})
 
+        render_click(view, "toggle_grade", %{"grade" => "11"})
         render_click(view, "no_textbook", %{})
 
         assert {:error, {:live_redirect, _}} =
@@ -112,11 +113,9 @@ defmodule FunSheepWeb.CourseNewLiveTest do
         # Fill subject + grade so the textbook picker becomes visible.
         view
         |> element("#course-form")
-        |> render_change(%{
-          "course_name" => "AP Biology",
-          "subject" => "Biology",
-          "selected_grade" => "11"
-        })
+        |> render_change(%{"course_name" => "AP Biology", "subject" => "Biology"})
+
+        render_click(view, "toggle_grade", %{"grade" => "11"})
 
         # Skip textbook so validation passes without hitting the OpenLibrary API.
         render_click(view, "no_textbook", %{})

@@ -881,7 +881,7 @@ defmodule FunSheepWeb.CourseDetailLive do
                 {@course.subject}
               </span>
               <span class="inline-flex items-center px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium bg-blue-50 text-blue-600">
-                Grade {@course.grade}
+                {FunSheep.Courses.format_grades(@course.grades)}
               </span>
               <span
                 :if={@course.school}
@@ -895,7 +895,7 @@ defmodule FunSheepWeb.CourseDetailLive do
           <div class="flex items-center gap-2 shrink-0">
             <.share_button
               title={"#{@course.name} - Fun Sheep"}
-              text={"I'm studying #{@course.subject} (Grade #{@course.grade}) on Fun Sheep! Join me."}
+              text={"I'm studying #{@course.subject} (#{FunSheep.Courses.format_grades(@course.grades)}) on Fun Sheep! Join me."}
               url={share_url(~p"/courses/#{@course.id}")}
               style={:icon}
             />
@@ -1295,7 +1295,9 @@ defmodule FunSheepWeb.CourseDetailLive do
           </select>
         </form>
       </div>
-      <p class="text-xs text-[#8E8E93] mb-3">Tip: a single PDF processes in minutes; individual images take hours.</p>
+      <p class="text-xs text-[#8E8E93] mb-3">
+        Tip: a single PDF processes in minutes; individual images take hours.
+      </p>
 
       <%!-- Upload buttons --%>
       <div class="flex flex-col sm:flex-row gap-3 mb-1">
@@ -1442,7 +1444,10 @@ defmodule FunSheepWeb.CourseDetailLive do
 
       <%!-- Process button — hidden when course is already actively processing --%>
       <div
-        :if={@has_pending && !@uploading && @course.processing_status not in ["processing", "extracting", "validating"]}
+        :if={
+          @has_pending && !@uploading &&
+            @course.processing_status not in ["processing", "extracting", "validating"]
+        }
         class="pt-3 border-t border-[#F5F5F7]"
       >
         <%!-- "Files ready" callout shown right after upload completes --%>
@@ -1457,7 +1462,9 @@ defmodule FunSheepWeb.CourseDetailLive do
         </div>
         <div class="flex items-center justify-between">
           <p class="text-xs text-[#8E8E93]">
-            <span class="font-medium text-[#1C1C1E]">{@pending_count} file{if @pending_count != 1, do: "s"}</span>
+            <span class="font-medium text-[#1C1C1E]">
+              {@pending_count} file{if @pending_count != 1, do: "s"}
+            </span>
             waiting — will update chapters, sections, and questions
           </p>
           <button
@@ -1468,7 +1475,6 @@ defmodule FunSheepWeb.CourseDetailLive do
           </button>
         </div>
       </div>
-
     </div>
     """
   end

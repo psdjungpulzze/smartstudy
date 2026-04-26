@@ -15,7 +15,7 @@ defmodule FunSheep.Courses.Course do
   schema "courses" do
     field :name, :string
     field :subject, :string
-    field :grade, :string
+    field :grades, {:array, :string}, default: []
     field :description, :string
     field :metadata, :map, default: %{}
     field :processing_status, :string, default: "pending"
@@ -53,7 +53,6 @@ defmodule FunSheep.Courses.Course do
     field :visibility_state, :string, default: "normal"
     field :dormant_at, :utc_datetime
 
-
     # A TOC rebase proposal waiting for approval. When non-nil, the course
     # has a candidate DiscoveredTOC that didn't auto-apply (material change
     # with risk to existing attempts). UI surfaces this as a banner to the
@@ -86,7 +85,7 @@ defmodule FunSheep.Courses.Course do
     |> cast(attrs, [
       :name,
       :subject,
-      :grade,
+      :grades,
       :description,
       :metadata,
       :school_id,
@@ -123,7 +122,8 @@ defmodule FunSheep.Courses.Course do
       :visibility_state,
       :dormant_at
     ])
-    |> validate_required([:name, :subject, :grade])
+    |> validate_required([:name, :subject])
+    |> validate_length(:grades, min: 1, message: "must include at least one grade")
     |> validate_inclusion(:access_level, @access_levels)
     |> validate_number(:sample_question_count, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:school_id)
