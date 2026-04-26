@@ -297,25 +297,43 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
 
   defp notify_teacher(course, reason) do
     with user_role_id when not is_nil(user_role_id) <- course.created_by_id do
-      {title, body} =
-        case reason do
-          :all_failed ->
-            {"Course setup failed",
-             "We couldn't process the uploaded files for \"#{course.name}\". Please check your files and try reprocessing."}
+      # Deduplicate: skip if an unread notification for this course failure
+      # already exists. Each reprocess attempt would otherwise flood the bell.
+      already_notified =
+        Notifications.unread_exists?(user_role_id,
+          type: :course_processing_failed,
+          course_id: course.id
+        )
 
-          :some_failed ->
-            {"Some files couldn't be processed",
-             "One or more files for \"#{course.name}\" failed to process. The course will continue with the files that succeeded."}
-        end
+      unless already_notified do
+        {title, body} =
+          case reason do
+            :all_failed ->
+              {"Course setup failed",
+               "We couldn't process the uploaded files for \"#{course.name}\". Please check your files and try reprocessing."}
 
-      Notifications.enqueue(user_role_id,
-        type: :course_processing_failed,
-        title: title,
-        body: body,
-        priority: 1,
-        channels: [:in_app, :push],
-        payload: %{"course_id" => course.id}
-      )
+            :some_failed ->
+              failed_count = Courses.count_failed_materials(course.id)
+              total = Courses.get_course!(course.id).ocr_total_count
+
+              if failed_count >= total do
+                {"Course setup failed",
+                 "We couldn't process any of the uploaded files for \"#{course.name}\". Please check your files and try reprocessing."}
+              else
+                {"Some files couldn't be processed",
+                 "One or more files for \"#{course.name}\" failed to process. The course will continue with the files that succeeded."}
+              end
+          end
+
+        Notifications.enqueue(user_role_id,
+          type: :course_processing_failed,
+          title: title,
+          body: body,
+          priority: 1,
+          channels: [:in_app, :push],
+          payload: %{"course_id" => course.id}
+        )
+      end
     end
   end
 end

@@ -201,13 +201,20 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
       # If by some race condition OCR is already done, advance immediately.
       # Normally OCR completes after web search, so this branch is a safety net.
       course = Courses.get_course!(course_id)
-      ocr_done = course.ocr_total_count == 0 or course.ocr_completed_count >= course.ocr_total_count
+
+      ocr_done =
+        course.ocr_total_count == 0 or course.ocr_completed_count >= course.ocr_total_count
 
       if ocr_done do
-        Logger.info("[WebDiscovery] OCR already complete, triggering EnrichDiscovery for #{course_id}")
+        Logger.info(
+          "[WebDiscovery] OCR already complete, triggering EnrichDiscovery for #{course_id}"
+        )
+
         Courses.advance_to_extraction(course_id)
       else
-        Logger.info("[WebDiscovery] Textbook uploaded — skipping web-only discovery; EnrichDiscovery will run after OCR")
+        Logger.info(
+          "[WebDiscovery] Textbook uploaded — skipping web-only discovery; EnrichDiscovery will run after OCR"
+        )
       end
     else
       # Web-only course: discovery from web search context is the only pass.
@@ -300,6 +307,10 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     has_textbook = Enum.any?(uploaded_kinds, &(&1 in [:textbook, :supplementary_book]))
     has_question_bank = :sample_questions in uploaded_kinds
 
+    # Prefer the course name as the search term when it's more specific than the
+    # stored subject. "AP US History" is a far better query token than "History".
+    search_subject = best_search_subject(course.name, subject)
+
     queries = []
 
     # 1. Question banks — skip if user already supplied sample questions
@@ -309,9 +320,9 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
       else
         queries ++
           [
-            {"#{subject} grade #{grade} practice questions", "question_bank"},
-            {"#{subject} grade #{grade} test questions with answers", "question_bank"},
-            {"#{subject} multiple choice questions and answers", "question_bank"}
+            {"#{search_subject} grade #{grade} practice questions", "question_bank"},
+            {"#{search_subject} grade #{grade} test questions with answers", "question_bank"},
+            {"#{search_subject} multiple choice questions and answers", "question_bank"}
           ]
       end
 
@@ -332,7 +343,10 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     # 3. AP/standardized test content (detect if AP course)
     queries =
       if is_ap_course?(subject, grade) do
-        ap_subject = normalize_ap_subject(subject)
+        # Derive ap_subject from the course name first (e.g. "AP US History" → "US History"),
+        # falling back to the stored subject. This prevents overly generic queries like
+        # "AP History ..." that match world/European history as well as US History.
+        ap_subject = normalize_ap_subject(course.name) || normalize_ap_subject(subject)
 
         queries ++
           [
@@ -350,7 +364,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     queries =
       queries ++
         Enum.flat_map(@search_sites, fn site ->
-          [{"site:#{site} #{subject} grade #{grade} questions", "question_bank"}]
+          [{"site:#{site} #{search_subject} grade #{grade} questions", "question_bank"}]
         end)
 
     # 5. Chapter-specific searches (top 3 chapters)
@@ -360,8 +374,8 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
           clean_name = clean_chapter_name(ch_name)
 
           [
-            {"#{subject} #{clean_name} practice questions", "question_bank"},
-            {"#{subject} #{clean_name} quiz", "practice_test"}
+            {"#{search_subject} #{clean_name} practice questions", "question_bank"},
+            {"#{search_subject} #{clean_name} quiz", "practice_test"}
           ]
         end)
 
@@ -369,20 +383,41 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     queries =
       queries ++
         [
-          {"#{subject} grade #{grade} study guide", "study_guide"},
-          {"#{subject} grade #{grade} review sheet", "study_guide"},
-          {"#{subject} grade #{grade} exam review", "study_guide"}
+          {"#{search_subject} grade #{grade} study guide", "study_guide"},
+          {"#{search_subject} grade #{grade} review sheet", "study_guide"},
+          {"#{search_subject} grade #{grade} exam review", "study_guide"}
         ]
 
     # 7. Past papers (especially for standardized courses)
     queries =
       queries ++
         [
-          {"#{subject} grade #{grade} past exam papers with answers", "practice_test"},
-          {"#{subject} final exam practice test", "practice_test"}
+          {"#{search_subject} grade #{grade} past exam papers with answers", "practice_test"},
+          {"#{search_subject} final exam practice test", "practice_test"}
         ]
 
     queries
+  end
+
+  # Returns the more descriptive of the course name and stored subject for use
+  # as a search term. The course name ("AP US History") is preferred over a
+  # broad subject label ("History") when it adds specificity.
+  defp best_search_subject(name, subject) do
+    name_stripped = if name, do: String.replace(name, ~r/^AP\s+/i, "") |> String.trim(), else: nil
+    subject_stripped = if subject, do: String.trim(subject), else: nil
+
+    cond do
+      # Course name is strictly longer (more specific) than the stored subject
+      name_stripped && subject_stripped &&
+          String.length(name_stripped) > String.length(subject_stripped) ->
+        name_stripped
+
+      subject_stripped && subject_stripped != "" ->
+        subject_stripped
+
+      true ->
+        name || ""
+    end
   end
 
   # --- Web Search Execution ---
@@ -556,10 +591,15 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     grade in ["11", "12", "College"]
   end
 
+  defp normalize_ap_subject(nil), do: nil
+
   defp normalize_ap_subject(subject) do
-    subject
-    |> String.replace(~r/^AP\s+/i, "")
-    |> String.trim()
+    result =
+      subject
+      |> String.replace(~r/^AP\s+/i, "")
+      |> String.trim()
+
+    if result == "", do: nil, else: result
   end
 
   defp clean_chapter_name(name) do

@@ -71,6 +71,16 @@ defmodule FunSheep.AI.OpenAI do
     end
   end
 
+  defp extract_text(%{
+         "choices" => [%{"finish_reason" => "length", "message" => %{"content" => partial}} | _]
+       }) do
+    Logger.warning(
+      "[AI.OpenAI] Response truncated (finish_reason=length); partial content: #{String.slice(partial || "", 0, 200)}"
+    )
+
+    {:error, :response_truncated}
+  end
+
   defp extract_text(%{"choices" => [%{"message" => %{"content" => text}} | _]}), do: {:ok, text}
   defp extract_text(%{"choices" => choices}), do: {:error, {:unexpected_choices, choices}}
   defp extract_text(body), do: {:error, {:unexpected_response, body}}

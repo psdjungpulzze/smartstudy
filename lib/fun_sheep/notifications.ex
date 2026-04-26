@@ -215,6 +215,35 @@ defmodule FunSheep.Notifications do
     |> Repo.all()
   end
 
+  @doc """
+  Returns true if an unread notification of the given type and course already
+  exists for the user. Used to prevent duplicate failure notifications when a
+  worker retries multiple times or the user clicks Reprocess repeatedly.
+  """
+  @spec unread_exists?(binary(), keyword()) :: boolean()
+  def unread_exists?(user_role_id, opts) do
+    type = Keyword.fetch!(opts, :type)
+    course_id = Keyword.get(opts, :course_id)
+
+    query =
+      from(n in Notification,
+        where:
+          n.user_role_id == ^user_role_id and
+            n.channel == :in_app and
+            n.type == ^type and
+            is_nil(n.read_at)
+      )
+
+    query =
+      if course_id do
+        where(query, [n], fragment("?->>'course_id' = ?", n.payload, ^course_id))
+      else
+        query
+      end
+
+    Repo.exists?(query)
+  end
+
   @doc "Returns the unread in-app count for a user."
   @spec unread_count(binary()) :: non_neg_integer()
   def unread_count(user_role_id) do

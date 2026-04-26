@@ -90,6 +90,12 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
     if course_cancelled do
       Logger.info("[Validation] Skipped cancelled course #{course_id}")
+      # Mark remaining :pending questions as :failed so the sweeper stops
+      # re-enqueuing them every 15 minutes. Without this, the sweeper sees
+      # :pending questions for the cancelled course, enqueues ~15 jobs per
+      # sweep, those jobs skip and leave the questions :pending — a permanent
+      # storm that exhausts the DB connection pool for all other workers.
+      cleanup_cancelled_course_questions(course_id)
       :ok
     else
 
@@ -286,6 +292,37 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
       Enum.split_with(updated, fn %{attempts: a} -> a >= @max_validation_attempts end)
 
     {Enum.map(give_up, & &1.id), Enum.map(retry, & &1.id)}
+  end
+
+  defp cleanup_cancelled_course_questions(nil), do: :ok
+
+  defp cleanup_cancelled_course_questions(course_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    report = %{
+      "error" => "course_cancelled",
+      "marked_at" => DateTime.to_iso8601(now)
+    }
+
+    {count, _} =
+      from(q in Question,
+        where: q.course_id == ^course_id and q.validation_status == :pending
+      )
+      |> Repo.update_all(
+        set: [
+          validation_status: :failed,
+          validation_score: 0.0,
+          validation_report: report,
+          validated_at: now,
+          updated_at: now
+        ]
+      )
+
+    if count > 0 do
+      Logger.info(
+        "[Validation] Marked #{count} pending questions :failed for cancelled course #{course_id}"
+      )
+    end
   end
 
   defp mark_failed_unparseable(ids, reason) do

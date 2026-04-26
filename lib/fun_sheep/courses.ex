@@ -590,6 +590,7 @@ defmodule FunSheep.Courses do
   Statuses:
     * `:missing`    — no textbook uploaded
     * `:processing` — textbook uploaded, OCR not finished
+    * `:failed`     — textbook uploaded but OCR failed (retry or re-upload)
     * `:partial`    — OCR done but completeness score below threshold
                       (or `ocr_status == :partial`)
     * `:complete`   — OCR done and completeness score ≥ threshold
@@ -598,7 +599,7 @@ defmodule FunSheep.Courses do
   Accepts either a course struct or a course id.
   """
   @spec textbook_status(Course.t() | Ecto.UUID.t()) :: %{
-          status: :missing | :processing | :partial | :complete,
+          status: :missing | :processing | :failed | :partial | :complete,
           material: FunSheep.Content.UploadedMaterial.t() | nil,
           completeness_score: float() | nil,
           notes: String.t() | nil,
@@ -670,7 +671,7 @@ defmodule FunSheep.Courses do
         :processing
 
       m.ocr_status == :failed ->
-        :missing
+        :failed
 
       is_float(m.completeness_score) and m.completeness_score >= @completeness_threshold ->
         :complete

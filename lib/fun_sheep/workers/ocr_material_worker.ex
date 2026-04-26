@@ -33,6 +33,9 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     case FunSheep.FeatureFlags.require!(:ocr_enabled) do
       {:cancel, reason} ->
         Logger.info("[OCR] Skipped material #{material_id}: #{reason}")
+        # Advance the course counter so EnrichDiscoveryWorker isn't stuck
+        # waiting for OCR that will never run when the kill switch is off.
+        advance_course(course_id)
         {:cancel, reason}
 
       :ok ->
@@ -268,6 +271,7 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     metadata = course.metadata || %{}
 
     textbook_kinds = [:textbook, :supplementary_book]
+
     has_textbook_ocr =
       FunSheep.Content.list_materials_by_course_and_kind(course_id, textbook_kinds)
       |> Enum.any?(&(&1.ocr_status == :completed))
