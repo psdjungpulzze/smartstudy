@@ -110,6 +110,17 @@ defmodule FunSheep.Workers.OCRMaterialWorker do
     :handled
   end
 
+  defp route_by_format(%{material_format: format} = material, course_id)
+       when format in ["docx", "pptx", "xlsx"] do
+    Logger.info("[OCR] Routing material #{material.id} to document text pipeline (#{format})")
+
+    %{"material_id" => material.id, "course_id" => course_id}
+    |> FunSheep.Workers.DocumentTextWorker.new()
+    |> Oban.insert()
+
+    :handled
+  end
+
   defp route_by_format(%{material_format: format} = material, _course_id)
        when format in ["mobi", "azw3"] do
     Logger.info("[OCR] Routing material #{material.id} to MOBI/AZW3 conversion pipeline")

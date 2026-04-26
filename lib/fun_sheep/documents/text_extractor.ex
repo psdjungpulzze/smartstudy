@@ -9,6 +9,11 @@ defmodule FunSheep.Documents.TextExtractor do
   Old binary formats (.doc, .xls) are NOT supported — they require a converter.
   """
 
+  # Maximum characters per page chunk when splitting DOCX text.
+  @page_char_limit 4_000
+  # Hard cap on pages produced per document to prevent runaway memory use.
+  @max_pages 500
+
   @doc """
   Detects the document type from a file extension and extracts plain text.
   Returns `{:ok, text}` or `{:error, reason}`.
@@ -23,6 +28,121 @@ defmodule FunSheep.Documents.TextExtractor do
       ".xls" -> {:error, :unsupported_binary_format}
       ext -> {:error, {:unknown_extension, ext}}
     end
+  end
+
+  @doc """
+  Splits the document into `{page_number, text}` tuples suitable for the
+  OcrPage pipeline.
+
+  - **DOCX**: groups paragraphs into ~#{@page_char_limit}-character chunks.
+  - **PPTX**: one entry per slide (each slide = one page).
+  - **XLSX**: one entry per worksheet.
+
+  Returns `{:ok, [{non_neg_integer(), String.t()}]}` or `{:error, reason}`.
+  """
+  def extract_pages(bytes, filename) when is_binary(bytes) and is_binary(filename) do
+    case String.downcase(Path.extname(filename)) do
+      ".docx" -> extract_docx_pages(bytes)
+      ".pptx" -> extract_pptx_pages(bytes)
+      ".xlsx" -> extract_xlsx_pages(bytes)
+      ext -> {:error, {:unknown_extension, ext}}
+    end
+  end
+
+  # --- Per-format page extraction ---
+
+  defp extract_docx_pages(bytes) do
+    with {:ok, text} <- extract_docx(bytes) do
+      pages =
+        text
+        |> chunk_text(@page_char_limit)
+        |> Enum.take(@max_pages)
+        |> with_page_numbers()
+
+      {:ok, pages}
+    end
+  end
+
+  defp extract_pptx_pages(bytes) do
+    with {:ok, files} <- unzip(bytes) do
+      pages =
+        files
+        |> Enum.filter(fn {name, _} ->
+          String.match?(name, ~r|^ppt/slides/slide\d+\.xml$|)
+        end)
+        |> Enum.sort_by(fn {name, _} ->
+          Regex.run(~r/(\d+)\.xml$/, name) |> List.last() |> String.to_integer()
+        end)
+        |> Enum.take(@max_pages)
+        |> Enum.with_index(1)
+        |> Enum.map(fn {{_, xml}, idx} ->
+          text =
+            xml
+            |> String.replace(~r/<a:p[ >]/, "\n")
+            |> String.replace("<a:p/>", "\n")
+            |> strip_xml()
+
+          {idx, text}
+        end)
+        |> Enum.reject(fn {_, text} -> String.trim(text) == "" end)
+
+      {:ok, pages}
+    end
+  end
+
+  defp extract_xlsx_pages(bytes) do
+    with {:ok, files} <- unzip(bytes) do
+      shared_strings = parse_shared_strings(Map.get(files, "xl/sharedStrings.xml"))
+
+      pages =
+        files
+        |> Enum.filter(fn {name, _} ->
+          String.match?(name, ~r|^xl/worksheets/sheet\d+\.xml$|)
+        end)
+        |> Enum.sort_by(fn {name, _} ->
+          Regex.run(~r/(\d+)\.xml$/, name) |> List.last() |> String.to_integer()
+        end)
+        |> Enum.take(@max_pages)
+        |> Enum.with_index(1)
+        |> Enum.map(fn {{_, xml}, idx} ->
+          {idx, extract_sheet_text(xml, shared_strings)}
+        end)
+        |> Enum.reject(fn {_, text} -> String.trim(text) == "" end)
+
+      {:ok, pages}
+    end
+  end
+
+  # Split text into chunks of at most max_chars, breaking on paragraph
+  # boundaries (newlines) so that sentences are not truncated mid-way.
+  defp chunk_text(text, max_chars) do
+    text
+    |> String.split("\n")
+    |> Enum.reject(&(String.trim(&1) == ""))
+    |> Enum.chunk_while(
+      [],
+      fn line, acc ->
+        current = Enum.join(acc, "\n")
+
+        if String.length(current) + String.length(line) + 1 > max_chars and acc != [] do
+          {:cont, acc, [line]}
+        else
+          {:cont, [line | acc]}
+        end
+      end,
+      fn
+        [] -> {:cont, []}
+        acc -> {:cont, acc, []}
+      end
+    )
+    |> Enum.map(fn lines ->
+      lines |> Enum.reverse() |> Enum.join("\n") |> String.trim()
+    end)
+    |> Enum.reject(&(String.trim(&1) == ""))
+  end
+
+  defp with_page_numbers(chunks) do
+    chunks |> Enum.with_index(1) |> Enum.map(fn {text, n} -> {n, text} end)
   end
 
   @doc """

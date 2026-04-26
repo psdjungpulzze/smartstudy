@@ -7,7 +7,7 @@ defmodule FunSheep.Ebook.FormatDetector do
   when magic bytes are ambiguous (e.g. MOBI files share ZIP-like bytes with
   EPUB in some edge cases, but are reliably identified by extension).
 
-  Returns one of: `:pdf` | `:epub` | `:mobi` | `:azw3` | `:image` | `:unknown`
+  Returns one of: `:pdf` | `:epub` | `:mobi` | `:azw3` | `:image` | `:docx` | `:pptx` | `:xlsx` | `:unknown`
   """
 
   @doc """
@@ -25,10 +25,18 @@ defmodule FunSheep.Ebook.FormatDetector do
       :epub
 
   """
-  @spec detect(binary(), String.t()) :: :pdf | :epub | :mobi | :azw3 | :image | :unknown
+  @spec detect(binary(), String.t()) ::
+          :pdf | :epub | :mobi | :azw3 | :image | :docx | :pptx | :xlsx | :unknown
 
   # PDF: starts with "%PDF-"
   def detect(<<0x25, 0x50, 0x44, 0x46, _rest::binary>>, _ext), do: :pdf
+
+  # Office Open XML formats — ZIP magic bytes, disambiguated by extension.
+  # These must appear BEFORE the generic ZIP→EPUB catch-all below so that
+  # .docx/.pptx/.xlsx files are not misidentified as EPUB.
+  def detect(<<0x50, 0x4B, 0x03, 0x04, _rest::binary>>, "docx"), do: :docx
+  def detect(<<0x50, 0x4B, 0x03, 0x04, _rest::binary>>, "pptx"), do: :pptx
+  def detect(<<0x50, 0x4B, 0x03, 0x04, _rest::binary>>, "xlsx"), do: :xlsx
 
   # EPUB: ZIP magic bytes (PK local file header signature)
   # EPUB files are ZIP archives with a mimetype file. Extension-based
@@ -66,7 +74,7 @@ defmodule FunSheep.Ebook.FormatDetector do
   Convenience wrapper: reads the magic bytes from a local file path and
   normalises the extension, then delegates to `detect/2`.
   """
-  @spec detect_file(String.t()) :: :pdf | :epub | :mobi | :azw3 | :image | :unknown
+  @spec detect_file(String.t()) :: :pdf | :epub | :mobi | :azw3 | :image | :docx | :pptx | :xlsx | :unknown
   def detect_file(path) do
     ext =
       path

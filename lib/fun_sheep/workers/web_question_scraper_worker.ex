@@ -183,17 +183,14 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
 
   defp scrape_and_extract(source, course) do
     cond do
-      pdf_url?(source.url) ->
-        # PDF file — download and route through OCR pipeline rather than skipping.
-        # This handles sources like SAT practice test PDFs from College Board.
-        Logger.info("[Scraper] PDF source, downloading for OCR: #{source.url}")
-        attach_pdf_source(source, course)
-
-      document_url?(source.url) ->
-        # Office XML document (DOCX/PPTX/XLSX) — download, extract text inline,
-        # then feed into the same AI question extractor as HTML pages.
-        Logger.info("[Scraper] Document source (#{url_ext(source.url)}): #{source.url}")
-        extract_document_source(source, course)
+      pdf_url?(source.url) or document_url?(source.url) ->
+        # Binary document (PDF, DOCX, PPTX, XLSX) — download and route through
+        # the UploadedMaterial → OCR pipeline. Large documents (hundreds of
+        # pages) are split into manageable OcrPage chunks by the pipeline workers
+        # rather than being processed as a single blob.
+        ext = url_ext(source.url)
+        Logger.info("[Scraper] Binary document (#{ext}), downloading for pipeline: #{source.url}")
+        attach_binary_source(source, course)
 
       skip_url?(source.url) ->
         Logger.debug("[Scraper] Skipping unsupported format (#{url_ext(source.url)}): #{source.url}")
@@ -252,25 +249,37 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     end
   end
 
-  # Download a PDF discovered source and add it as an UploadedMaterial for OCR.
-  # Returns 0 (questions are not extracted synchronously — they come from the OCR pipeline).
-  defp attach_pdf_source(source, course) do
+  # Maximum binary document size we will download (50 MB).
+  # Anything larger is skipped with a clear error rather than OOMing the worker.
+  @max_doc_bytes 50 * 1024 * 1024
+
+  # Download any binary document source (PDF, DOCX, PPTX, XLSX) and add it
+  # as an UploadedMaterial so it flows through the standard OCR pipeline:
+  #   OCRMaterialWorker → DocumentTextWorker / PdfOcrDispatchWorker
+  #   → OcrPage records → QuestionExtractionWorker
+  #
+  # Questions are NOT extracted synchronously — they arrive via the pipeline.
+  # Returns 0 (scraper counts questions inserted in this pass; pipeline inserts
+  # them asynchronously later).
+  defp attach_binary_source(source, course) do
     filename =
-      (URI.parse(source.url).path || "document.pdf")
+      (URI.parse(source.url).path || "document")
       |> String.split("/")
       |> List.last()
       |> URI.decode()
-      |> then(fn f -> if String.ends_with?(String.downcase(f), ".pdf"), do: f, else: f <> ".pdf" end)
 
-    with {:ok, pdf_bytes} <- fetch_pdf_bytes(source.url),
+    ext = url_ext(source.url)
+    content_type = content_type_for_ext(ext)
+
+    with {:ok, bytes} <- fetch_document_bytes(source.url),
          storage_key = "materials/#{Ecto.UUID.generate()}/#{filename}",
-         {:ok, _} <- FunSheep.Storage.put(storage_key, pdf_bytes, content_type: "application/pdf"),
+         {:ok, _} <- FunSheep.Storage.put(storage_key, bytes, content_type: content_type),
          {:ok, material} <-
            FunSheep.Content.create_uploaded_material(%{
              file_path: storage_key,
              file_name: filename,
-             file_type: "application/pdf",
-             file_size: byte_size(pdf_bytes),
+             file_type: content_type,
+             file_size: byte_size(bytes),
              material_kind: :sample_questions,
              user_role_id: course.created_by_id,
              course_id: course.id,
@@ -285,7 +294,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
       Content.update_discovered_source(source, %{status: "processed"})
 
       Logger.info(
-        "[Scraper] PDF queued for OCR: material=#{material.id}, source=#{source.id}, bytes=#{byte_size(pdf_bytes)}"
+        "[Scraper] Document queued for pipeline: material=#{material.id}, source=#{source.id}, ext=#{ext}, bytes=#{byte_size(bytes)}"
       )
 
       0
@@ -294,7 +303,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
         error_msg = inspect(reason)
 
         Logger.warning(
-          "[Scraper] PDF download/storage failed for #{source.url}: #{error_msg}"
+          "[Scraper] Document download/storage failed for #{source.url}: #{error_msg}"
         )
 
         Content.update_discovered_source(source, %{status: "failed", error_message: error_msg})
@@ -302,7 +311,7 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
     end
   end
 
-  defp fetch_pdf_bytes(url) do
+  defp fetch_document_bytes(url) do
     case Req.get(url,
            headers: [
              {"user-agent",
@@ -311,67 +320,26 @@ defmodule FunSheep.Workers.WebQuestionScraperWorker do
            receive_timeout: 60_000,
            max_redirects: 5
          ) do
-      {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
-      {:ok, %{status: status}} -> {:error, {:http_status, status}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+      {:ok, %{status: 200, body: body}} when is_binary(body) ->
+        if byte_size(body) > @max_doc_bytes do
+          {:error, {:document_too_large, byte_size(body)}}
+        else
+          {:ok, body}
+        end
 
-  # Download an Office XML document (DOCX/PPTX/XLSX), extract plain text
-  # inline, then run the AI question extractor on it — same flow as HTML pages
-  # but without needing the OCR pipeline.
-  defp extract_document_source(source, course) do
-    filename =
-      (URI.parse(source.url).path || "document")
-      |> String.split("/")
-      |> List.last()
-      |> URI.decode()
-
-    with {:ok, bytes} <- fetch_pdf_bytes(source.url),
-         {:ok, text} <- FunSheep.Documents.TextExtractor.extract(bytes, filename) do
-      Content.update_discovered_source(source, %{
-        scraped_text: safe_slice(text, @max_page_size),
-        content_size_bytes: byte_size(bytes),
-        status: "scraped"
-      })
-
-      questions = extract_questions_from_text(text, course, source)
-      grounding_ref = %{"type" => "url", "id" => source.url, "title" => source.title}
-
-      {inserted, inserted_ids} =
-        Enum.reduce(questions, {0, []}, fn q, {count, ids} ->
-          case insert_question(q, course, grounding_ref) do
-            {:ok, inserted_q} -> {count + 1, [inserted_q.id | ids]}
-            {:error, _} -> {count, ids}
-          end
-        end)
-
-      FunSheep.Workers.QuestionValidationWorker.enqueue(inserted_ids, course_id: course.id)
-      FunSheep.Workers.QuestionClassificationWorker.enqueue_for_questions(inserted_ids)
-
-      Content.update_discovered_source(source, %{
-        status: "processed",
-        questions_extracted: inserted
-      })
-
-      Logger.info(
-        "[Scraper] Document extracted #{inserted} questions from #{filename} (#{byte_size(bytes)} bytes)"
-      )
-
-      inserted
-    else
-      {:error, :unsupported_binary_format} ->
-        Logger.info("[Scraper] Old binary format, skipping: #{source.url}")
-        Content.update_discovered_source(source, %{status: "skipped"})
-        0
+      {:ok, %{status: status}} ->
+        {:error, {:http_status, status}}
 
       {:error, reason} ->
-        error_msg = inspect(reason)
-        Logger.warning("[Scraper] Document extraction failed for #{source.url}: #{error_msg}")
-        Content.update_discovered_source(source, %{status: "failed", error_message: error_msg})
-        0
+        {:error, reason}
     end
   end
+
+  defp content_type_for_ext(".pdf"), do: "application/pdf"
+  defp content_type_for_ext(".docx"), do: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  defp content_type_for_ext(".pptx"), do: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  defp content_type_for_ext(".xlsx"), do: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  defp content_type_for_ext(_), do: "application/octet-stream"
 
   # --- Page Fetching ---
 
