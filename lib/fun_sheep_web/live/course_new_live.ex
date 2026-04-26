@@ -32,6 +32,7 @@ defmodule FunSheepWeb.CourseNewLive do
         # Test detection & generation
         detected_profile: nil,
         generation_brief: "",
+        generation_brief_auto: false,
         # State
         user_role: user_role,
         editing_course: nil,
@@ -130,11 +131,14 @@ defmodule FunSheepWeb.CourseNewLive do
       |> maybe_assign(params, "course_name", :course_name)
       |> maybe_assign(params, "subject", :subject)
       |> maybe_assign(params, "description", :description)
-      |> maybe_assign(params, "generation_brief", :generation_brief)
       |> maybe_detect_profile()
       |> maybe_refresh_textbooks()
 
     {:noreply, socket}
+  end
+
+  def handle_event("update_brief", %{"value" => value}, socket) do
+    {:noreply, assign(socket, generation_brief: value, generation_brief_auto: false)}
   end
 
   def handle_event("toggle_grade", %{"grade" => grade}, socket) do
@@ -350,30 +354,49 @@ defmodule FunSheepWeb.CourseNewLive do
     end
   end
 
+  defp maybe_assign_brief(socket, params) do
+    case Map.get(params, "generation_brief") do
+      nil ->
+        socket
+
+      value ->
+        # If user edited an auto-filled brief, mark as user-owned so detection won't overwrite it
+        if socket.assigns.generation_brief_auto and value != socket.assigns.generation_brief do
+          assign(socket, generation_brief: value, generation_brief_auto: false)
+        else
+          assign(socket, generation_brief: value)
+        end
+    end
+  end
+
   defp maybe_detect_profile(socket) do
     case KnownTestProfiles.detect(socket.assigns.course_name) do
       {:ok, profile} ->
-        prev_profile = socket.assigns.detected_profile
-
         socket
         |> assign(detected_profile: profile)
+        # Always update subject from profile (clears stale subject from prior detection)
+        |> assign(subject: profile.catalog_subject)
         |> then(fn s ->
-          # Auto-fill subject only if blank or if it was previously auto-filled by a profile
-          prev_subject = if prev_profile, do: prev_profile.catalog_subject, else: nil
-
-          if s.assigns.subject == "" or s.assigns.subject == prev_subject do
-            assign(s, subject: profile.catalog_subject)
+          # Only overwrite brief if it hasn't been user-edited
+          if s.assigns.generation_brief_auto or s.assigns.generation_brief == "" do
+            s
+            |> assign(generation_brief: profile.generation_config["prompt_context"])
+            |> assign(generation_brief_auto: true)
           else
             s
           end
         end)
-        |> then(fn s ->
-          brief = profile.generation_config["prompt_context"]
-          assign(s, generation_brief: brief)
-        end)
 
       :unknown ->
-        assign(socket, detected_profile: nil)
+        socket
+        |> assign(detected_profile: nil)
+        |> then(fn s ->
+          if s.assigns.generation_brief_auto do
+            s |> assign(generation_brief: "", generation_brief_auto: false)
+          else
+            s
+          end
+        end)
     end
   end
 
@@ -576,8 +599,10 @@ defmodule FunSheepWeb.CourseNewLive do
                 <span class="text-gray-400 font-normal text-xs ml-1">(used by AI to generate questions)</span>
               </label>
               <textarea
-                name="generation_brief"
-                phx-debounce="500"
+                id={"brief-#{if @detected_profile, do: @detected_profile.display_name, else: "custom"}"}
+                phx-change="update_brief"
+                phx-debounce="300"
+                name="value"
                 rows="4"
                 placeholder={
                   if @detected_profile,
