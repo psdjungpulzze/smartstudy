@@ -116,7 +116,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
         end
 
       questions =
-        if course && course.catalog_test_type == "sat" do
+        if course && uses_structural_validation?(course) do
           pre_filter_sat_questions(questions, course)
         else
           questions
@@ -545,9 +545,20 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     end
   end
 
-  # --- SAT structural pre-validation ---
+  # --- Structural pre-validation (SAT and metadata-driven courses) ---
 
-  # Filters a list of SAT questions by structural rules BEFORE the LLM validator runs.
+  # Returns true when a course should have structural pre-validation applied.
+  # This includes SAT courses (explicit) and any course with generation_config
+  # validation_rules in its metadata (metadata-driven standardized tests).
+  defp uses_structural_validation?(%Course{catalog_test_type: "sat"}), do: true
+
+  defp uses_structural_validation?(%Course{metadata: %{"generation_config" => gen_config}})
+       when is_map(gen_config),
+       do: Map.has_key?(gen_config, "validation_rules")
+
+  defp uses_structural_validation?(_), do: false
+
+  # Filters questions by structural rules BEFORE the LLM validator runs.
   # Questions that fail are marked :failed immediately; questions that pass are returned
   # for the regular LLM-based validation flow.
   #
@@ -563,7 +574,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
         {:error, reason} ->
           report = %{
-            "error" => "sat_structural_validation_failed",
+            "error" => "structural_validation_failed",
             "reason" => reason,
             "marked_at" => DateTime.to_iso8601(now)
           }
@@ -580,7 +591,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
           )
 
           Logger.warning(
-            "[Validation] SAT pre-validation failed for question #{q.id} (course #{course.id}): #{reason}"
+            "[Validation] Structural pre-validation failed for question #{q.id} (course #{course.id}): #{reason}"
           )
 
           false
@@ -589,22 +600,28 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
   end
 
   @doc """
-  Validates structural rules for a single SAT question.
+  Validates structural rules for a single standardized-test question.
+
+  When `course.metadata["generation_config"]["validation_rules"]` is present,
+  its `mcq_option_count` and `answer_labels` override the SAT defaults.
   Returns `:ok` or `{:error, reason}`.
 
   Rules applied:
-  - All SAT questions: question stem must not be empty
-  - MCQ: exactly 4 options present (A, B, C, D)
-  - MCQ: exactly 1 answer marked as correct (answer field must be A/B/C/D)
+  - All questions: question stem must not be empty
+  - MCQ: exactly N options present (N from validation_rules, default 4 for A–D)
+  - MCQ: answer must be one of the expected labels
   - Reading & Writing passage questions: passage between 10 and 200 words
     (detected by presence of a blank-line separator in the stem)
   - Numeric short-answer: answer must parse to a number
   """
   @spec validate_sat_question(Question.t(), Course.t()) :: :ok | {:error, String.t()}
-  def validate_sat_question(question, _course) do
+  def validate_sat_question(question, course) do
+    validation_rules = get_in(course.metadata || %{}, ["generation_config", "validation_rules"])
+    required_labels = (validation_rules || %{})["answer_labels"] || ["A", "B", "C", "D"]
+
     with :ok <- check_non_empty_stem(question),
-         :ok <- check_mcq_options(question),
-         :ok <- check_mcq_answer(question),
+         :ok <- check_mcq_options_for_labels(question, required_labels),
+         :ok <- check_mcq_answer_for_labels(question, required_labels),
          :ok <- check_rw_passage_length(question),
          :ok <- check_numeric_answer(question) do
       :ok
@@ -621,31 +638,43 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
     end
   end
 
-  defp check_mcq_options(%Question{question_type: :multiple_choice} = question) do
+  # Label-parameterized MCQ option check — supports both 4-option (A–D) and
+  # 5-option (A–E) tests. Called from validate_sat_question/2 with the
+  # labels extracted from course.metadata["generation_config"]["validation_rules"].
+  defp check_mcq_options_for_labels(
+         %Question{question_type: :multiple_choice} = question,
+         required_labels
+       ) do
     options = question.options || %{}
-    required_keys = ["A", "B", "C", "D"]
+    required_keys = Enum.sort(required_labels)
     present_keys = Map.keys(options) |> Enum.map(&String.upcase/1) |> Enum.sort()
 
-    if Enum.sort(required_keys) == present_keys do
+    if required_keys == present_keys do
       :ok
     else
-      {:error, "MCQ must have exactly 4 options (A, B, C, D); found: #{inspect(present_keys)}"}
+      {:error,
+       "MCQ must have exactly #{length(required_labels)} options (#{Enum.join(required_labels, ", ")}); found: #{inspect(present_keys)}"}
     end
   end
 
-  defp check_mcq_options(_question), do: :ok
+  defp check_mcq_options_for_labels(_question, _labels), do: :ok
 
-  defp check_mcq_answer(%Question{question_type: :multiple_choice} = question) do
+  defp check_mcq_answer_for_labels(
+         %Question{question_type: :multiple_choice} = question,
+         required_labels
+       ) do
     answer = question.answer || ""
+    upper_labels = Enum.map(required_labels, &String.upcase/1)
 
-    if String.upcase(String.trim(answer)) in ["A", "B", "C", "D"] do
+    if String.upcase(String.trim(answer)) in upper_labels do
       :ok
     else
-      {:error, "MCQ answer must be A, B, C, or D; got: #{inspect(answer)}"}
+      {:error,
+       "MCQ answer must be one of #{Enum.join(upper_labels, ", ")}; got: #{inspect(answer)}"}
     end
   end
 
-  defp check_mcq_answer(_question), do: :ok
+  defp check_mcq_answer_for_labels(_question, _labels), do: :ok
 
   # For Reading & Writing questions: if the question stem contains a blank-line
   # separator (passage + question pattern), verify the passage word count is

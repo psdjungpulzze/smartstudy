@@ -366,10 +366,80 @@ defmodule FunSheep.Workers.AIQuestionGenerationWorker do
   # the "default arg in multi-clause function" compiler warning.
   defp build_prompt(mode, course, chapter, context, count, difficulty, section_name \\ nil)
 
+  # Metadata-driven prompt — dispatched when the course has
+  # generation_config in its metadata. Works for any standardized test
+  # course (ACT, GRE, HSC, etc.) that was created via CourseBuilder.
+  # The prompt_context is prepended to give the LLM precise format rules.
+  defp build_prompt(
+         _mode,
+         %{metadata: %{"generation_config" => gen_config}} = course,
+         chapter,
+         context,
+         count,
+         difficulty,
+         section_name
+       )
+       when is_map(gen_config) do
+    chapter_name = if chapter, do: chapter.name, else: "all chapters"
+    topic = section_name || chapter_name
+    prompt_context = gen_config["prompt_context"] || ""
+    validation_rules = gen_config["validation_rules"] || %{}
+    option_count = Map.get(validation_rules, "mcq_option_count", 4)
+    answer_labels = Map.get(validation_rules, "answer_labels", ["A", "B", "C", "D"])
+    labels_str = Enum.join(answer_labels, ", ")
+    correct_label_range = "#{List.first(answer_labels)}–#{List.last(answer_labels)}"
+
+    difficulty_note =
+      case difficulty do
+        nil -> "Mix of easy (30%), medium (40%), and hard (30%)."
+        d -> "#{d} — target this difficulty exclusively."
+      end
+
+    material_section =
+      if context[:material_text] && context.material_text != "" do
+        """
+        Reference material:
+        ---
+        #{context.material_text}
+        ---
+
+        """
+      else
+        ""
+      end
+
+    """
+    #{prompt_context}
+    Domain: #{chapter_name}
+    Skill: #{topic}
+
+    FORMAT RULES (follow exactly):
+    - Every MCQ question MUST have exactly #{option_count} answer options labelled #{labels_str}.
+    - Exactly one option is correct. The others are plausible distractors.
+    - Do NOT write ambiguous or subjective questions.
+    - Do NOT reference external context not provided in the question stem.
+
+    DIFFICULTY: #{difficulty_note}
+
+    #{material_section}Generate #{count} practice questions for the skill "#{topic}" in the domain "#{chapter_name}".
+
+    IMPORTANT: Return your response as a JSON array of question objects. Each object must have:
+    - "content": the question text
+    - "answer": the correct answer letter (#{correct_label_range})
+    - "question_type": "multiple_choice" for standard MCQ (or "short_answer" for numeric/open response)
+    - "options": an object with exactly #{option_count} keys #{inspect(Map.new(answer_labels, fn k -> {k, "..."} end))}
+    - "difficulty": one of "easy", "medium", "hard"
+    - "explanation": 1–2 sentences explaining why the answer is correct
+
+    Return ONLY the JSON array, no other text.
+    """
+  end
+
   # SAT-specific prompt — dispatched before the generic prompt when the
-  # course has catalog_test_type "sat". Enforces Digital SAT format rules:
-  # 4-option MCQ for all domains; short passage context for Reading & Writing;
-  # numeric-response for Math when appropriate; College Board difficulty tiers.
+  # course has catalog_test_type "sat" but no generation_config metadata.
+  # Enforces Digital SAT format rules: 4-option MCQ for all domains;
+  # short passage context for Reading & Writing; numeric-response for
+  # Math when appropriate; College Board difficulty tiers.
   defp build_prompt(
          _mode,
          %{catalog_test_type: "sat"} = course,

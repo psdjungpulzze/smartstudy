@@ -32,7 +32,16 @@ defmodule SATSeed do
         |> Repo.insert!()
 
       existing ->
-        existing
+        # Always merge metadata so generation_config and score_predictor_weights
+        # are kept current even when the course already exists.
+        new_metadata = Map.merge(existing.metadata || %{}, attrs.metadata || %{})
+
+        {:ok, updated} =
+          existing
+          |> Course.changeset(%{metadata: new_metadata})
+          |> Repo.update()
+
+        updated
     end
   end
 
@@ -93,7 +102,7 @@ math_course =
   SATSeed.find_or_create_course(%{
     name: "SAT Math",
     subject: "Mathematics",
-    grade: "College Prep",
+    grades: ["College Prep"],
     description:
       "Complete SAT Math preparation covering all four domains: Algebra, Advanced Math, " <>
         "Problem-Solving & Data Analysis, and Geometry & Trigonometry. Adaptive practice " <>
@@ -107,7 +116,26 @@ math_course =
     currency: "usd",
     price_label: "One-time purchase",
     sample_question_count: 10,
-    processing_status: "pending"
+    processing_status: "pending",
+    metadata: %{
+      "generation_config" => %{
+        "prompt_context" =>
+          "Digital SAT Math — adaptive exam, 4-option MCQ or numeric free-entry, " <>
+            "calculator always available. Domains: Algebra (35%), Advanced Math (35%), " <>
+            "Problem-Solving & Data Analysis (15%), Geometry & Trigonometry (15%).",
+        "validation_rules" => %{
+          "mcq_option_count" => 4,
+          "answer_labels" => ["A", "B", "C", "D"]
+        }
+      },
+      "score_predictor_weights" => %{
+        "algebra" => 0.35,
+        "advanced_math" => 0.35,
+        "problem_solving_data_analysis" => 0.15,
+        "geometry_trigonometry" => 0.15
+      },
+      "score_range" => [200, 800]
+    }
   })
 
 IO.puts("SAT Math course: #{math_course.id}")
@@ -190,7 +218,7 @@ rw_course =
   SATSeed.find_or_create_course(%{
     name: "SAT Reading & Writing",
     subject: "English Language Arts",
-    grade: "College Prep",
+    grades: ["College Prep"],
     description:
       "Complete SAT Reading & Writing preparation covering all four domains: Craft & Structure, " <>
         "Information & Ideas, Expression of Ideas, and Standard English Conventions. Master " <>
@@ -204,7 +232,26 @@ rw_course =
     currency: "usd",
     price_label: "One-time purchase",
     sample_question_count: 10,
-    processing_status: "pending"
+    processing_status: "pending",
+    metadata: %{
+      "generation_config" => %{
+        "prompt_context" =>
+          "Digital SAT Reading & Writing — adaptive exam, 4-option MCQ, passage-based. " <>
+            "Domains: Craft & Structure (28%), Information & Ideas (26%), " <>
+            "Expression of Ideas (20%), Standard English Conventions (26%).",
+        "validation_rules" => %{
+          "mcq_option_count" => 4,
+          "answer_labels" => ["A", "B", "C", "D"]
+        }
+      },
+      "score_predictor_weights" => %{
+        "craft_and_structure" => 0.28,
+        "information_and_ideas" => 0.26,
+        "expression_of_ideas" => 0.20,
+        "standard_english_conventions" => 0.26
+      },
+      "score_range" => [200, 800]
+    }
   })
 
 IO.puts("SAT Reading & Writing course: #{rw_course.id}")
