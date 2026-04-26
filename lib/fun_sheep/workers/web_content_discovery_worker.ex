@@ -271,7 +271,39 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   # --- Search Query Building ---
 
+  defp build_search_queries(%{metadata: %{"generation_config" => gen_config}} = course)
+       when is_map(gen_config) do
+    # Metadata-driven path: derive search queries from generation_config.prompt_context.
+    # This handles any standardized test course that has generation_config set via
+    # CourseBuilder (ACT, GRE, HSC, etc.), not just SAT.
+    prompt_context = gen_config["prompt_context"] || ""
+    test_label = String.upcase(course.catalog_test_type || course.name)
+
+    per_section =
+      course.chapters
+      |> Enum.flat_map(fn chapter ->
+        Enum.flat_map(chapter.sections || [], fn section ->
+          test_specific_search_queries(section.name, chapter.name, test_label, course.catalog_subject)
+        end)
+      end)
+
+    if per_section != [] do
+      per_section
+    else
+      # No sections yet — fall back to course-level queries derived from the prompt context
+      subject_hint = course.catalog_subject || course.subject || course.name
+
+      [
+        {"#{test_label} #{subject_hint} practice questions", "question_bank"},
+        {"#{test_label} #{subject_hint} official prep", "question_bank"},
+        {"#{test_label} #{subject_hint} test bank sample questions", "practice_test"},
+        {"#{prompt_context |> String.slice(0, 80)} practice", "question_bank"}
+      ]
+    end
+  end
+
   defp build_search_queries(%{catalog_test_type: "sat"} = course) do
+    # SAT fallback: courses created before generation_config metadata was added.
     # SAT courses use targeted, domain-specific search queries for each section.
     # Generic queries ("grade X practice questions") produce irrelevant hits for
     # standardised tests — we need College Board / Khan Academy / Albert sources
@@ -607,6 +639,33 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     |> String.replace(~r/^Chapter\s*\d+\s*[:\-]\s*/i, "")
     |> String.replace(~r/^Unit\s*\d+\s*[:\-]\s*/i, "")
     |> String.trim()
+  end
+
+  # --- Metadata-driven (generic standardized test) query generation ---
+
+  # Generates targeted search queries for any standardized test course that has
+  # generation_config in its metadata. Uses the test_label (e.g. "ACT", "GRE")
+  # and the section/chapter names to build domain-specific queries.
+  defp test_specific_search_queries(section_name, chapter_name, test_label, catalog_subject) do
+    clean_section = clean_chapter_name(section_name)
+    clean_chapter = clean_chapter_name(chapter_name)
+
+    subject_hint =
+      case catalog_subject do
+        "mathematics" -> "math"
+        "english_language" -> "English"
+        "reading" -> "reading"
+        "science" -> "science"
+        "verbal" -> "verbal reasoning"
+        "quantitative" -> "quantitative reasoning"
+        _ -> catalog_subject || ""
+      end
+
+    [
+      {"#{test_label} #{subject_hint} practice questions #{clean_section}", "question_bank"},
+      {"#{test_label} #{clean_chapter} #{clean_section} practice problems", "question_bank"},
+      {"#{test_label} #{subject_hint} official prep #{clean_section}", "practice_test"}
+    ]
   end
 
   # --- SAT-specific query generation ---
