@@ -71,8 +71,17 @@ defmodule FunSheepWeb.UserProfileLive do
     <div class="space-y-6 max-w-lg mx-auto">
       <%!-- Back link --%>
       <div class="animate-slide-up">
-        <.link navigate={~p"/leaderboard"} class="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <.link
+          navigate={~p"/leaderboard"}
+          class="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1"
+        >
+          <svg
+            class="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            viewBox="0 0 24 24"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
           </svg>
           Back to Flock
@@ -159,7 +168,10 @@ defmodule FunSheepWeb.UserProfileLive do
       </div>
 
       <%!-- Badges --%>
-      <div :if={@achievements != []} class="bg-white rounded-2xl border border-gray-100 p-5 animate-slide-up">
+      <div
+        :if={@achievements != []}
+        class="bg-white rounded-2xl border border-gray-100 p-5 animate-slide-up"
+      >
         <h2 class="text-sm font-extrabold text-gray-900 mb-3">Badges</h2>
         <div class="grid grid-cols-4 sm:grid-cols-6 gap-2">
           <div
@@ -167,7 +179,9 @@ defmodule FunSheepWeb.UserProfileLive do
             class="flex flex-col items-center text-center"
             title={Achievement.display_info(achievement.achievement_type).name}
           >
-            <span class="text-2xl">{Achievement.display_info(achievement.achievement_type).emoji}</span>
+            <span class="text-2xl">
+              {Achievement.display_info(achievement.achievement_type).emoji}
+            </span>
             <span class="text-[9px] text-gray-400 mt-0.5 leading-tight">
               {Achievement.display_info(achievement.achievement_type).name}
             </span>
@@ -187,7 +201,8 @@ defmodule FunSheepWeb.UserProfileLive do
             {avatar_initial(@flock_tree.invited_by.display_name)}
           </div>
           <span class="text-xs text-gray-500">
-            Invited by <span class="font-semibold text-gray-700">{@flock_tree.invited_by.display_name}</span>
+            Invited by
+            <span class="font-semibold text-gray-700">{@flock_tree.invited_by.display_name}</span>
           </span>
         </div>
 
@@ -300,5 +315,4 @@ defmodule FunSheepWeb.UserProfileLive do
 
   defp school_label(%{school: %{name: name}}) when is_binary(name), do: " · #{name}"
   defp school_label(_), do: ""
-
 end

@@ -133,7 +133,10 @@ defmodule FunSheepWeb.TestScheduleLive do
         </.link>
       </div>
 
-      <div :if={@schedules == [] and @custom_banks == []} class="bg-white rounded-2xl shadow-md p-8 text-center">
+      <div
+        :if={@schedules == [] and @custom_banks == []}
+        class="bg-white rounded-2xl shadow-md p-8 text-center"
+      >
         <.icon name="hero-clipboard-document-check" class="w-12 h-12 text-[#8E8E93] mx-auto mb-4" />
         <p class="text-[#8E8E93] text-lg">No tests yet.</p>
         <p class="text-[#8E8E93] text-sm mt-2">

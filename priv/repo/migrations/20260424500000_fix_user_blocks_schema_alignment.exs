@@ -10,9 +10,7 @@ defmodule FunSheep.Repo.Migrations.FixUserBlocksSchemaAlignment do
     end
 
     # Add the no_self_block check constraint referenced in Block.changeset/2.
-    create constraint(:user_blocks, :no_self_block,
-             check: "blocker_id != blocked_id"
-           )
+    create constraint(:user_blocks, :no_self_block, check: "blocker_id != blocked_id")
   end
 
   def down do

@@ -12,6 +12,16 @@ config :fun_sheep,
   generators: [timestamp_type: :utc_datetime],
   env: Atom.to_string(config_env())
 
+# OpenTelemetry — service identity for traces exported to Cloud Trace or Honeycomb.
+# Exporter endpoint is configured in runtime.exs via OTEL_EXPORTER_OTLP_ENDPOINT.
+# When the endpoint is unset, the default noop exporter is used (no remote export).
+config :opentelemetry,
+  resource: [service: [name: "funsheep", version: "0.1.0"]],
+  span_processor: :batch
+
+config :opentelemetry_exporter,
+  otlp_protocol: :http_protobuf
+
 # Configure the endpoint
 config :fun_sheep, FunSheepWeb.Endpoint,
   url: [host: "localhost"],
@@ -77,6 +87,10 @@ config :fun_sheep, Oban,
        # Every 15min — re-enqueue questions stuck at :pending after a
        # validation job was discarded (see StuckValidationSweeperWorker).
        {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker},
+       # Every 5 minutes — update processed_urls and questions_extracted on all
+       # running CrawlBatches from live DB counts. Keeps the admin dashboard
+       # accurate without per-job writes.
+       {"*/5 * * * *", FunSheep.Workers.CrawlBatchProgressWorker},
        # Every 30min — recover discovered_sources stuck in scraping /
        # failed / unrun-discovered (Phase 5 — April audit had 32/33
        # sources stuck in non-terminal states, producing only 4 scraped
@@ -107,7 +121,10 @@ config :fun_sheep, Oban,
        {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "gre"}},
        {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "gmat"}},
        {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "lsat"}},
-       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "mcat"}}
+       {"0 6 1 1,4,7,10 *", FunSheep.Workers.TestDateSyncWorker, args: %{"test_type" => "mcat"}},
+       # Nightly at 02:00 UTC — HEAD-probe every source_registry_entry not checked
+       # in the last 7 days; disable entries after 3 consecutive failures.
+       {"0 2 * * *", FunSheep.Workers.SourceRegistryVerifierWorker}
      ]}
   ],
   queues: [
@@ -140,7 +157,13 @@ config :fun_sheep, Oban,
     # Dedicated queue for new-course setup (WebContentDiscovery + CourseDiscovery).
     # Isolated from :ai so a generation backlog can't delay new-course setup
     # (2026-04-24 incident: 1741 generation jobs buried a CourseDiscoveryWorker).
-    course_setup: 2
+    course_setup: 2,
+    # Validation of web-scraped questions uses per-tier thresholds that are more
+    # lenient than AI-generated question validation. Isolated from :ai_validation
+    # so Tier 1 question approvals don't compete with the stricter AI path.
+    web_validation: 2,
+    # Per-source web scraping (WebSourceScraperWorker). 5 in dev; 20 in prod.
+    web_scrape: 5
   ]
 
 # Interactor integration (billing, auth, agents)

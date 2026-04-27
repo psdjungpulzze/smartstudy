@@ -23,7 +23,11 @@ defmodule FunSheep.Assessments.HasAnyAttemptTest do
       refute Assessments.has_any_attempt?(ur.id, c.id)
     end
 
-    test "returns true after a question attempt in the course", %{user_role: ur, course: c, chapter: ch} do
+    test "returns true after a question attempt in the course", %{
+      user_role: ur,
+      course: c,
+      chapter: ch
+    } do
       {:ok, question} =
         FunSheep.Questions.create_question(%{
           content: "What is 2 + 2?",

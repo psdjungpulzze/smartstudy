@@ -68,13 +68,17 @@ defmodule FunSheep.Workers.ProcessCourseWorker do
   # Creates TestSchedule records for the course creator from upcoming known_test_dates.
   # Only runs when the course has `auto_create_tests: true` and a catalog_test_type.
   # Each official date gets a system-level TestSchedule with full course scope.
-  defp maybe_create_test_schedules(%{auto_create_tests: true, catalog_test_type: test_type, created_by_id: creator_id} = course)
+  defp maybe_create_test_schedules(
+         %{auto_create_tests: true, catalog_test_type: test_type, created_by_id: creator_id} =
+           course
+       )
        when is_binary(test_type) and is_binary(creator_id) do
     upcoming = Courses.list_upcoming_known_dates(test_type)
 
     if upcoming == [] do
       # No dates in DB yet — enqueue a one-off sync first, tests will be seeded after
       Logger.info("[Pipeline] No known_test_dates for #{test_type}, enqueuing TestDateSyncWorker")
+
       %{"test_type" => test_type}
       |> FunSheep.Workers.TestDateSyncWorker.new()
       |> Oban.insert()
@@ -93,10 +97,14 @@ defmodule FunSheep.Workers.ProcessCourseWorker do
 
         case Assessments.create_test_schedule(attrs) do
           {:ok, schedule} ->
-            Logger.info("[Pipeline] Auto-created test schedule #{schedule.id} for #{known_date.test_name}")
+            Logger.info(
+              "[Pipeline] Auto-created test schedule #{schedule.id} for #{known_date.test_name}"
+            )
 
           {:error, changeset} ->
-            Logger.warning("[Pipeline] Failed to auto-create test schedule: #{inspect(changeset.errors)}")
+            Logger.warning(
+              "[Pipeline] Failed to auto-create test schedule: #{inspect(changeset.errors)}"
+            )
         end
       end)
     end

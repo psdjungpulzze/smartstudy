@@ -28,7 +28,10 @@ defmodule FunSheep.Assessments.TestSchedule do
 
     # Schedule classification: standard (student-created), official (auto-created
     # from known_test_dates), simulation (full mock exam session)
-    field :schedule_type, Ecto.Enum, values: [:standard, :official, :simulation], default: :standard
+    field :schedule_type, Ecto.Enum,
+      values: [:standard, :official, :simulation],
+      default: :standard
+
     field :is_auto_created, :boolean, default: false
 
     belongs_to :user_role, FunSheep.Accounts.UserRole

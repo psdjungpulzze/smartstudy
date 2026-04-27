@@ -250,7 +250,13 @@ defmodule FunSheepWeb.CourseNewLive do
     socket =
       if new_val,
         do: assign(socket, is_premium_catalog: true, access_level: "premium"),
-        else: assign(socket, is_premium_catalog: false, access_level: "public", price_cents: nil, auto_create_tests: false)
+        else:
+          assign(socket,
+            is_premium_catalog: false,
+            access_level: "public",
+            price_cents: nil,
+            auto_create_tests: false
+          )
 
     {:noreply, socket}
   end
@@ -260,10 +266,12 @@ defmodule FunSheepWeb.CourseNewLive do
   end
 
   def handle_event("update_price_cents", %{"value" => value}, socket) do
-    parsed = case Integer.parse(value) do
-      {n, _} when n >= 0 -> n
-      _ -> nil
-    end
+    parsed =
+      case Integer.parse(value) do
+        {n, _} when n >= 0 -> n
+        _ -> nil
+      end
+
     {:noreply, assign(socket, price_cents: parsed)}
   end
 
@@ -347,7 +355,11 @@ defmodule FunSheepWeb.CourseNewLive do
               |> FunSheep.Workers.ProcessCourseWorker.new()
               |> Oban.insert()
 
-              put_flash(socket, :info, "Course updated! Re-processing content for new textbook...")
+              put_flash(
+                socket,
+                :info,
+                "Course updated! Re-processing content for new textbook..."
+              )
             else
               put_flash(socket, :info, "Course updated!")
             end
@@ -455,7 +467,10 @@ defmodule FunSheepWeb.CourseNewLive do
         brief != "" ->
           %{
             "prompt_context" => brief,
-            "validation_rules" => %{"mcq_option_count" => 4, "answer_labels" => ["A", "B", "C", "D"]}
+            "validation_rules" => %{
+              "mcq_option_count" => 4,
+              "answer_labels" => ["A", "B", "C", "D"]
+            }
           }
 
         true ->
@@ -463,11 +478,17 @@ defmodule FunSheepWeb.CourseNewLive do
       end
 
     score_weights =
-      if profile, do: profile.score_predictor_weights, else: existing_metadata["score_predictor_weights"]
+      if profile,
+        do: profile.score_predictor_weights,
+        else: existing_metadata["score_predictor_weights"]
 
     existing_metadata
-    |> then(fn m -> if generation_config, do: Map.put(m, "generation_config", generation_config), else: m end)
-    |> then(fn m -> if score_weights, do: Map.put(m, "score_predictor_weights", score_weights), else: m end)
+    |> then(fn m ->
+      if generation_config, do: Map.put(m, "generation_config", generation_config), else: m
+    end)
+    |> then(fn m ->
+      if score_weights, do: Map.put(m, "score_predictor_weights", score_weights), else: m
+    end)
   end
 
   defp build_catalog_attrs(assigns) do
@@ -607,8 +628,9 @@ defmodule FunSheepWeb.CourseNewLive do
               <div>
                 <p class="text-sm font-semibold text-green-800">{@detected_profile.display_name}</p>
                 <p class="text-xs text-green-700 mt-0.5">
-                  {length(@detected_profile.suggested_chapters)} chapters ·
-                  {@detected_profile.generation_config["validation_rules"]["mcq_option_count"]}-option MCQ ·
+                  {length(@detected_profile.suggested_chapters)} chapters · {@detected_profile.generation_config[
+                    "validation_rules"
+                  ]["mcq_option_count"]}-option MCQ ·
                   Questions tailored to official test format
                 </p>
               </div>
@@ -648,7 +670,9 @@ defmodule FunSheepWeb.CourseNewLive do
             <div>
               <label class="block text-sm font-medium text-gray-900 mb-1">
                 Generation Brief
-                <span class="text-gray-400 font-normal text-xs ml-1">(used by AI to generate questions)</span>
+                <span class="text-gray-400 font-normal text-xs ml-1">
+                  (used by AI to generate questions)
+                </span>
               </label>
               <textarea
                 id={"brief-#{if @detected_profile, do: @detected_profile.display_name, else: "custom"}"}
@@ -1040,10 +1064,14 @@ defmodule FunSheepWeb.CourseNewLive do
             name="value"
             class="w-full px-3 py-2 bg-white border border-gray-200 rounded-full text-sm text-gray-900 focus:border-[#4CD964] outline-none"
           >
-            <option value="preview" selected={@access_level == "preview"}>Preview (free sample only)</option>
+            <option value="preview" selected={@access_level == "preview"}>
+              Preview (free sample only)
+            </option>
             <option value="standard" selected={@access_level == "standard"}>Standard</option>
             <option value="premium" selected={@access_level == "premium"}>Premium</option>
-            <option value="professional" selected={@access_level == "professional"}>Professional</option>
+            <option value="professional" selected={@access_level == "professional"}>
+              Professional
+            </option>
           </select>
         </div>
 

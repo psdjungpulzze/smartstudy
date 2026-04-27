@@ -49,7 +49,8 @@ defmodule FunSheep.Workers.StuckValidationSweeperWorker do
     # fight in-flight validators.
     base_query =
       from(q in Question,
-        join: c in Course, on: c.id == q.course_id,
+        join: c in Course,
+        on: c.id == q.course_id,
         where: q.validation_status == :pending,
         where: c.processing_status != "cancelled",
         distinct: true,

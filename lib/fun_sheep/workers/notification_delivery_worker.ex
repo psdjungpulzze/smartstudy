@@ -24,7 +24,7 @@ defmodule FunSheep.Workers.NotificationDeliveryWorker do
   import Ecto.Query, warn: false
 
   alias FunSheep.Notifications
-  alias FunSheep.Notifications.Notification
+  alias FunSheep.Notifications.{Notification, PushDelivery}
   alias FunSheep.{Accounts, Repo}
 
   require Logger
@@ -106,18 +106,20 @@ defmodule FunSheep.Workers.NotificationDeliveryWorker do
 
           mark_failed(notif, "no_active_push_tokens")
         else
-          # Push send requires FCM/APNS integration (Phase 2). Log intent for now.
-          Logger.info(
-            "[NotificationDelivery] push stub: would send #{notif.type} to #{length(tokens)} token(s) for #{user_role_id}"
-          )
+          %{sent: sent, failed: failed, skipped: skipped} =
+            PushDelivery.deliver(tokens, notif.title, notif.body, notif.payload || %{})
 
           :telemetry.execute(
-            [:fun_sheep, :notifications, :push_delivery_stub],
-            %{token_count: length(tokens)},
+            [:fun_sheep, :notifications, :push_delivery],
+            %{sent: sent, failed: failed, skipped: skipped},
             %{user_role_id: user_role_id, type: notif.type}
           )
 
-          mark_sent(notif)
+          if sent > 0 or skipped == length(tokens) do
+            mark_sent(notif)
+          else
+            mark_failed(notif, "all_tokens_rejected")
+          end
         end
       end
     end

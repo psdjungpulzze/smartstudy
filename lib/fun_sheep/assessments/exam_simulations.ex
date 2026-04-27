@@ -7,7 +7,9 @@ defmodule FunSheep.Assessments.ExamSimulations do
 
   def get_active_session(user_role_id, course_id) do
     from(s in ExamSimulationSession,
-      where: s.user_role_id == ^user_role_id and s.course_id == ^course_id and s.status == "in_progress",
+      where:
+        s.user_role_id == ^user_role_id and s.course_id == ^course_id and
+          s.status == "in_progress",
       order_by: [desc: s.started_at],
       limit: 1
     )
@@ -43,6 +45,7 @@ defmodule FunSheep.Assessments.ExamSimulations do
 
   def mark_submitted(session, scoring_attrs) do
     attrs = Map.merge(scoring_attrs, %{submitted_at: DateTime.utc_now(:second)})
+
     session
     |> ExamSimulationSession.submit_changeset(attrs)
     |> Repo.update()
@@ -50,6 +53,7 @@ defmodule FunSheep.Assessments.ExamSimulations do
 
   def mark_timed_out(session, scoring_attrs) do
     attrs = Map.merge(scoring_attrs, %{submitted_at: DateTime.utc_now(:second)})
+
     session
     |> ExamSimulationSession.timeout_changeset(attrs)
     |> Repo.update()

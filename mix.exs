@@ -89,7 +89,17 @@ defmodule FunSheep.MixProject do
       {:fun_with_flags, "~> 1.11"},
       # EPUB support: HTML parsing + XPath for OPF/NCX
       {:floki, "~> 0.36"},
-      {:sweet_xml, "~> 0.7"}
+      {:sweet_xml, "~> 0.7"},
+      # Distributed process registry + supervisor (cluster-aware tutor sessions)
+      {:horde, "~> 0.9"},
+      # Redis client (shared cache for cohort percentiles, rate-limit counters)
+      {:redix, "~> 1.5"},
+      # OpenTelemetry — distributed tracing for Phoenix, Ecto, and Oban
+      {:opentelemetry, "~> 1.5"},
+      {:opentelemetry_exporter, "~> 1.8"},
+      {:opentelemetry_phoenix, "~> 2.0"},
+      {:opentelemetry_ecto, "~> 1.2"},
+      {:opentelemetry_oban, "~> 1.1"}
     ]
   end
 

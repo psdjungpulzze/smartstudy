@@ -75,14 +75,19 @@ defmodule FunSheep.Workers.TestDateSyncWorker do
     with {:ok, dates} <- fetch_test_dates(test_type, source) do
       {inserted, updated} =
         Enum.reduce(dates, {0, 0}, fn date_attrs, {ins, upd} ->
-          case Courses.upsert_known_test_date(Map.put(date_attrs, :last_synced_at, DateTime.utc_now())) do
+          case Courses.upsert_known_test_date(
+                 Map.put(date_attrs, :last_synced_at, DateTime.utc_now())
+               ) do
             {:ok, record} ->
               if record.inserted_at == record.updated_at,
                 do: {ins + 1, upd},
                 else: {ins, upd + 1}
 
             {:error, changeset} ->
-              Logger.warning("[TestDateSyncWorker] Skipped invalid date: #{inspect(changeset.errors)}")
+              Logger.warning(
+                "[TestDateSyncWorker] Skipped invalid date: #{inspect(changeset.errors)}"
+              )
+
               {ins, upd}
           end
         end)
@@ -91,7 +96,10 @@ defmodule FunSheep.Workers.TestDateSyncWorker do
       :ok
     else
       {:error, reason} ->
-        Logger.error("[TestDateSyncWorker] Failed to fetch #{test_type} dates: #{inspect(reason)}")
+        Logger.error(
+          "[TestDateSyncWorker] Failed to fetch #{test_type} dates: #{inspect(reason)}"
+        )
+
         {:error, reason}
     end
   end
@@ -185,7 +193,10 @@ defmodule FunSheep.Workers.TestDateSyncWorker do
         {:ok, dates}
 
       {:error, _} = err ->
-        Logger.warning("[TestDateSyncWorker] Could not parse JSON dates from response: #{String.slice(text, 0, 200)}")
+        Logger.warning(
+          "[TestDateSyncWorker] Could not parse JSON dates from response: #{String.slice(text, 0, 200)}"
+        )
+
         err
     end
   end
@@ -205,16 +216,17 @@ defmodule FunSheep.Workers.TestDateSyncWorker do
 
   defp parse_date_entry(raw, test_type) do
     with {:ok, test_date} <- parse_date(raw["test_date"]) do
-      {:ok, %{
-        test_type: test_type,
-        test_name: raw["test_name"] || "#{String.upcase(test_type)} #{test_date}",
-        test_date: test_date,
-        registration_deadline: parse_date_ok(raw["registration_deadline"]),
-        late_registration_deadline: parse_date_ok(raw["late_registration_deadline"]),
-        score_release_date: parse_date_ok(raw["score_release_date"]),
-        source_url: raw["source_url"],
-        region: "us"
-      }}
+      {:ok,
+       %{
+         test_type: test_type,
+         test_name: raw["test_name"] || "#{String.upcase(test_type)} #{test_date}",
+         test_date: test_date,
+         registration_deadline: parse_date_ok(raw["registration_deadline"]),
+         late_registration_deadline: parse_date_ok(raw["late_registration_deadline"]),
+         score_release_date: parse_date_ok(raw["score_release_date"]),
+         source_url: raw["source_url"],
+         region: "us"
+       }}
     end
   end
 

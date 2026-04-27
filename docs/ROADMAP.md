@@ -35,6 +35,8 @@ Plans are ordered by impact for a high school student preparing for finals.
 | 22 | Social Friends & Followers — follow graph, school directory, peer invites, course sharing, viral loops | Social & Growth | [ROADMAP/funsheep-social-friends-strategy.md](ROADMAP/funsheep-social-friends-strategy.md) | Planning |
 | 20 | Subscription Purchase Flows (Flow A student-ask, B parent-initiated, C teacher-initiated) | Monetization | [ROADMAP/funsheep-subscription-flows.md](ROADMAP/funsheep-subscription-flows.md) | Planning |
 | 21 | Premium Courses & Standardized Test Prep (SAT, ACT, AP, IB, LSAT, Bar, GMAT, MCAT) | Monetization | [ROADMAP/funsheep-premium-courses-and-tests.md](ROADMAP/funsheep-premium-courses-and-tests.md) | Planning |
+| 23 | **Mobile App — iOS & Android (React Native + Expo, web-to-mobile sync workflow)** | Platform Expansion | [ROADMAP/funsheep-mobile-app.md](ROADMAP/funsheep-mobile-app.md) | **Planning** |
+| 24 | **Scalability Hardening — PgBouncer, read replica, Redis, CDN, Horde, worker auto-scaling** | Infrastructure | [ROADMAP/funsheep-scalability-hardening.md](ROADMAP/funsheep-scalability-hardening.md) | **Planning** |
 
 ### Quality Assessments
 

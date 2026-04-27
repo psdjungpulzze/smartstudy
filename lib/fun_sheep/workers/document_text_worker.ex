@@ -78,9 +78,7 @@ defmodule FunSheep.Workers.DocumentTextWorker do
       :ok
     else
       {:error, {:unknown_extension, ext}} ->
-        Logger.warning(
-          "[DocText] Unsupported extension #{ext} for material #{material.id}"
-        )
+        Logger.warning("[DocText] Unsupported extension #{ext} for material #{material.id}")
 
         Content.update_uploaded_material(material, %{
           ocr_status: :failed,

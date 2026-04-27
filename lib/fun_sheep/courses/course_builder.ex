@@ -84,7 +84,8 @@ defmodule FunSheep.Courses.CourseBuilder do
       has_exam_simulation: not is_nil(spec["exam_simulation"]),
       has_bundle: not is_nil(spec["bundle"]),
       has_textbook: not is_nil(textbook),
-      textbook_title: textbook && (textbook["title"] || textbook["pdf_url"] || textbook["amazon_url"]),
+      textbook_title:
+        textbook && (textbook["title"] || textbook["pdf_url"] || textbook["amazon_url"]),
       price_cents: spec["price_cents"]
     }
   end
@@ -228,7 +229,10 @@ defmodule FunSheep.Courses.CourseBuilder do
     if has_questions do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
       Repo.update_all(from(c in Chapter, where: c.id == ^chapter.id), set: [orphaned_at: now])
-      Logger.warning("[CourseBuilder] Chapter not in spec — marked orphaned (has questions): #{chapter.name}")
+
+      Logger.warning(
+        "[CourseBuilder] Chapter not in spec — marked orphaned (has questions): #{chapter.name}"
+      )
     else
       Repo.delete_all(from s in Section, where: s.chapter_id == ^chapter.id)
       Repo.delete!(chapter)
@@ -261,10 +265,15 @@ defmodule FunSheep.Courses.CourseBuilder do
     |> Enum.each(fn s ->
       unless MapSet.member?(spec_names, s.name) do
         if Repo.exists?(from q in Question, where: q.section_id == ^s.id) do
-          Logger.warning("[CourseBuilder] Section not in spec has questions, leaving: #{chapter.name} / #{s.name}")
+          Logger.warning(
+            "[CourseBuilder] Section not in spec has questions, leaving: #{chapter.name} / #{s.name}"
+          )
         else
           Repo.delete!(s)
-          Logger.info("[CourseBuilder] Deleted empty section not in spec: #{chapter.name} / #{s.name}")
+
+          Logger.info(
+            "[CourseBuilder] Deleted empty section not in spec: #{chapter.name} / #{s.name}"
+          )
         end
       end
     end)
@@ -410,7 +419,10 @@ defmodule FunSheep.Courses.CourseBuilder do
             %{type: :metadata, textbook_id: textbook.id, title: textbook.title}
 
           {:error, reason} ->
-            Logger.warning("[CourseBuilder] Metadata textbook attachment failed: #{inspect(reason)}")
+            Logger.warning(
+              "[CourseBuilder] Metadata textbook attachment failed: #{inspect(reason)}"
+            )
+
             nil
         end
     end

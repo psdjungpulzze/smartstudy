@@ -74,7 +74,8 @@ defmodule FunSheep.Ebook.FormatDetector do
   Convenience wrapper: reads the magic bytes from a local file path and
   normalises the extension, then delegates to `detect/2`.
   """
-  @spec detect_file(String.t()) :: :pdf | :epub | :mobi | :azw3 | :image | :docx | :pptx | :xlsx | :unknown
+  @spec detect_file(String.t()) ::
+          :pdf | :epub | :mobi | :azw3 | :image | :docx | :pptx | :xlsx | :unknown
   def detect_file(path) do
     ext =
       path

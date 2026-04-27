@@ -7,18 +7,33 @@ defmodule FunSheep.Application do
 
   @impl true
   def start(_type, _args) do
+    # Set up OpenTelemetry auto-instrumentation before the supervisor starts so
+    # all Phoenix requests, Ecto queries, and Oban jobs are traced from boot.
+    OpentelemetryPhoenix.setup(adapter: :bandit)
+    OpentelemetryEcto.setup([:fun_sheep, :repo])
+    OpentelemetryEcto.setup([:fun_sheep, :repo_read])
+    OpentelemetryOban.setup()
+
     children =
       [
         FunSheepWeb.Telemetry,
         FunSheep.Repo,
+        # Read-only repo pointed at the read replica (falls back to primary when
+        # DATABASE_READ_URL is unset). Used for heavy read queries to offload the primary.
+        FunSheep.RepoRead,
         {DNSCluster, query: Application.get_env(:fun_sheep, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: FunSheep.PubSub},
         # Interactor Auth token cache (caches App JWT for M2M calls)
         FunSheep.Interactor.Auth,
         # Circuit-breaker + daily-budget guard for LLM calls
         FunSheep.AIUsage.Guard,
-        # Registry for AI tutor sessions (one GenServer per active student+question)
-        {Registry, keys: :unique, name: FunSheep.Tutor.SessionRegistry},
+        # Cluster-aware registry for AI tutor sessions. Horde.Registry distributes
+        # lookups across all nodes so a session started on node A is findable from
+        # node B, and the cluster rebalances on node join/leave.
+        {Horde.Registry, name: FunSheep.Tutor.SessionRegistry, keys: :unique, members: :auto},
+        # Per-domain token-bucket rate limiter for web scraping (Phase 4).
+        # Must start before WebSourceScraperWorker jobs run.
+        FunSheep.Scraper.DomainRateLimiter,
         # Cache for in-progress assessment state (survives LiveView reconnects)
         FunSheep.Assessments.StateCache,
         # ETS-backed cache for cohort percentile bands (spec §6.3)
@@ -56,6 +71,7 @@ defmodule FunSheep.Application do
         {Oban, Application.fetch_env!(:fun_sheep, Oban)}
       ] ++
         goth_children() ++
+        redis_children() ++
         [
           # Start to serve requests, typically the last entry
           FunSheepWeb.Endpoint
@@ -88,4 +104,16 @@ defmodule FunSheep.Application do
       []
     end
   end
+
+  # Start a single Redix connection when REDIS_URL is configured. The connection
+  # is registered under the name :funsheep_redis so FunSheep.Cache can find it.
+  # When REDIS_URL is absent (e.g. dev, test) no Redis process starts and the
+  # Cache module degrades gracefully to :miss on all reads.
+  defp redis_children do
+    case Application.get_env(:fun_sheep, :redis_url) do
+      nil -> []
+      url -> [{Redix, {url, name: :funsheep_redis}}]
+    end
+  end
+
 end

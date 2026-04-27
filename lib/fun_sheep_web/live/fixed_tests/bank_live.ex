@@ -317,7 +317,9 @@ defmodule FunSheepWeb.FixedTests.BankLive do
       <div class="flex items-center justify-between mb-6">
         <div>
           <.link
-            navigate={if @bank.course_id, do: ~p"/courses/#{@bank.course_id}/tests", else: ~p"/custom-tests"}
+            navigate={
+              if @bank.course_id, do: ~p"/courses/#{@bank.course_id}/tests", else: ~p"/custom-tests"
+            }
             class="text-sm text-[#8E8E93] hover:underline"
           >
             ← Back

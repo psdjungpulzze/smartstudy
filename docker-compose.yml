@@ -34,5 +34,46 @@ services:
     tmpfs:
       - /var/lib/postgresql/data
 
+  # =============================================================================
+  # PgBouncer — connection pooler (transaction mode) for local scalability testing
+  # Mirrors the prod Cloud SQL → PgBouncer topology.
+  # Start with: docker compose --profile pgbouncer up -d pgbouncer_dev
+  # Then set DATABASE_URL=ecto://postgres:postgres@localhost:5452/fun_sheep_dev
+  # =============================================================================
+  pgbouncer_dev:
+    image: edoburu/pgbouncer:1.22.1
+    profiles: ["pgbouncer"]
+    container_name: fun_sheep_pgbouncer_dev
+    depends_on:
+      postgres_dev:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres_dev
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: fun_sheep_dev
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      SERVER_RESET_QUERY: DISCARD ALL
+      # Disable named prepared statements (required for transaction mode)
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+    ports:
+      - "5452:5432"
+
+  # =============================================================================
+  # Redis — shared cache / rate-limit counters for local scalability testing
+  # Start with: docker compose --profile redis up -d redis_dev
+  # Then set REDIS_URL=redis://localhost:6379
+  # =============================================================================
+  redis_dev:
+    image: redis:7-alpine
+    profiles: ["redis"]
+    container_name: fun_sheep_redis_dev
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
 volumes:
   postgres_dev_data:

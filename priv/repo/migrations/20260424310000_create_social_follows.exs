@@ -4,8 +4,12 @@ defmodule FunSheep.Repo.Migrations.CreateSocialFollows do
   def change do
     create_if_not_exists table(:social_follows, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :follower_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
-      add :followee_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :follower_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
+
+      add :followee_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
 
       timestamps(type: :utc_datetime)
     end
@@ -16,8 +20,12 @@ defmodule FunSheep.Repo.Migrations.CreateSocialFollows do
 
     create_if_not_exists table(:user_blocks, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :blocker_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
-      add :blocked_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :blocker_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
+
+      add :blocked_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
 
       timestamps(type: :utc_datetime)
     end

@@ -95,5 +95,8 @@ defmodule Mix.Tasks.Funsheep.Course.Create do
   end
 
   defp format_price(nil, _), do: "free"
-  defp format_price(cents, currency), do: "$#{div(cents, 100)}.#{rem(cents, 100) |> to_string() |> String.pad_leading(2, "0")} #{String.upcase(currency || "usd")}"
+
+  defp format_price(cents, currency),
+    do:
+      "$#{div(cents, 100)}.#{rem(cents, 100) |> to_string() |> String.pad_leading(2, "0")} #{String.upcase(currency || "usd")}"
 end

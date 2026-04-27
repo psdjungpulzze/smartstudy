@@ -47,11 +47,12 @@ defmodule FunSheep.SocialCourseShareTest do
 
       {:ok, _} = Social.share_course(sharer.id, course.id, [sharer.id, r1.id])
 
-      recipients = Repo.all(
-        from r in CourseShareRecipient,
-          join: s in assoc(r, :share),
-          where: s.sharer_id == ^sharer.id and s.course_id == ^course.id
-      )
+      recipients =
+        Repo.all(
+          from r in CourseShareRecipient,
+            join: s in assoc(r, :share),
+            where: s.sharer_id == ^sharer.id and s.course_id == ^course.id
+        )
 
       recipient_ids = Enum.map(recipients, & &1.recipient_id)
       refute sharer.id in recipient_ids
@@ -62,7 +63,9 @@ defmodule FunSheep.SocialCourseShareTest do
       r1 = make_student()
       course = make_course()
 
-      {:ok, share} = Social.share_course(sharer.id, course.id, [r1.id], message: "Check this out!")
+      {:ok, share} =
+        Social.share_course(sharer.id, course.id, [r1.id], message: "Check this out!")
+
       assert share.message == "Check this out!"
     end
   end
@@ -76,7 +79,9 @@ defmodule FunSheep.SocialCourseShareTest do
       course = make_course()
 
       {:ok, share} = Social.share_course(sharer.id, course.id, [recipient.id])
-      recipient_record = Repo.get_by!(CourseShareRecipient, share_id: share.id, recipient_id: recipient.id)
+
+      recipient_record =
+        Repo.get_by!(CourseShareRecipient, share_id: share.id, recipient_id: recipient.id)
 
       assert {:ok, updated} = Social.mark_share_seen(share.id, recipient.id)
       assert updated.seen_at != nil

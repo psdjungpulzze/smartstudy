@@ -35,7 +35,10 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
   @vision_batch_size 20
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"material_id" => material_id}, attempt: attempt, max_attempts: max} = _job) do
+  def perform(
+        %Oban.Job{args: %{"material_id" => material_id}, attempt: attempt, max_attempts: max} =
+          _job
+      ) do
     material = Content.get_uploaded_material!(material_id)
 
     result =
@@ -57,7 +60,10 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
     # so the course doesn't hang forever at "Processing uploaded materials…".
     case result do
       {:error, _reason} when attempt >= max ->
-        Logger.error("[PDF OCR] Exhausted #{max} attempts for material #{material_id}, advancing course")
+        Logger.error(
+          "[PDF OCR] Exhausted #{max} attempts for material #{material_id}, advancing course"
+        )
+
         advance_course_on_failure(material)
         :ok
 
@@ -279,7 +285,8 @@ defmodule FunSheep.Workers.PdfOcrDispatchWorker do
         # All materials failed — mark course as failed and notify teacher
         Courses.update_course(course, %{
           processing_status: "failed",
-          processing_step: "OCR failed for all #{total} uploaded files. Please check your files and reprocess."
+          processing_step:
+            "OCR failed for all #{total} uploaded files. Please check your files and reprocess."
         })
 
         notify_teacher(course, :all_failed)

@@ -59,7 +59,11 @@ defmodule FunSheep.Social.Invite do
     user_role_id = get_field(changeset, :invitee_user_role_id)
 
     if is_nil(email) and is_nil(user_role_id) do
-      add_error(changeset, :invitee_email, "either invitee_email or invitee_user_role_id must be set")
+      add_error(
+        changeset,
+        :invitee_email,
+        "either invitee_email or invitee_user_role_id must be set"
+      )
     else
       changeset
     end

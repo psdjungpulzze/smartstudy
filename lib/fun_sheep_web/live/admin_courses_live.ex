@@ -429,7 +429,7 @@ defmodule FunSheepWeb.AdminCoursesLive do
               class="w-full px-4 py-2 bg-[#F5F5F7] border border-transparent focus:border-[#4CD964] focus:bg-white rounded-full outline-none transition-colors"
             >
               <%= for level <- ~w(public preview standard premium professional) do %>
-                <option value={level} selected={@course.access_level == level}><%= level %></option>
+                <option value={level} selected={@course.access_level == level}>{level}</option>
               <% end %>
             </select>
           </div>

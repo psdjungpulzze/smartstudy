@@ -66,7 +66,10 @@ defmodule FunSheepWeb.FlockProfileLive do
     ~H"""
     <div class="space-y-6 max-w-lg mx-auto">
       <%!-- Back link --%>
-      <.link navigate={~p"/leaderboard"} class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+      <.link
+        navigate={~p"/leaderboard"}
+        class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+      >
         ← Back to Flock
       </.link>
 
@@ -182,7 +185,10 @@ defmodule FunSheepWeb.FlockProfileLive do
         </div>
       </div>
 
-      <div :if={@achievements == []} class="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+      <div
+        :if={@achievements == []}
+        class="bg-white rounded-2xl border border-gray-100 p-6 text-center"
+      >
         <p class="text-gray-400 text-sm">No badges earned yet</p>
       </div>
     </div>

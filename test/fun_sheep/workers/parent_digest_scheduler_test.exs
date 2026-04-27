@@ -83,6 +83,7 @@ defmodule FunSheep.Workers.ParentDigestSchedulerTest do
       {:ok, _} = Accounts.accept_guardian_invite(sg.id)
 
       import Ecto.Query
+
       Repo.update_all(
         from(ur in FunSheep.Accounts.UserRole, where: ur.id == ^parent.id),
         set: [suspended_at: DateTime.utc_now() |> DateTime.truncate(:second)]

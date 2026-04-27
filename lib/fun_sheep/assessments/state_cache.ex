@@ -46,7 +46,11 @@ defmodule FunSheep.Assessments.StateCache do
 
   @doc "Store exam simulation state."
   def put_exam(user_role_id, session_id, state) do
-    :ets.insert(@table, {{:exam, user_role_id, session_id}, state, System.monotonic_time(:second)})
+    :ets.insert(
+      @table,
+      {{:exam, user_role_id, session_id}, state, System.monotonic_time(:second)}
+    )
+
     :ok
   end
 

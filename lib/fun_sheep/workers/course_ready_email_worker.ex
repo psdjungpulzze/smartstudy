@@ -40,7 +40,8 @@ defmodule FunSheep.Workers.CourseReadyEmailWorker do
           %UserRole{email: email, display_name: name} ->
             url = FunSheepWeb.Endpoint.url() <> "/courses/#{course_id}"
 
-            case CourseReadyEmail.build(email, name, course.name, url) |> FunSheep.Mailer.deliver() do
+            case CourseReadyEmail.build(email, name, course.name, url)
+                 |> FunSheep.Mailer.deliver() do
               {:ok, _} ->
                 Logger.info("[CourseReadyEmail] Sent to #{email} for course #{course_id}")
                 :ok

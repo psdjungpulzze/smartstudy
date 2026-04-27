@@ -35,10 +35,12 @@ defmodule FunSheep.SocialInviteTest do
       inviter = make_student()
       invitee = make_student()
 
-      {:ok, invite} = Social.create_invite(inviter.id,
-        invitee_user_role_id: invitee.id,
-        message: "Join me!"
-      )
+      {:ok, invite} =
+        Social.create_invite(inviter.id,
+          invitee_user_role_id: invitee.id,
+          message: "Join me!"
+        )
+
       assert invite.message == "Join me!"
     end
 
@@ -47,10 +49,13 @@ defmodule FunSheep.SocialInviteTest do
       invitee = make_student()
 
       long_msg = String.duplicate("x", 250)
-      {:ok, invite} = Social.create_invite(inviter.id,
-        invitee_user_role_id: invitee.id,
-        message: long_msg
-      )
+
+      {:ok, invite} =
+        Social.create_invite(inviter.id,
+          invitee_user_role_id: invitee.id,
+          message: long_msg
+        )
+
       assert String.length(invite.message) == 200
     end
 
@@ -59,11 +64,13 @@ defmodule FunSheep.SocialInviteTest do
       invitee = make_student()
       ctx_id = Ecto.UUID.generate()
 
-      {:ok, invite} = Social.create_invite(inviter.id,
-        invitee_user_role_id: invitee.id,
-        context: "course",
-        context_id: ctx_id
-      )
+      {:ok, invite} =
+        Social.create_invite(inviter.id,
+          invitee_user_role_id: invitee.id,
+          context: "course",
+          context_id: ctx_id
+        )
+
       assert invite.context == "course"
       assert invite.context_id == ctx_id
     end

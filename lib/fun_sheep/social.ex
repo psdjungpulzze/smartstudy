@@ -84,8 +84,13 @@ defmodule FunSheep.Social do
     )
 
     case Repo.get_by(Block, blocker_id: blocker_id, blocked_id: blocked_id) do
-      %Block{} = existing -> {:ok, existing}
-      nil -> %Block{} |> Block.changeset(%{blocker_id: blocker_id, blocked_id: blocked_id}) |> Repo.insert()
+      %Block{} = existing ->
+        {:ok, existing}
+
+      nil ->
+        %Block{}
+        |> Block.changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
+        |> Repo.insert()
     end
   end
 
@@ -169,28 +174,31 @@ defmodule FunSheep.Social do
     if viewer_id == subject_id do
       :self
     else
-      blocked = Repo.exists?(
-        from(b in Block,
-          where:
-            (b.blocker_id == ^viewer_id and b.blocked_id == ^subject_id) or
-              (b.blocker_id == ^subject_id and b.blocked_id == ^viewer_id)
+      blocked =
+        Repo.exists?(
+          from(b in Block,
+            where:
+              (b.blocker_id == ^viewer_id and b.blocked_id == ^subject_id) or
+                (b.blocker_id == ^subject_id and b.blocked_id == ^viewer_id)
+          )
         )
-      )
 
       if blocked do
         :blocked
       else
-        viewer_follows = Repo.exists?(
-          from(f in Follow,
-            where: f.follower_id == ^viewer_id and f.following_id == ^subject_id
+        viewer_follows =
+          Repo.exists?(
+            from(f in Follow,
+              where: f.follower_id == ^viewer_id and f.following_id == ^subject_id
+            )
           )
-        )
 
-        subject_follows = Repo.exists?(
-          from(f in Follow,
-            where: f.follower_id == ^subject_id and f.following_id == ^viewer_id
+        subject_follows =
+          Repo.exists?(
+            from(f in Follow,
+              where: f.follower_id == ^subject_id and f.following_id == ^viewer_id
+            )
           )
-        )
 
         cond do
           viewer_follows and subject_follows -> :mutual
@@ -266,10 +274,18 @@ defmodule FunSheep.Social do
             ur.school_id == ^me.school_id and
               ur.role == :student and
               ur.id not in ^exclude_ids,
-          left_join: s in Streak, on: s.user_role_id == ur.id,
+          left_join: s in Streak,
+          on: s.user_role_id == ur.id,
           left_join: xp in XpEvent,
           on: xp.user_role_id == ur.id and xp.inserted_at >= ^window_start,
-          group_by: [ur.id, ur.display_name, ur.grade, ur.school_id, s.current_streak, s.wool_level],
+          group_by: [
+            ur.id,
+            ur.display_name,
+            ur.grade,
+            ur.school_id,
+            s.current_streak,
+            s.wool_level
+          ],
           select: %{
             id: ur.id,
             display_name: ur.display_name,
@@ -299,12 +315,13 @@ defmodule FunSheep.Social do
         Map.put(p, :follow_state, follow_state)
       end)
       |> Enum.sort_by(fn p ->
-        follow_order = case p.follow_state do
-          :mutual -> 0
-          :following -> 1
-          :followed_by -> 2
-          :none -> 3
-        end
+        follow_order =
+          case p.follow_state do
+            :mutual -> 0
+            :following -> 1
+            :followed_by -> 2
+            :none -> 3
+          end
 
         {follow_order, -p.weekly_xp}
       end)
@@ -324,8 +341,7 @@ defmodule FunSheep.Social do
       %UserRole{school_id: school_id} ->
         Repo.one(
           from(ur in UserRole,
-            where:
-              ur.school_id == ^school_id and ur.role == :student and ur.id != ^user_role_id,
+            where: ur.school_id == ^school_id and ur.role == :student and ur.id != ^user_role_id,
             select: count(ur.id)
           )
         )
@@ -435,7 +451,8 @@ defmodule FunSheep.Social do
 
     fof_ids =
       from(f1 in Follow,
-        join: f2 in Follow, on: f2.follower_id == f1.following_id,
+        join: f2 in Follow,
+        on: f2.follower_id == f1.following_id,
         where: f1.follower_id == ^user_id and f2.following_id not in ^MapSet.to_list(exclude),
         where: f2.following_id not in ^MapSet.to_list(seen),
         select: f2.following_id,
@@ -518,13 +535,14 @@ defmodule FunSheep.Social do
   def can_view_profile?(viewer_id, subject_id) when viewer_id == subject_id, do: true
 
   def can_view_profile?(viewer_id, subject_id) do
-    blocked = Repo.exists?(
-      from(b in Block,
-        where:
-          (b.blocker_id == ^viewer_id and b.blocked_id == ^subject_id) or
-            (b.blocker_id == ^subject_id and b.blocked_id == ^viewer_id)
+    blocked =
+      Repo.exists?(
+        from(b in Block,
+          where:
+            (b.blocker_id == ^viewer_id and b.blocked_id == ^subject_id) or
+              (b.blocker_id == ^subject_id and b.blocked_id == ^viewer_id)
+        )
       )
-    )
 
     if blocked do
       false
@@ -533,10 +551,19 @@ defmodule FunSheep.Social do
       subject = Repo.get(UserRole, subject_id)
 
       cond do
-        is_nil(viewer) or is_nil(subject) -> false
-        viewer.school_id && viewer.school_id == subject.school_id -> true
-        Repo.exists?(from(f in Follow, where: f.follower_id == ^viewer_id and f.following_id == ^subject_id)) -> true
-        true -> false
+        is_nil(viewer) or is_nil(subject) ->
+          false
+
+        viewer.school_id && viewer.school_id == subject.school_id ->
+          true
+
+        Repo.exists?(
+          from(f in Follow, where: f.follower_id == ^viewer_id and f.following_id == ^subject_id)
+        ) ->
+          true
+
+        true ->
+          false
       end
     end
   end
@@ -576,7 +603,12 @@ defmodule FunSheep.Social do
     attrs =
       if is_nil(invitee_user_role_id) do
         token = generate_invite_token()
-        expires_at = DateTime.utc_now() |> DateTime.add(14 * 24 * 60 * 60, :second) |> DateTime.truncate(:second)
+
+        expires_at =
+          DateTime.utc_now()
+          |> DateTime.add(14 * 24 * 60 * 60, :second)
+          |> DateTime.truncate(:second)
+
         Map.merge(attrs, %{invite_token: token, invite_token_expires_at: expires_at})
       else
         attrs
@@ -775,6 +807,7 @@ defmodule FunSheep.Social do
         source_id: course_id,
         metadata: %{partner_id: user_b}
       )
+
       tap_award_study_buddy_achievement(user_a)
     end
 
@@ -783,6 +816,7 @@ defmodule FunSheep.Social do
         source_id: course_id,
         metadata: %{partner_id: user_a}
       )
+
       tap_award_study_buddy_achievement(user_b)
     end
   end
@@ -812,7 +846,11 @@ defmodule FunSheep.Social do
         case Repo.get_by(CourseShare, sharer_id: sharer_id, course_id: course_id) do
           nil ->
             %CourseShare{}
-            |> CourseShare.changeset(%{sharer_id: sharer_id, course_id: course_id, message: message})
+            |> CourseShare.changeset(%{
+              sharer_id: sharer_id,
+              course_id: course_id,
+              message: message
+            })
             |> Repo.insert!()
 
           existing ->
@@ -831,7 +869,8 @@ defmodule FunSheep.Social do
               |> CourseShareRecipient.changeset(%{share_id: share.id, recipient_id: rid})
               |> Repo.insert!(on_conflict: :nothing)
 
-            existing -> existing
+            existing ->
+              existing
           end
         end)
 
@@ -914,13 +953,21 @@ defmodule FunSheep.Social do
   ## ── Badge side effects ───────────────────────────────────────────────────
 
   defp tap_award_first_follow_badges({:ok, _follow} = result, follower_id, following_id) do
-    new_following_count = Repo.one(
-      from(f in Follow, where: f.follower_id == ^follower_id and f.status != "blocked", select: count(f.id))
-    )
+    new_following_count =
+      Repo.one(
+        from(f in Follow,
+          where: f.follower_id == ^follower_id and f.status != "blocked",
+          select: count(f.id)
+        )
+      )
 
-    new_follower_count = Repo.one(
-      from(f in Follow, where: f.following_id == ^following_id and f.status != "blocked", select: count(f.id))
-    )
+    new_follower_count =
+      Repo.one(
+        from(f in Follow,
+          where: f.following_id == ^following_id and f.status != "blocked",
+          select: count(f.id)
+        )
+      )
 
     if new_following_count == 1 do
       FunSheep.Gamification.award_achievement(follower_id, "first_follow", %{})

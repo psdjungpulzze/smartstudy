@@ -340,6 +340,7 @@ defmodule FunSheep.Workers.PdfOcrPollerWorker do
     metadata = course.metadata || %{}
 
     textbook_kinds = [:textbook, :supplementary_book]
+
     has_textbook_ocr =
       FunSheep.Content.list_materials_by_course_and_kind(course_id, textbook_kinds)
       |> Enum.any?(&(&1.ocr_status == :completed))

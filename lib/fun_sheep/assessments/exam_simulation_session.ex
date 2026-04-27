@@ -35,12 +35,29 @@ defmodule FunSheep.Assessments.ExamSimulationSession do
   def changeset(session, attrs) do
     session
     |> cast(attrs, [
-      :user_role_id, :course_id, :schedule_id, :format_template_id,
-      :status, :time_limit_seconds, :started_at, :submitted_at,
-      :question_ids_order, :section_boundaries, :answers,
-      :score_correct, :score_total, :score_pct, :section_scores
+      :user_role_id,
+      :course_id,
+      :schedule_id,
+      :format_template_id,
+      :status,
+      :time_limit_seconds,
+      :started_at,
+      :submitted_at,
+      :question_ids_order,
+      :section_boundaries,
+      :answers,
+      :score_correct,
+      :score_total,
+      :score_pct,
+      :section_scores
     ])
-    |> validate_required([:user_role_id, :course_id, :time_limit_seconds, :started_at, :question_ids_order])
+    |> validate_required([
+      :user_role_id,
+      :course_id,
+      :time_limit_seconds,
+      :started_at,
+      :question_ids_order
+    ])
     |> validate_inclusion(:status, @valid_statuses)
     |> foreign_key_constraint(:user_role_id)
     |> foreign_key_constraint(:course_id)

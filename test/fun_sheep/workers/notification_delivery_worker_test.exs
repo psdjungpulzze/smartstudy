@@ -148,7 +148,6 @@ defmodule FunSheep.Workers.NotificationDeliveryWorkerTest do
     end
   end
 
-
   describe "perform/1 — quiet hours" do
     defp quiet_student_with_token do
       h = DateTime.utc_now().hour

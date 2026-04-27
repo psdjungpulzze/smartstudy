@@ -20,17 +20,13 @@ defmodule FunSheep.Repo.Migrations.AlterSocialFollowsRenameFolloweeAddStatusSour
     create unique_index(:social_follows, [:follower_id, :following_id])
 
     # Drop old index on followee_id if it exists
-    drop_if_exists index(:social_follows, [:followee_id],
-                     name: :social_follows_followee_id_index
-                   )
+    drop_if_exists index(:social_follows, [:followee_id], name: :social_follows_followee_id_index)
 
     # Create index on following_id
     create_if_not_exists index(:social_follows, [:following_id])
 
     # Add check constraint to prevent self-follows
-    create constraint(:social_follows, :no_self_follow,
-             check: "follower_id != following_id"
-           )
+    create constraint(:social_follows, :no_self_follow, check: "follower_id != following_id")
   end
 
   def down do

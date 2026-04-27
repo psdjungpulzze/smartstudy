@@ -4,7 +4,10 @@ defmodule FunSheep.Repo.Migrations.CreateCourseShares do
   def change do
     create table(:course_shares, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :sharer_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :sharer_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :course_id, references(:courses, type: :binary_id, on_delete: :delete_all), null: false
       add :message, :text
       add :share_count, :integer, default: 1, null: false
@@ -14,8 +17,13 @@ defmodule FunSheep.Repo.Migrations.CreateCourseShares do
 
     create table(:course_share_recipients, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :share_id, references(:course_shares, type: :binary_id, on_delete: :delete_all), null: false
-      add :recipient_id, references(:user_roles, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :share_id, references(:course_shares, type: :binary_id, on_delete: :delete_all),
+        null: false
+
+      add :recipient_id, references(:user_roles, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :seen_at, :utc_datetime
 
       timestamps(type: :utc_datetime, updated_at: false)

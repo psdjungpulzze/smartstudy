@@ -146,7 +146,8 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
         insights
       end
 
-    over_budget = Enum.filter(section_summary, fn s -> s.time_used_seconds > s.time_budget_seconds end)
+    over_budget =
+      Enum.filter(section_summary, fn s -> s.time_used_seconds > s.time_budget_seconds end)
 
     insights =
       if over_budget != [] do
@@ -205,28 +206,28 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
     <div class="max-w-3xl mx-auto py-8 px-4">
       <div class="mb-6">
         <a href={~p"/courses/#{@course_id}"} class="text-sm text-gray-500 hover:text-gray-700">
-          &larr; <%= @course.name %>
+          &larr; {@course.name}
         </a>
       </div>
-
-      <!-- Score header -->
+      
+    <!-- Score header -->
       <div class="rounded-2xl bg-white shadow-md overflow-hidden mb-6">
         <div class="bg-slate-800 text-white px-8 py-6 flex items-center justify-between">
           <div>
             <h1 class="text-2xl font-bold">Exam Results</h1>
             <p class="text-slate-300 mt-1">
-              <%= if @session.status == "timed_out", do: "⏰ Time ran out", else: "✅ Submitted" %>
+              {if @session.status == "timed_out", do: "⏰ Time ran out", else: "✅ Submitted"}
             </p>
           </div>
           <div class="text-center">
-            <div class="text-4xl font-bold"><%= score_pct(@session.score_pct) %>%</div>
+            <div class="text-4xl font-bold">{score_pct(@session.score_pct)}%</div>
             <div class="text-slate-300 text-sm mt-1">
-              <%= @session.score_correct || 0 %> / <%= @session.score_total || 0 %> correct
+              {@session.score_correct || 0} / {@session.score_total || 0} correct
             </div>
           </div>
         </div>
-
-        <!-- Section scores -->
+        
+    <!-- Section scores -->
         <%= if @section_summary != [] do %>
           <div class="p-6">
             <h2 class="font-semibold text-gray-700 mb-3">Section Breakdown</h2>
@@ -236,9 +237,9 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
                 <% time_status = section_time_status(sec.time_used_seconds, sec.time_budget_seconds) %>
                 <div class="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
                   <div>
-                    <span class="font-medium text-gray-800"><%= sec.name %></span>
+                    <span class="font-medium text-gray-800">{sec.name}</span>
                     <span class="text-gray-500 text-sm ml-2">
-                      <%= sec.correct %>/<%= sec.total %> (<%= pct %>%)
+                      {sec.correct}/{sec.total} ({pct}%)
                     </span>
                   </div>
                   <div class="text-right text-sm">
@@ -250,9 +251,9 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
                         :on_track -> "text-gray-500"
                       end
                     ]}>
-                      ⏱ <%= format_time(sec.time_used_seconds) %>
+                      ⏱ {format_time(sec.time_used_seconds)}
                       <%= if sec.time_budget_seconds > 0 do %>
-                        / <%= format_time(sec.time_budget_seconds) %>
+                        / {format_time(sec.time_budget_seconds)}
                         <%= case time_status do %>
                           <% :over -> %>
                             <span class="text-amber-500 text-xs">over</span>
@@ -269,20 +270,20 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
           </div>
         <% end %>
       </div>
-
-      <!-- Insights -->
+      
+    <!-- Insights -->
       <%= if @insights != [] do %>
         <div class="rounded-2xl bg-amber-50 border border-amber-200 p-5 mb-6">
           <h2 class="font-semibold text-amber-800 mb-2">💡 Insights</h2>
           <ul class="space-y-2">
             <%= for insight <- @insights do %>
-              <li class="text-amber-700 text-sm"><%= insight %></li>
+              <li class="text-amber-700 text-sm">{insight}</li>
             <% end %>
           </ul>
         </div>
       <% end %>
-
-      <!-- Actions -->
+      
+    <!-- Actions -->
       <div class="flex gap-3 mb-8">
         <%= if @weak_sections != [] do %>
           <button
@@ -305,8 +306,8 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
           Back to Course
         </a>
       </div>
-
-      <!-- Question review -->
+      
+    <!-- Question review -->
       <div class="rounded-2xl bg-white shadow-md overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100">
           <h2 class="font-semibold text-gray-700">Question Review</h2>
@@ -338,36 +339,36 @@ defmodule FunSheepWeb.ExamSimulationLive.Results do
                     <% end %>
                   </span>
                   <span class="text-gray-700 text-sm">
-                    Q<%= item.index + 1 %>
-                    <%= if item.question,
+                    Q{item.index + 1}
+                    {if item.question,
                       do:
-                        " — #{String.slice(item.question.content, 0, 60)}#{if String.length(item.question.content || "") > 60, do: "...", else: ""}" %>
+                        " — #{String.slice(item.question.content, 0, 60)}#{if String.length(item.question.content || "") > 60, do: "...", else: ""}"}
                   </span>
                   <%= if item.flagged do %>
                     <span class="text-amber-500 text-xs">🚩 Flagged</span>
                   <% end %>
                 </div>
-                <span class="text-gray-400 text-sm"><%= format_time(item.time_spent_seconds) %></span>
+                <span class="text-gray-400 text-sm">{format_time(item.time_spent_seconds)}</span>
               </button>
 
               <%= if @expanded_question == item.index && item.question do %>
                 <div class="mt-4 ml-9 space-y-2 text-sm">
                   <div class="text-gray-600">
-                    <strong>Question:</strong> <%= item.question.content %>
+                    <strong>Question:</strong> {item.question.content}
                   </div>
                   <%= if item.answered do %>
                     <div class={if item.is_correct, do: "text-emerald-700", else: "text-red-700"}>
-                      <strong>Your answer:</strong> <%= item.your_answer %>
+                      <strong>Your answer:</strong> {item.your_answer}
                     </div>
                   <% else %>
                     <div class="text-gray-400">Not answered</div>
                   <% end %>
                   <div class="text-emerald-700">
-                    <strong>Correct answer:</strong> <%= item.question.answer %>
+                    <strong>Correct answer:</strong> {item.question.answer}
                   </div>
                   <%= if item.question.explanation do %>
                     <div class="text-gray-500 bg-gray-50 rounded-lg p-3">
-                      <%= item.question.explanation %>
+                      {item.question.explanation}
                     </div>
                   <% end %>
                 </div>

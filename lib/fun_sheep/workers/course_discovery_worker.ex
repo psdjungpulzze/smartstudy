@@ -34,7 +34,9 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
         attempt: attempt,
         max_attempts: max_attempts
       }) do
-    Logger.info("[Discovery] Starting chapter discovery for course #{course_id} (attempt #{attempt})")
+    Logger.info(
+      "[Discovery] Starting chapter discovery for course #{course_id} (attempt #{attempt})"
+    )
 
     course = Courses.get_course_with_chapters!(course_id)
     source_context = args["source_context"] || ""
@@ -251,7 +253,11 @@ defmodule FunSheep.Workers.CourseDiscoveryWorker do
     |> Enum.with_index(1)
     |> Enum.reduce(0, fn {chapter_data, position}, count ->
       case %Chapter{}
-           |> Chapter.changeset(%{name: chapter_data.name, position: position, course_id: course_id})
+           |> Chapter.changeset(%{
+             name: chapter_data.name,
+             position: position,
+             course_id: course_id
+           })
            |> Repo.insert() do
         {:ok, chapter} ->
           if chapter_data[:sections] && chapter_data.sections != [] do

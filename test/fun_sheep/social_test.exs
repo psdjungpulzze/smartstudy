@@ -7,9 +7,15 @@ defmodule FunSheep.SocialTest do
 
   setup do
     school = create_school()
-    alice = create_user_role(%{email: "alice@test.com", display_name: "Alice", school_id: school.id})
+
+    alice =
+      create_user_role(%{email: "alice@test.com", display_name: "Alice", school_id: school.id})
+
     bob = create_user_role(%{email: "bob@test.com", display_name: "Bob", school_id: school.id})
-    carol = create_user_role(%{email: "carol@test.com", display_name: "Carol", school_id: school.id})
+
+    carol =
+      create_user_role(%{email: "carol@test.com", display_name: "Carol", school_id: school.id})
+
     %{alice: alice, bob: bob, carol: carol}
   end
 

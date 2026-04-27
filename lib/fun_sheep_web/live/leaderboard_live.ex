@@ -322,7 +322,10 @@ defmodule FunSheepWeb.LeaderboardLive do
         </div>
 
         <%!-- Empty flock (all filter) --%>
-        <div :if={@flock == [] and @flock_filter == :all} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+        <div
+          :if={@flock == [] and @flock_filter == :all}
+          class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+        >
           <.sheep state={:encouraging} size="lg" message="Your flock is forming!" />
           <h3 class="font-extrabold text-gray-900 text-lg mt-4">No flock members yet</h3>
           <p class="text-sm text-gray-500 mt-1">
@@ -373,7 +376,10 @@ defmodule FunSheepWeb.LeaderboardLive do
           </.link>
         </div>
 
-        <div :if={@school_peers == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+        <div
+          :if={@school_peers == []}
+          class="bg-white rounded-2xl border border-gray-100 p-8 text-center"
+        >
           <p class="text-3xl mb-3">🏫</p>
           <h3 class="font-extrabold text-gray-900 text-lg">No classmates found yet</h3>
           <p class="text-sm text-gray-500 mt-1">
@@ -624,6 +630,7 @@ defmodule FunSheepWeb.LeaderboardLive do
 
   defp podium(assigns) do
     top3 = Enum.take(assigns.flock, 3)
+
     ordered =
       case top3 do
         [first, second, third] -> [second, first, third]
@@ -701,16 +708,19 @@ defmodule FunSheepWeb.LeaderboardLive do
   end
 
   defp tab_class(true),
-    do: "px-4 py-2 rounded-full text-sm font-bold bg-[#4CD964] text-white shadow-md transition-all"
+    do:
+      "px-4 py-2 rounded-full text-sm font-bold bg-[#4CD964] text-white shadow-md transition-all"
 
   defp tab_class(false),
-    do: "px-4 py-2 rounded-full text-sm font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
+    do:
+      "px-4 py-2 rounded-full text-sm font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
 
   defp filter_class(true),
     do: "px-3 py-1.5 rounded-full text-xs font-bold bg-gray-800 text-white transition-all"
 
   defp filter_class(false),
-    do: "px-3 py-1.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500 hover:bg-gray-200 transition-all"
+    do:
+      "px-3 py-1.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500 hover:bg-gray-200 transition-all"
 
   defp week_start do
     today = Date.utc_today()
@@ -746,13 +756,16 @@ defmodule FunSheepWeb.LeaderboardLive do
   defp rank_badge_class(_), do: "bg-gray-50 text-gray-400"
 
   defp podium_avatar_class(1),
-    do: "w-16 h-16 bg-gradient-to-br from-amber-400 to-yellow-500 text-white text-xl ring-4 ring-amber-200"
+    do:
+      "w-16 h-16 bg-gradient-to-br from-amber-400 to-yellow-500 text-white text-xl ring-4 ring-amber-200"
 
   defp podium_avatar_class(2),
-    do: "w-12 h-12 bg-gradient-to-br from-gray-300 to-gray-400 text-white text-lg ring-2 ring-gray-200"
+    do:
+      "w-12 h-12 bg-gradient-to-br from-gray-300 to-gray-400 text-white text-lg ring-2 ring-gray-200"
 
   defp podium_avatar_class(_),
-    do: "w-12 h-12 bg-gradient-to-br from-orange-300 to-orange-400 text-white text-lg ring-2 ring-orange-200"
+    do:
+      "w-12 h-12 bg-gradient-to-br from-orange-300 to-orange-400 text-white text-lg ring-2 ring-orange-200"
 
   defp podium_block_class(1), do: "bg-gradient-to-b from-amber-400 to-amber-500 h-20"
   defp podium_block_class(2), do: "bg-gradient-to-b from-gray-300 to-gray-400 h-14"

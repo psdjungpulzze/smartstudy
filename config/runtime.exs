@@ -121,7 +121,11 @@ if config_env() == :prod do
   base_repo_config = [
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    socket_options: maybe_ipv6
+    socket_options: maybe_ipv6,
+    # Required for PgBouncer in transaction mode: disables named prepared
+    # statements so every query is re-prepared per connection checkout.
+    # Safe to set even before PgBouncer is deployed — Postgres handles it fine.
+    prepare: :unnamed
   ]
 
   # When deployed on Cloud Run with Cloud SQL via Unix socket,
@@ -134,6 +138,29 @@ if config_env() == :prod do
     end
 
   config :fun_sheep, FunSheep.Repo, repo_config
+
+  # Read replica — offloads heavy reads (leaderboards, cohort percentiles, course
+  # browsing) from the primary. Falls back to the primary URL when no replica is
+  # provisioned so the app works identically before and after replica setup.
+  read_repo_config =
+    base_repo_config
+    |> Keyword.put(:url, System.get_env("DATABASE_READ_URL") || database_url)
+    |> Keyword.put(:pool_size, String.to_integer(System.get_env("READ_POOL_SIZE") || "5"))
+    |> then(fn config ->
+      case System.get_env("DB_SOCKET_DIR") do
+        nil -> config
+        socket_dir -> Keyword.put(config, :socket_dir, socket_dir)
+      end
+    end)
+
+  config :fun_sheep, FunSheep.RepoRead, read_repo_config
+
+  # Redis — shared cache for cohort percentiles, rate-limit counters, and other
+  # data that should be consistent across all instances. When unset, the app
+  # operates without shared caching (ETS-only, per-instance).
+  if redis_url = System.get_env("REDIS_URL") do
+    config :fun_sheep, :redis_url, redis_url
+  end
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
@@ -195,7 +222,8 @@ if config_env() == :prod do
   # CourseDiscoveryWorker job and left the course spinning for hours).
   # POOL_SIZE on the worker container must be >= sum of these queues
   # (default=10 + ocr=8 + ai=2 + ai_validation=3 + pdf_ocr=3 + ingest=1
-  #  + integrations=3 + notifications=2 + ebook=5 + course_setup=2 = 39)
+  #  + integrations=3 + notifications=2 + ebook=5 + course_setup=2
+  #  + web_validation=5 + web_scrape=20 = 64)
   # plus headroom for Lifeline/Pruner plugins and Oban's internal Peer/Notifier.
   oban_queues =
     if System.get_env("RUN_OBAN_WORKERS") == "true" do
@@ -209,7 +237,16 @@ if config_env() == :prod do
         integrations: 3,
         notifications: 2,
         ebook: 5,
-        course_setup: 2
+        course_setup: 2,
+        # Validation of web-scraped questions with per-tier thresholds. Higher
+        # concurrency than ai_validation (5 vs 3) because Tier 1 questions
+        # often pass immediately without a correction loop.
+        web_validation: 5,
+        # Per-source web scraping (WebSourceScraperWorker). High concurrency so
+        # thousands of URLs can be processed in parallel — each job is I/O-bound
+        # (HTTP fetch + renderer) so 20 concurrent jobs hit ~20 URLs simultaneously
+        # without saturating the DB or CPU.
+        web_scrape: 20
       ]
     else
       false
@@ -236,6 +273,8 @@ if config_env() == :prod do
          # Every 15min — re-enqueue questions stuck at :pending after a
          # validation job was discarded (see StuckValidationSweeperWorker).
          {"*/15 * * * *", FunSheep.Workers.StuckValidationSweeperWorker},
+         # Every 5 minutes — update CrawlBatch progress from live DB counts.
+         {"*/5 * * * *", FunSheep.Workers.CrawlBatchProgressWorker},
          # Every 30min — recover discovered_sources stuck in scraping /
          # failed / unrun-discovered (Phase 5).
          {"*/30 * * * *", FunSheep.Workers.DiscoveredSourceSweeperWorker},
@@ -261,6 +300,20 @@ if config_env() == :prod do
          {"0 8 * * *", FunSheep.Workers.TestUpcomingWorker}
        ]}
     ]
+
+  # Playwright renderer horizontal scaling (Phase 4.4).
+  # Set PLAYWRIGHT_RENDERER_URLS to a comma-separated list of renderer base URLs
+  # (e.g. "http://renderer-1:3000,http://renderer-2:3000"). Falls back to the
+  # legacy single-URL PLAYWRIGHT_RENDERER_URL for backward compatibility.
+  playwright_renderer_urls =
+    (System.get_env("PLAYWRIGHT_RENDERER_URLS") ||
+       System.get_env("PLAYWRIGHT_RENDERER_URL") ||
+       "http://localhost:3000")
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+
+  config :fun_sheep, :playwright_renderer_urls, playwright_renderer_urls
 
   interactor_client_id =
     System.get_env("INTERACTOR_CLIENT_ID") ||
@@ -355,5 +408,30 @@ if config_env() == :prod do
       retries: 2
 
     config :fun_sheep, :mailer_from, mailer_from
+  end
+
+  # OpenTelemetry OTLP export — send traces to Cloud Trace (via the OpenTelemetry
+  # Collector sidecar) or Honeycomb when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+  # When unset, the batch processor queues spans but the noop exporter discards
+  # them, so there is no performance cost.
+  if otlp_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
+    config :opentelemetry_exporter,
+      otlp_protocol: :http_protobuf,
+      otlp_endpoint: otlp_endpoint,
+      otlp_headers: [
+        {"x-honeycomb-team", System.get_env("HONEYCOMB_API_KEY", "")}
+      ]
+  end
+
+  # ── Push notifications (Expo push relay) ─────────────────────────────────
+  # The mobile app uses expo-notifications to obtain an Expo push token
+  # (format: ExponentPushToken[xxx]). The backend calls Expo's push API at
+  # https://exp.host/--/api/v2/push/send — no Firebase or APNs credentials
+  # required on our side; Expo holds those on behalf of all Expo apps.
+  #
+  # An optional EXPO_ACCESS_TOKEN can be set to increase rate limits above
+  # the unauthenticated tier (600 req/min → 1,000 req/min per token).
+  if expo_token = System.get_env("EXPO_ACCESS_TOKEN") do
+    config :fun_sheep, :expo_access_token, expo_token
   end
 end

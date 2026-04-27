@@ -73,30 +73,43 @@ defmodule FunSheep.Notifications.NotificationTest do
 
   describe "changeset/2 — validations" do
     test "rejects priority outside 0-3", %{student: s} do
-      changeset = Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :priority, 5))
+      changeset =
+        Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :priority, 5))
+
       assert changeset.errors[:priority]
     end
 
     test "accepts priority 0 (critical)", %{student: s} do
-      changeset = Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :priority, 0))
+      changeset =
+        Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :priority, 0))
+
       assert changeset.valid?
     end
 
     test "rejects body longer than 500 characters", %{student: s} do
       long_body = String.duplicate("x", 501)
-      changeset = Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :body, long_body))
+
+      changeset =
+        Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :body, long_body))
+
       assert changeset.errors[:body]
     end
 
     test "rejects title longer than 200 characters", %{student: s} do
       long_title = String.duplicate("t", 201)
-      changeset = Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :title, long_title))
+
+      changeset =
+        Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :title, long_title))
+
       assert changeset.errors[:title]
     end
 
     test "accepts title of exactly 200 characters", %{student: s} do
       title = String.duplicate("t", 200)
-      changeset = Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :title, title))
+
+      changeset =
+        Notification.changeset(%Notification{}, Map.put(valid_attrs(s.id), :title, title))
+
       assert changeset.valid?
     end
   end

@@ -17,7 +17,7 @@ defmodule FunSheepWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images uploads favicon.ico robots.txt)
+  def static_paths, do: ~w(assets fonts images uploads favicon.ico robots.txt manifest.json sw.js)
 
   def router do
     quote do

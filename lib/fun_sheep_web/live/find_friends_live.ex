@@ -95,19 +95,29 @@ defmodule FunSheepWeb.FindFriendsLive do
         nil ->
           case Social.create_invite(user_role_id, invitee_email: trimmed) do
             {:ok, _invite} ->
-              {:noreply, assign(socket, invite_email: "", invite_status: {:ok, "Invite sent to #{trimmed}!"})}
+              {:noreply,
+               assign(socket,
+                 invite_email: "",
+                 invite_status: {:ok, "Invite sent to #{trimmed}!"}
+               )}
 
             {:error, _} ->
-              {:noreply, assign(socket, invite_status: {:error, "Couldn't send invite. Please try again."})}
+              {:noreply,
+               assign(socket, invite_status: {:error, "Couldn't send invite. Please try again."})}
           end
 
         %{id: invitee_id} ->
           case Social.create_invite(user_role_id, invitee_user_role_id: invitee_id) do
             {:ok, _invite} ->
-              {:noreply, assign(socket, invite_email: "", invite_status: {:ok, "Invite sent to #{trimmed}!"})}
+              {:noreply,
+               assign(socket,
+                 invite_email: "",
+                 invite_status: {:ok, "Invite sent to #{trimmed}!"}
+               )}
 
             {:error, _} ->
-              {:noreply, assign(socket, invite_status: {:error, "Couldn't send invite. Please try again."})}
+              {:noreply,
+               assign(socket, invite_status: {:error, "Couldn't send invite. Please try again."})}
           end
       end
     end
@@ -119,15 +129,26 @@ defmodule FunSheepWeb.FindFriendsLive do
     <div class="space-y-6 max-w-lg mx-auto">
       <%!-- Header --%>
       <div class="animate-slide-up">
-        <.link navigate={~p"/leaderboard"} class="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1 mb-4">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <.link
+          navigate={~p"/leaderboard"}
+          class="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1 mb-4"
+        >
+          <svg
+            class="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            viewBox="0 0 24 24"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
           </svg>
           Back to Flock
         </.link>
         <h1 class="text-2xl font-extrabold text-gray-900">Find Friends</h1>
         <p class="text-sm text-gray-500 mt-0.5">
-          You're following {@following_count} {if @following_count == 1, do: "student", else: "students"}
+          You're following {@following_count} {if @following_count == 1,
+            do: "student",
+            else: "students"}
         </p>
       </div>
 
@@ -144,9 +165,16 @@ defmodule FunSheepWeb.FindFriendsLive do
           />
           <svg
             class="absolute right-3 top-3 w-5 h-5 text-gray-400"
-            fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            viewBox="0 0 24 24"
           >
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+            />
           </svg>
         </form>
       </div>
@@ -154,10 +182,17 @@ defmodule FunSheepWeb.FindFriendsLive do
       <%!-- Search results --%>
       <div :if={@search_results != []} class="space-y-2 animate-slide-up">
         <h2 class="text-sm font-extrabold text-gray-900">Results</h2>
-        <.peer_card :for={result <- @search_results} peer={result.user_role} follow_state={result.follow_state} />
+        <.peer_card
+          :for={result <- @search_results}
+          peer={result.user_role}
+          follow_state={result.follow_state}
+        />
       </div>
 
-      <div :if={String.length(String.trim(@query)) >= 2 and @search_results == []} class="text-center py-6 animate-slide-up">
+      <div
+        :if={String.length(String.trim(@query)) >= 2 and @search_results == []}
+        class="text-center py-6 animate-slide-up"
+      >
         <p class="text-gray-400 text-sm">No classmates found for "{@query}"</p>
       </div>
 
@@ -172,7 +207,10 @@ defmodule FunSheepWeb.FindFriendsLive do
         />
       </div>
 
-      <div :if={@query == "" and @suggestions == []} class="bg-white rounded-2xl border border-gray-100 p-8 text-center animate-slide-up">
+      <div
+        :if={@query == "" and @suggestions == []}
+        class="bg-white rounded-2xl border border-gray-100 p-8 text-center animate-slide-up"
+      >
         <p class="text-3xl mb-3">🐑</p>
         <h3 class="font-extrabold text-gray-900">No suggestions yet</h3>
         <p class="text-sm text-gray-500 mt-1">
@@ -205,11 +243,14 @@ defmodule FunSheepWeb.FindFriendsLive do
             </button>
           </form>
 
-          <p :if={@invite_status} class={[
-            "text-xs font-medium",
-            match?({:ok, _}, @invite_status) && "text-[#4CD964]",
-            match?({:error, _}, @invite_status) && "text-red-500"
-          ]}>
+          <p
+            :if={@invite_status}
+            class={[
+              "text-xs font-medium",
+              match?({:ok, _}, @invite_status) && "text-[#4CD964]",
+              match?({:error, _}, @invite_status) && "text-red-500"
+            ]}
+          >
             {elem(@invite_status, 1)}
           </p>
         </div>

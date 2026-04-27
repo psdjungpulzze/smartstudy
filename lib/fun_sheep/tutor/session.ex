@@ -41,7 +41,7 @@ defmodule FunSheep.Tutor.Session do
     :exit, {:noproc, _} -> :ok
   end
 
-  defp via(session_id), do: {:via, Registry, {@registry, session_id}}
+  defp via(session_id), do: {:via, Horde.Registry, {@registry, session_id}}
 
   # --- GenServer Callbacks ---
 

@@ -44,7 +44,16 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
   def handle_event("generate_questions", %{"course_id" => course_id}, socket) do
     course = Courses.get_course!(course_id)
 
-    case FunSheep.Workers.ProcessCourseWorker.new(%{course_id: course_id}) |> Oban.insert() do
+    result =
+      try do
+        FunSheep.Workers.ProcessCourseWorker.new(%{course_id: course_id}) |> Oban.insert()
+      rescue
+        e -> {:error, e}
+      catch
+        :exit, reason -> {:error, reason}
+      end
+
+    case result do
       {:ok, _job} ->
         socket = subscribe_course(socket, course_id)
 
@@ -67,7 +76,9 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
   def handle_event("publish_course", %{"course_id" => course_id}, socket) do
     course = Courses.get_course!(course_id)
 
-    case Courses.update_course(course, %{published_at: DateTime.utc_now() |> DateTime.truncate(:second)}) do
+    case Courses.update_course(course, %{
+           published_at: DateTime.utc_now() |> DateTime.truncate(:second)
+         }) do
       {:ok, _updated} ->
         {:noreply,
          socket
@@ -164,7 +175,12 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
       socket
     else
       Phoenix.PubSub.subscribe(FunSheep.PubSub, "course:#{course_id}")
-      assign(socket, :subscribed_course_ids, MapSet.put(socket.assigns.subscribed_course_ids, course_id))
+
+      assign(
+        socket,
+        :subscribed_course_ids,
+        MapSet.put(socket.assigns.subscribed_course_ids, course_id)
+      )
     end
   end
 
@@ -259,12 +275,17 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
                   <tr :for={course <- courses} class="border-t border-[#F5F5F7] dark:border-[#3A3A3C]">
                     <td class="px-4 py-3">
                       <div class="font-medium text-[#1C1C1E] dark:text-white">{course.name}</div>
-                      <div class="text-xs text-[#8E8E93]">{course.catalog_subject || course.subject}</div>
+                      <div class="text-xs text-[#8E8E93]">
+                        {course.catalog_subject || course.subject}
+                      </div>
                     </td>
                     <td class="px-4 py-3">
                       <.status_badge status={course.processing_status} />
                       <div
-                        :if={course.processing_status == "processing" and not is_nil(course.processing_step)}
+                        :if={
+                          course.processing_status == "processing" and
+                            not is_nil(course.processing_step)
+                        }
                         class="text-xs text-[#8E8E93] mt-1 max-w-[220px] truncate"
                         title={course.processing_step}
                       >
@@ -341,7 +362,10 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
           </div>
         </div>
 
-        <div :if={@grouped_courses == []} class="bg-white dark:bg-[#2D2D2D] rounded-2xl shadow-md p-8 text-center text-[#8E8E93]">
+        <div
+          :if={@grouped_courses == []}
+          class="bg-white dark:bg-[#2D2D2D] rounded-2xl shadow-md p-8 text-center text-[#8E8E93]"
+        >
           No premium catalog courses yet. Create one below.
         </div>
       </div>
@@ -352,7 +376,11 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
           Create New Test Course
         </h2>
         <p class="text-sm text-[#8E8E93] mb-4">
-          Paste a JSON spec below. See <code class="bg-[#F5F5F7] dark:bg-[#1C1C1E] px-1 rounded">.claude/commands/course-create.md</code> for the spec format.
+          Paste a JSON spec below. See
+          <code class="bg-[#F5F5F7] dark:bg-[#1C1C1E] px-1 rounded">
+            .claude/commands/course-create.md
+          </code>
+          for the spec format.
         </p>
 
         <form phx-submit="create_from_spec" phx-change="update_spec" class="space-y-4">
@@ -365,12 +393,18 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
           >{@spec_json}</textarea>
 
           <%!-- Error message --%>
-          <div :if={@spec_error} class="text-sm text-[#FF3B30] bg-[#FFF2F1] dark:bg-[#3A1515] px-4 py-3 rounded-xl">
+          <div
+            :if={@spec_error}
+            class="text-sm text-[#FF3B30] bg-[#FFF2F1] dark:bg-[#3A1515] px-4 py-3 rounded-xl"
+          >
             {@spec_error}
           </div>
 
           <%!-- Preview --%>
-          <div :if={@spec_preview} class="bg-[#F0FFF4] dark:bg-[#1A2E1A] border border-[#4CD964] rounded-xl px-4 py-3 text-sm">
+          <div
+            :if={@spec_preview}
+            class="bg-[#F0FFF4] dark:bg-[#1A2E1A] border border-[#4CD964] rounded-xl px-4 py-3 text-sm"
+          >
             <div class="font-semibold text-[#1C1C1E] dark:text-white mb-2">Preview</div>
             <div class="space-y-1 text-[#3C3C43] dark:text-[#EBEBF5]">
               <div><span class="text-[#8E8E93]">Name:</span> {@spec_preview.name}</div>
@@ -389,8 +423,7 @@ defmodule FunSheepWeb.AdminTestCourseBuilderLive do
                 <span class="text-[#8E8E93]">Bundle:</span> Yes
               </div>
               <div :if={@spec_preview.price_cents}>
-                <span class="text-[#8E8E93]">Price:</span>
-                ${div(@spec_preview.price_cents, 100)}
+                <span class="text-[#8E8E93]">Price:</span> ${div(@spec_preview.price_cents, 100)}
               </div>
             </div>
             <details class="mt-2 text-xs text-[#8E8E93]">

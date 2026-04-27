@@ -53,7 +53,10 @@ defmodule FunSheepWeb.TextbookBanner do
       @tone.container,
       @class
     ]}>
-      <div class={["w-10 h-10 rounded-full flex items-center justify-center shrink-0", @tone.icon_wrap]}>
+      <div class={[
+        "w-10 h-10 rounded-full flex items-center justify-center shrink-0",
+        @tone.icon_wrap
+      ]}>
         <.icon name={@tone.icon} class={["w-5 h-5", @tone.icon_color]} />
       </div>
       <div class="flex-1 min-w-0">
@@ -138,7 +141,11 @@ defmodule FunSheepWeb.TextbookBanner do
 
     ~H"""
     <span
-      class={["inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold", @tone.chip, @class]}
+      class={[
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold",
+        @tone.chip,
+        @class
+      ]}
       title="Processing failed"
     >
       <.icon name="hero-x-circle" class="w-3 h-3" /> Processing failed

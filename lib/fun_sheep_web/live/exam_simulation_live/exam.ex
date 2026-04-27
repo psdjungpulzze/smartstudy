@@ -74,7 +74,9 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
   @impl true
   def handle_event("answer", %{"question_id" => qid, "answer" => answer}, socket) do
     time_spent = time_spent_seconds(socket.assigns.question_entered_at)
-    state = ExamSimulationEngine.record_answer(socket.assigns.engine_state, qid, answer, time_spent)
+
+    state =
+      ExamSimulationEngine.record_answer(socket.assigns.engine_state, qid, answer, time_spent)
 
     {:noreply,
      socket
@@ -127,8 +129,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
       {:ok, session} ->
         {:noreply,
          push_navigate(socket,
-           to:
-             ~p"/courses/#{socket.assigns.course_id}/exam-simulation/results/#{session.id}"
+           to: ~p"/courses/#{socket.assigns.course_id}/exam-simulation/results/#{session.id}"
          )}
 
       {:error, _reason} ->
@@ -324,7 +325,13 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
 
   @impl true
   def render(assigns) do
-    current_q = current_question(assigns.engine_state, assigns.current_section_index, assigns.current_question_index)
+    current_q =
+      current_question(
+        assigns.engine_state,
+        assigns.current_section_index,
+        assigns.current_question_index
+      )
+
     assigns = assign(assigns, current_question: current_q)
     current_qid = current_q && current_q.id
     assigns = assign(assigns, current_qid: current_qid)
@@ -353,7 +360,10 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
         <div class="flex gap-2 overflow-x-auto flex-1">
           <%= for {sec, idx} <- Enum.with_index(@engine_state.section_boundaries) do %>
             <% ids = ExamSimulationEngine.question_ids_for_section(@engine_state, idx) %>
-            <% answered = Enum.count(ids, fn id -> get_in(@engine_state.answers, [id, "answer"]) not in [nil, ""] end) %>
+            <% answered =
+              Enum.count(ids, fn id ->
+                get_in(@engine_state.answers, [id, "answer"]) not in [nil, ""]
+              end) %>
             <button
               phx-click="navigate"
               phx-value-section={idx}
@@ -366,13 +376,13 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
                 )
               ]}
             >
-              <%= sec["name"] %> (<%= answered %>/<%= sec["question_count"] %>)
+              {sec["name"]} ({answered}/{sec["question_count"]})
             </button>
           <% end %>
         </div>
 
         <div class={["font-mono text-lg tabular-nums", timer_class(@timer_urgency)]}>
-          ⏱ <%= format_timer(@remaining_seconds) %>
+          ⏱ {format_timer(@remaining_seconds)}
         </div>
 
         <button
@@ -390,7 +400,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
             <h3 class="text-sm font-semibold text-slate-400 mb-3">Question Overview</h3>
             <%= for {sec, si} <- Enum.with_index(@engine_state.section_boundaries) do %>
               <div class="mb-4">
-                <p class="text-xs text-slate-400 mb-2"><%= sec["name"] %></p>
+                <p class="text-xs text-slate-400 mb-2">{sec["name"]}</p>
                 <div class="flex flex-wrap gap-1">
                   <%= for qi <- 0..(sec["question_count"] - 1) do %>
                     <% flat_i = sec["start_index"] + qi %>
@@ -409,7 +419,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
                         end
                       ]}
                     >
-                      <%= flat_i + 1 %>
+                      {flat_i + 1}
                     </button>
                   <% end %>
                 </div>
@@ -428,16 +438,15 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
             </div>
           </div>
         <% end %>
-
-        <!-- Main question area -->
+        
+    <!-- Main question area -->
         <div class="flex-1 overflow-y-auto p-6">
           <%= if @current_question do %>
             <div class="max-w-2xl mx-auto">
               <div class="flex items-center justify-between mb-4">
                 <span class="text-slate-400 text-sm">
-                  Question
-                  <%= Enum.find_index(@engine_state.question_ids_order, &(&1 == @current_qid)) |> Kernel.+(1) %>
-                  of <%= length(@engine_state.question_ids_order) %>
+                  Question {Enum.find_index(@engine_state.question_ids_order, &(&1 == @current_qid))
+                  |> Kernel.+(1)} of {length(@engine_state.question_ids_order)}
                 </span>
                 <button
                   phx-click="flag"
@@ -456,10 +465,10 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
               </div>
 
               <div class="bg-slate-800 rounded-2xl p-6 mb-6">
-                <p class="text-lg leading-relaxed"><%= @current_question.content %></p>
+                <p class="text-lg leading-relaxed">{@current_question.content}</p>
               </div>
-
-              <!-- Answer area -->
+              
+    <!-- Answer area -->
               <%= cond do %>
                 <% @current_question.question_type in [:multiple_choice, :true_false] -> %>
                   <div class="space-y-3" role="radiogroup">
@@ -479,8 +488,8 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
                           )
                         ]}
                       >
-                        <span class="font-medium mr-2"><%= key %>.</span>
-                        <%= value %>
+                        <span class="font-medium mr-2">{key}.</span>
+                        {value}
                       </button>
                     <% end %>
                   </div>
@@ -505,8 +514,8 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
                     Question type not supported in simulation yet.
                   </p>
               <% end %>
-
-              <!-- Navigation -->
+              
+    <!-- Navigation -->
               <div class="flex justify-between mt-8">
                 <button
                   phx-click="prev"
@@ -529,8 +538,8 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
           <% end %>
         </div>
       </div>
-
-      <!-- Submit confirmation modal -->
+      
+    <!-- Submit confirmation modal -->
       <%= if @submit_modal_open do %>
         <div
           class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
@@ -541,8 +550,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Exam do
             <h2 class="text-xl font-semibold mb-4">Submit Exam?</h2>
             <%= if @unanswered_count > 0 do %>
               <p class="text-slate-300 mb-2">
-                You have
-                <strong class="text-amber-400"><%= @unanswered_count %> unanswered question(s)</strong>. They will be marked incorrect.
+                You have <strong class="text-amber-400"><%= @unanswered_count %> unanswered question(s)</strong>. They will be marked incorrect.
               </p>
             <% else %>
               <p class="text-slate-300 mb-2">You've answered all questions. Ready to submit?</p>

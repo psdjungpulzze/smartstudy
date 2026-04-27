@@ -74,7 +74,9 @@ defmodule FunSheep.Workers.MobiConvertWorker do
           run_conversion(material, input_path, tmp_dir)
 
         {:error, reason} ->
-          Logger.error("[MobiConvert] Download failed material=#{material.id}: #{inspect(reason)}")
+          Logger.error(
+            "[MobiConvert] Download failed material=#{material.id}: #{inspect(reason)}"
+          )
 
           Content.update_uploaded_material(material, %{
             ocr_status: :failed,
@@ -140,7 +142,8 @@ defmodule FunSheep.Workers.MobiConvertWorker do
 
         Content.update_uploaded_material(material, %{
           ocr_status: :failed,
-          ocr_error: "eBook conversion timed out or failed. The file may be too large or malformed."
+          ocr_error:
+            "eBook conversion timed out or failed. The file may be too large or malformed."
         })
 
         {:error, reason}
