@@ -238,6 +238,8 @@ if config_env() == :prod do
         notifications: 2,
         ebook: 5,
         course_setup: 2,
+        # Low-throughput background tasks: TestDateSyncWorker, etc.
+        background: 2,
         # Validation of web-scraped questions with per-tier thresholds. Higher
         # concurrency than ai_validation (5 vs 3) because Tier 1 questions
         # often pass immediately without a correction loop.
