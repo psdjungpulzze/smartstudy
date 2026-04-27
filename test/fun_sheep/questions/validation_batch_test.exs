@@ -19,7 +19,7 @@ defmodule FunSheep.Questions.ValidationBatchTest do
     Application.put_env(:fun_sheep, :ai_client_impl, ClientMock)
 
     on_exit(fn ->
-      Application.delete_env(:fun_sheep, :ai_client_impl)
+      Application.put_env(:fun_sheep, :ai_client_impl, FunSheep.AI.ClientMock)
     end)
 
     :ok

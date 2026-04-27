@@ -41,10 +41,12 @@ defmodule FunSheep.Workers.TestDateSyncWorkerTest do
       }
 
       {:ok, first} = Courses.upsert_known_test_date(attrs)
-      {:ok, second} = Courses.upsert_known_test_date(%{attrs | test_name: "SAT October 2025 (Updated)"})
+      {:ok, _second} = Courses.upsert_known_test_date(%{attrs | test_name: "SAT October 2025 (Updated)"})
 
-      assert first.id == second.id
-      assert Repo.get!(KnownTestDate, first.id).test_name == "SAT October 2025 (Updated)"
+      all = Repo.all(KnownTestDate)
+      assert length(all) == 1
+      assert hd(all).id == first.id
+      assert hd(all).test_name == "SAT October 2025 (Updated)"
     end
 
     test "rejects invalid test_type" do

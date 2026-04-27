@@ -108,7 +108,7 @@ defmodule FunSheep.Notifications.NotificationTest do
       assert :test_upcoming_3d in types
       assert :test_upcoming_1d in types
       assert :weekly_digest in types
-      assert length(types) == 17
+      assert length(types) == 19
     end
 
     test "channels/0 returns all supported channels" do

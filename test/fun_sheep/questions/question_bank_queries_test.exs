@@ -110,7 +110,7 @@ defmodule FunSheep.Questions.QuestionBankQueriesTest do
           statuses: [:passed, :pending, :needs_review, :failed]
         )
 
-      assert student_counts[ch.id].total == 1
+      assert student_counts[ch.id].total == 2
       assert admin_counts[ch.id].total == 3
     end
 

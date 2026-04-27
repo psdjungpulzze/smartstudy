@@ -33,7 +33,7 @@ defmodule FunSheep.Assessments.HasAnyAttemptTest do
           difficulty: :easy,
           question_type: :multiple_choice,
           options: %{"A" => "3", "B" => "4"},
-          validation_status: :approved
+          validation_status: :passed
         })
 
       {:ok, _attempt} =
@@ -60,7 +60,7 @@ defmodule FunSheep.Assessments.HasAnyAttemptTest do
           difficulty: :easy,
           question_type: :multiple_choice,
           options: %{"A" => "3", "B" => "4"},
-          validation_status: :approved
+          validation_status: :passed
         })
 
       {:ok, _} =

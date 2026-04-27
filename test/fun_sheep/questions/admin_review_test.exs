@@ -117,14 +117,23 @@ defmodule FunSheep.Questions.AdminReviewTest do
 
     test "approved question becomes visible to students" do
       course = create_course()
-      q = create_needs_review_question(course)
 
-      # Before approval — hidden
+      {:ok, q} =
+        Questions.create_question(%{
+          content: "What is osmosis?",
+          answer: "Water diffusion",
+          question_type: :short_answer,
+          difficulty: :medium,
+          course_id: course.id,
+          validation_status: :pending
+        })
+
+      # Before approval — :pending is hidden from students
       assert Questions.list_questions_by_course(course.id) == []
 
       Questions.admin_approve_question(q)
 
-      # After approval — visible
+      # After approval — :passed is visible
       assert [visible] = Questions.list_questions_by_course(course.id)
       assert visible.id == q.id
     end

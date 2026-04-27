@@ -183,7 +183,7 @@ defmodule FunSheep.QuestionsTest do
       assert Questions.list_questions_by_course(course.id) == []
     end
 
-    test "hides pending, needs_review, and failed questions from students" do
+    test "hides pending and failed questions from students, but shows needs_review" do
       course = create_course()
       create_question(course, %{content: "Passed", validation_status: :passed})
       create_question(course, %{content: "Pending", validation_status: :pending})
@@ -191,8 +191,9 @@ defmodule FunSheep.QuestionsTest do
       create_question(course, %{content: "Failed", validation_status: :failed})
 
       questions = Questions.list_questions_by_course(course.id)
-      assert length(questions) == 1
-      assert hd(questions).content == "Passed"
+      assert length(questions) == 2
+      contents = Enum.map(questions, & &1.content) |> Enum.sort()
+      assert contents == ["Passed", "Review"]
     end
 
     test "count_questions_by_course only counts passed questions" do
@@ -516,7 +517,7 @@ defmodule FunSheep.QuestionsTest do
 
       counts = Questions.list_chapter_section_counts(course.id)
 
-      assert counts[ch.id].total == 1
+      assert counts[ch.id].total == 2
     end
 
     test "includes all statuses when opts specify multiple statuses" do

@@ -8,6 +8,7 @@ defmodule FunSheep.Search.TavilyClientTest do
     Application.put_env(:fun_sheep, :tavily_req_opts, plug: {Req.Test, TavilyClient})
 
     on_exit(fn ->
+      Application.put_env(:fun_sheep, :tavily_api_key, nil)
       Application.delete_env(:fun_sheep, :tavily_req_opts)
     end)
 

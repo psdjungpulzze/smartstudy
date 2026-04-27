@@ -132,7 +132,7 @@ defmodule FunSheep.Workers.QuestionValidationWorker do
 
       maybe_finalize_course(course_id)
 
-      if Enum.all?(outcomes, &match?({:error, _}, &1)) do
+      if outcomes != [] and Enum.all?(outcomes, &match?({:error, _}, &1)) do
         # Every sub-batch failed. Interactor is likely down or misconfigured —
         # raising lets Oban retry the whole job with backoff. No point
         # re-enqueueing individual questions here since the whole job will retry.

@@ -202,7 +202,7 @@ defmodule FunSheep.Workers.TextbookCompletenessWorker do
     course_context =
       case course do
         nil -> "Unknown course."
-        %{} = c -> "Course: #{c.subject} (Grade #{c.grade}). Name: #{c.name}."
+        %{} = c -> "Course: #{c.subject} (Grade #{Enum.join(c.grades || [], ", ")}). Name: #{c.name}."
       end
 
     """

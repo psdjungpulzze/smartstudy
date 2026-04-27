@@ -40,7 +40,7 @@ defmodule FunSheep.Workers.WebPipelineIntegrationTest do
     stub(ClientMock, :call, fn _sys, _user, _opts -> {:ok, "[]"} end)
 
     on_exit(fn ->
-      Application.delete_env(:fun_sheep, :ai_client_impl)
+      Application.put_env(:fun_sheep, :ai_client_impl, FunSheep.AI.ClientMock)
       Application.delete_env(:fun_sheep, :scraper_req_opts)
     end)
 

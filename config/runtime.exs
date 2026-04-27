@@ -40,10 +40,12 @@ if config_env() in [:dev, :test] do
   end
 
   # Set LLM API keys into Application env after .env.credentials is loaded above.
+  # Tavily is only enabled in dev — in test the real HTTP calls would hit rate limits
+  # and cause multi-minute inline job chains that time out tests.
   config :fun_sheep,
     openai_api_key: System.get_env("OPENAI_API_KEY"),
     anthropic_api_key: System.get_env("ANTHROPIC_API_KEY"),
-    tavily_api_key: System.get_env("TAVILY_API_KEY")
+    tavily_api_key: if(config_env() == :dev, do: System.get_env("TAVILY_API_KEY"))
 end
 
 # Google Vision API key (from env or .env.credentials).
