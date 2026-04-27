@@ -85,7 +85,7 @@ defmodule FunSheepWeb.StudentLive.Shared.Phase3ComponentsTest do
       assert html =~ "3 open slots"
     end
 
-    test "renders an assignment" do
+    test "renders an in_progress assignment with section name and due date" do
       assignment = %{
         id: "a1",
         question_count: 10,
@@ -103,6 +103,60 @@ defmodule FunSheepWeb.StudentLive.Shared.Phase3ComponentsTest do
       assert html =~ "10 questions"
       assert html =~ "In progress"
       assert html =~ "4/5"
+      assert html =~ "due"
+    end
+
+    test "renders a pending assignment with chapter fallback name" do
+      assignment = %{
+        id: "a2",
+        question_count: 5,
+        due_date: nil,
+        questions_attempted: 0,
+        questions_correct: 0,
+        status: :pending,
+        chapter: %{name: "Chapter 3"}
+      }
+
+      html =
+        render_component(&AssignmentsPanel.panel/1, assignments: [assignment], open_slots: 1)
+
+      assert html =~ "Chapter 3"
+      assert html =~ "Pending"
+      refute html =~ "0/0 correct"
+    end
+
+    test "renders a completed assignment" do
+      assignment = %{
+        id: "a3",
+        question_count: 8,
+        due_date: nil,
+        questions_attempted: 8,
+        questions_correct: 8,
+        status: :completed,
+        section: %{name: "Fractions"}
+      }
+
+      html =
+        render_component(&AssignmentsPanel.panel/1, assignments: [assignment], open_slots: 0)
+
+      assert html =~ "Done"
+    end
+
+    test "renders an expired assignment with generic name when no section/chapter" do
+      assignment = %{
+        id: "a4",
+        question_count: 6,
+        due_date: nil,
+        questions_attempted: 0,
+        questions_correct: 0,
+        status: :expired
+      }
+
+      html =
+        render_component(&AssignmentsPanel.panel/1, assignments: [assignment], open_slots: 2)
+
+      assert html =~ "Practice set"
+      assert html =~ "Expired"
     end
   end
 
@@ -137,7 +191,7 @@ defmodule FunSheepWeb.StudentLive.Shared.Phase3ComponentsTest do
       refute html =~ "Milestone reached"
     end
 
-    test "renders share CTA for goal_achieved" do
+    test "renders share CTA for streak_days goal_achieved" do
       triggers = [
         %{
           kind: :goal_achieved,
@@ -152,6 +206,58 @@ defmodule FunSheepWeb.StudentLive.Shared.Phase3ComponentsTest do
       assert html =~ "Milestone reached"
       assert html =~ "7-day streak"
       assert html =~ "Share"
+    end
+
+    test "renders share CTA for daily_minutes goal_achieved" do
+      triggers = [
+        %{
+          kind: :goal_achieved,
+          goal_type: :daily_minutes,
+          target_value: 30
+        }
+      ]
+
+      html = render_component(&ShareTriggers.banner/1, triggers: triggers, student_id: "s1")
+      assert html =~ "30 min/day goal"
+      assert html =~ "Share"
+    end
+
+    test "renders share CTA for weekly_practice_count goal_achieved" do
+      triggers = [
+        %{
+          kind: :goal_achieved,
+          goal_type: :weekly_practice_count,
+          target_value: 5
+        }
+      ]
+
+      html = render_component(&ShareTriggers.banner/1, triggers: triggers, student_id: "s1")
+      assert html =~ "5 practice sessions this week"
+    end
+
+    test "renders share CTA for target_readiness_score goal_achieved" do
+      triggers = [
+        %{
+          kind: :goal_achieved,
+          goal_type: :target_readiness_score,
+          target_value: 80
+        }
+      ]
+
+      html = render_component(&ShareTriggers.banner/1, triggers: triggers, student_id: "s1")
+      assert html =~ "80%"
+      assert html =~ "readiness target"
+    end
+
+    test "renders fallback copy for unknown trigger kind" do
+      triggers = [
+        %{
+          kind: :something_else
+        }
+      ]
+
+      html = render_component(&ShareTriggers.banner/1, triggers: triggers, student_id: "s1")
+      assert html =~ "Worth celebrating"
     end
   end
 end

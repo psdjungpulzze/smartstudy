@@ -36,7 +36,7 @@ defmodule FunSheepWeb.ReviewLive do
         )
       else
         session =
-          StudySessions.start_session(user_role_id, "review", %{course_id: course_id})
+          StudySessions.start_session(user_role_id, "review", course_id: course_id)
 
         session_id =
           case session do

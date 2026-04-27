@@ -310,7 +310,7 @@ defmodule FunSheepWeb.AdminUserDetailLive do
                 </.link>
               </td>
               <td class="px-4 py-3 text-[#1C1C1E]">
-                {c.subject} · {c.grade}
+                {c.subject} · {Enum.join(c.grades || [], ", ")}
               </td>
               <td class="px-4 py-3 text-[#8E8E93]">{c.processing_status || "—"}</td>
               <td class="px-4 py-3 text-[#8E8E93]">

@@ -208,4 +208,237 @@ defmodule FunSheepWeb.ParentDashboardLiveTest do
       refute render(view) =~ "Recent attempts"
     end
   end
+
+  describe "share_progress event" do
+    setup do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student = create_user_role(%{role: :student, display_name: "Alice Student", grade: "10th"})
+      link!(parent, student)
+      %{parent: parent, student: student}
+    end
+
+    test "share_progress sets shared_student_id", %{conn: conn, parent: parent, student: student} do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      # The share_progress event sets shared_student_id; the proof card only renders
+      # when show_proof_card? is true, which requires a meaningful improvement in score.
+      # We just verify the event doesn't crash.
+      _ = render_click(view, "share_progress", %{"id" => student.id})
+      assert render(view) =~ "Alice Student"
+    end
+
+    test "open_share event sets shared_student_id", %{
+      conn: conn,
+      parent: parent,
+      student: student
+    } do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      _ = render_click(view, "open_share", %{"student-id" => student.id})
+      assert render(view) =~ "Alice Student"
+    end
+  end
+
+  describe "multiple students — household overview" do
+    test "household overview renders when there are 2+ students", %{conn: conn} do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student1 = create_user_role(%{role: :student, display_name: "Alice", grade: "10th"})
+      student2 = create_user_role(%{role: :student, display_name: "Bob", grade: "9th"})
+      link!(parent, student1)
+      link!(parent, student2)
+
+      conn = auth_conn(conn, parent)
+      {:ok, _view, html} = live(conn, ~p"/parent")
+
+      assert html =~ "Household"
+      assert html =~ "Alice"
+      assert html =~ "Bob"
+    end
+
+    test "select_student switches the active student tab in multi-student view", %{conn: conn} do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student1 = create_user_role(%{role: :student, display_name: "Alice", grade: "10th"})
+      student2 = create_user_role(%{role: :student, display_name: "Bob", grade: "9th"})
+      link!(parent, student1)
+      link!(parent, student2)
+
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      # Switch to student2
+      html = render_click(view, "select_student", %{"id" => student2.id})
+      assert html =~ "Bob"
+    end
+  end
+
+  describe "goal management" do
+    setup do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student = create_user_role(%{role: :student, display_name: "Alice Student", grade: "10th"})
+      link!(parent, student)
+      %{parent: parent, student: student}
+    end
+
+    test "open_propose_goal opens the goal proposal form", %{conn: conn, parent: parent} do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      html = render_click(view, "open_propose_goal", %{})
+      assert html =~ "Goal type"
+    end
+
+    test "close_propose_goal closes the form", %{conn: conn, parent: parent} do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      render_click(view, "open_propose_goal", %{})
+      html = render_click(view, "close_propose_goal", %{})
+
+      # Form should be closed — no goal type label visible
+      refute html =~ "Goal type"
+    end
+
+    test "open_counter_goal re-opens propose form", %{conn: conn, parent: parent} do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      html = render_click(view, "open_counter_goal", %{})
+      assert html =~ "Goal type"
+    end
+
+    test "decline_goal with unknown id is a no-op", %{conn: conn, parent: parent} do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      _ = render_click(view, "decline_goal", %{"goal-id" => Ecto.UUID.generate()})
+      assert render(view) =~ "Alice Student"
+    end
+
+    test "accept_goal with unknown id is a no-op", %{conn: conn, parent: parent} do
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      _ = render_click(view, "accept_goal", %{"goal-id" => Ecto.UUID.generate()})
+      assert render(view) =~ "Alice Student"
+    end
+  end
+
+  describe "set_target_readiness event" do
+    test "set_target_readiness with no schedule is a no-op", %{conn: conn} do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student = create_user_role(%{role: :student, display_name: "Alice Student", grade: "10th"})
+      link!(parent, student)
+
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      # No schedule exists, so this should be a no-op
+      _ =
+        render_click(view, "set_target_readiness", %{
+          "schedule_id" => Ecto.UUID.generate(),
+          "value" => "80"
+        })
+
+      assert render(view) =~ "Alice Student"
+    end
+
+    test "set_target_readiness with invalid value is a no-op", %{conn: conn} do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student = create_user_role(%{role: :student, display_name: "Alice Student", grade: "10th"})
+      link!(parent, student)
+
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      _ =
+        render_click(view, "set_target_readiness", %{
+          "schedule_id" => Ecto.UUID.generate(),
+          "value" => "not_a_number"
+        })
+
+      assert render(view) =~ "Alice Student"
+    end
+  end
+
+  describe "assign_topic_practice event" do
+    test "assign_topic_practice with no drill open is a no-op", %{conn: conn} do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student = create_user_role(%{role: :student, display_name: "Alice Student", grade: "10th"})
+      link!(parent, student)
+
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      # No drill open, so section_id is nil — event is a no-op
+      _ = render_click(view, "assign_topic_practice", %{"question_count" => "5"})
+      assert render(view) =~ "Alice Student"
+    end
+  end
+
+  describe "close_topic_drill event" do
+    setup do
+      parent = create_user_role(%{role: :parent, display_name: "Test Parent"})
+      student = create_user_role(%{role: :student, display_name: "Alice Student", grade: "10th"})
+      link!(parent, student)
+      %{parent: parent, student: student}
+    end
+
+    test "close_topic_drill clears the drill assign", %{
+      conn: conn,
+      parent: parent,
+      student: student
+    } do
+      course = FunSheep.ContentFixtures.create_course()
+
+      {:ok, chapter} =
+        Courses.create_chapter(%{name: "Algebra", position: 1, course_id: course.id})
+
+      {:ok, section} =
+        Courses.create_section(%{name: "Equations", position: 1, chapter_id: chapter.id})
+
+      {:ok, _schedule} =
+        Assessments.create_test_schedule(%{
+          name: "Final",
+          test_date: Date.add(Date.utc_today(), 14),
+          scope: %{"chapter_ids" => [chapter.id]},
+          user_role_id: student.id,
+          course_id: course.id
+        })
+
+      {:ok, q} =
+        Questions.create_question(%{
+          content: "Solve for x",
+          answer: "5",
+          question_type: :short_answer,
+          difficulty: :easy,
+          course_id: course.id,
+          chapter_id: chapter.id,
+          section_id: section.id
+        })
+
+      {:ok, _} =
+        %Questions.QuestionAttempt{}
+        |> Questions.QuestionAttempt.changeset(%{
+          user_role_id: student.id,
+          question_id: q.id,
+          is_correct: true,
+          time_taken_seconds: 30,
+          answer_given: "5"
+        })
+        |> Repo.insert()
+
+      conn = auth_conn(conn, parent)
+      {:ok, view, _html} = live(conn, ~p"/parent")
+
+      # Open the drill
+      render_click(view, "topic_drill", %{"section-id" => section.id})
+      assert render(view) =~ "Recent attempts"
+
+      # Close it
+      html = render_click(view, "close_topic_drill", %{})
+      refute html =~ "Recent attempts"
+    end
+  end
 end

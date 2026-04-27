@@ -134,7 +134,7 @@ defmodule FunSheepWeb.TestDatePickerComponent do
   def render(assigns) do
     ~H"""
     <div class="bg-white rounded-2xl border border-gray-100 shadow-md overflow-hidden">
-      <div class="p-6 border-b border-gray-100">
+      <div class="p-4 sm:p-6 border-b border-gray-100">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 bg-[#E8F8EB] rounded-full flex items-center justify-center">
             <.icon name="hero-calendar-days" class="w-5 h-5 text-[#4CD964]" />
@@ -148,12 +148,12 @@ defmodule FunSheepWeb.TestDatePickerComponent do
         </div>
       </div>
 
-      <div :if={@error} class="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl">
+      <div :if={@error} class="mx-4 sm:mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl">
         <p class="text-sm text-red-700">{@error}</p>
       </div>
 
       <%!-- Official dates from organizing body --%>
-      <div :if={@known_dates != []} class="p-6 space-y-3">
+      <div :if={@known_dates != []} class="p-4 sm:p-6 space-y-3">
         <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
           Official {String.upcase(@course.catalog_test_type || "")} Dates
         </p>
@@ -184,17 +184,17 @@ defmodule FunSheepWeb.TestDatePickerComponent do
         </button>
       </div>
 
-      <div :if={@known_dates == []} class="p-6">
+      <div :if={@known_dates == []} class="p-4 sm:p-6">
         <p class="text-sm text-gray-500">
           No upcoming official dates found yet. Use a custom date below.
         </p>
       </div>
 
       <%!-- Divider --%>
-      <div class="mx-6 border-t border-gray-100" />
+      <div class="mx-4 sm:mx-6 border-t border-gray-100" />
 
       <%!-- Custom date option --%>
-      <div class="p-6">
+      <div class="p-4 sm:p-6">
         <div :if={!@showing_custom}>
           <button
             type="button"

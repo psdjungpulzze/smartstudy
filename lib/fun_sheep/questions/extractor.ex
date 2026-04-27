@@ -151,10 +151,28 @@ defmodule FunSheep.Questions.Extractor do
         _ -> ""
       end
 
+    test_type_line =
+      case opts[:test_type] do
+        nil -> ""
+        t -> "Test format: #{t |> to_string() |> String.upcase() |> String.replace("_", " ")}\n"
+      end
+
+    section_hint_line =
+      case opts[:section_hint] do
+        nil -> ""
+        s -> "Expected topic/section: #{s}\n"
+      end
+
+    source_url_line =
+      case get_in(opts, [:source_ref, :source_url]) do
+        nil -> ""
+        url -> "Source URL: #{url}\nIf content is a blog post, nav page, or ad page, return [].\n"
+      end
+
     sampled = sample(text)
 
     """
-    #{subject_line}#{source_line}
+    #{subject_line}#{test_type_line}#{section_hint_line}#{source_line}#{source_url_line}
     Content (sampled; #{String.length(text)} chars total):
     ---
     #{sampled}
@@ -258,13 +276,53 @@ defmodule FunSheep.Questions.Extractor do
   defp maybe_string(s) when is_binary(s), do: String.trim(s)
   defp maybe_string(_), do: nil
 
-  # Hard pre-insert gates.
+  # Hard pre-insert gates. Emits telemetry on each rejection so the admin
+  # pipeline dashboard can break down why questions are dropped.
   defp accept?(%{content: content} = q) do
-    content_ok?(content) and
-      not answer_key_artifact?(content) and
-      not fragment?(content) and
-      mcq_options_ok?(q) and
-      answer_ok?(q)
+    cond do
+      not content_ok?(content) ->
+        :telemetry.execute([:fun_sheep, :scraper, :extraction_gate_reject], %{count: 1}, %{
+          reason: :content_length,
+          source: :ai
+        })
+
+        false
+
+      answer_key_artifact?(content) ->
+        :telemetry.execute([:fun_sheep, :scraper, :extraction_gate_reject], %{count: 1}, %{
+          reason: :answer_key_artifact,
+          source: :ai
+        })
+
+        false
+
+      fragment?(content) ->
+        :telemetry.execute([:fun_sheep, :scraper, :extraction_gate_reject], %{count: 1}, %{
+          reason: :fragment,
+          source: :ai
+        })
+
+        false
+
+      not mcq_options_ok?(q) ->
+        :telemetry.execute([:fun_sheep, :scraper, :extraction_gate_reject], %{count: 1}, %{
+          reason: :mcq_options,
+          source: :ai
+        })
+
+        false
+
+      not answer_ok?(q) ->
+        :telemetry.execute([:fun_sheep, :scraper, :extraction_gate_reject], %{count: 1}, %{
+          reason: :missing_answer,
+          source: :ai
+        })
+
+        false
+
+      true ->
+        true
+    end
   end
 
   defp accept?(_), do: false

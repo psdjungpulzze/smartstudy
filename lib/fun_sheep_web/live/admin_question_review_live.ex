@@ -25,11 +25,24 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
     {"All", nil}
   ]
 
+  @tiers [
+    {"All tiers", nil},
+    {"Tier 1 — Official", 1},
+    {"Tier 2 — Reputable", 2},
+    {"Tier 3 — Unknown", 3},
+    {"Tier 4 — Low quality", 4}
+  ]
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Question Review", editing_id: nil, status_filter: :needs_review)
+     |> assign(
+       page_title: "Question Review",
+       editing_id: nil,
+       status_filter: :needs_review,
+       tier_filter: nil
+     )
      |> load_queue()}
   end
 
@@ -48,6 +61,32 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
      socket
      |> assign(status_filter: status, editing_id: nil)
      |> load_queue()}
+  end
+
+  def handle_event("filter_tier", %{"tier" => raw}, socket) do
+    tier =
+      case Integer.parse(raw) do
+        {n, ""} when n in 1..4 -> n
+        _ -> nil
+      end
+
+    {:noreply,
+     socket
+     |> assign(tier_filter: tier, editing_id: nil)
+     |> load_queue()}
+  end
+
+  def handle_event("bulk_approve_tier1", _params, socket) do
+    case Questions.bulk_approve_web_tier1_questions(reviewer_id(socket)) do
+      {:ok, 0} ->
+        {:noreply, put_flash(socket, :info, "No Tier 1 questions in the review queue.")}
+
+      {:ok, count} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Bulk approved #{count} Tier 1 web-scraped question(s).")
+         |> load_queue()}
+    end
   end
 
   def handle_event("approve", %{"id" => id}, socket) do
@@ -137,7 +176,8 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
   defp load_queue(socket) do
     status = socket.assigns.status_filter
-    questions = Questions.list_all_questions_for_admin(status)
+    tier = socket.assigns.tier_filter
+    questions = Questions.list_all_questions_for_admin(status, tier)
     counts = Questions.count_questions_by_status()
     assign(socket, questions: questions, queue_count: length(questions), status_counts: counts)
   end
@@ -152,7 +192,10 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :statuses, @statuses)
+    assigns =
+      assigns
+      |> assign(:statuses, @statuses)
+      |> assign(:tiers, @tiers)
 
     ~H"""
     <div class="max-w-5xl mx-auto p-6">
@@ -163,14 +206,25 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
             Review, edit, approve, reject, or delete questions.
           </p>
         </div>
-        <div class="bg-white rounded-2xl shadow-md px-4 py-2">
-          <span class="text-2xl font-bold text-[#4CD964]">{@queue_count}</span>
-          <span class="text-sm text-[#8E8E93] ml-1">shown</span>
+        <div class="flex items-center gap-3">
+          <button
+            :if={@status_filter == :needs_review}
+            type="button"
+            phx-click="bulk_approve_tier1"
+            data-confirm="Bulk approve all Tier 1 (official source) web-scraped questions in the review queue?"
+            class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm"
+          >
+            Bulk approve Tier 1
+          </button>
+          <div class="bg-white rounded-2xl shadow-md px-4 py-2">
+            <span class="text-2xl font-bold text-[#4CD964]">{@queue_count}</span>
+            <span class="text-sm text-[#8E8E93] ml-1">shown</span>
+          </div>
         </div>
       </div>
 
       <%!-- Status filter tabs --%>
-      <div class="bg-white rounded-2xl shadow-md p-3 mb-4 flex items-center gap-2 flex-wrap">
+      <div class="bg-white rounded-2xl shadow-md p-3 mb-3 flex items-center gap-2 flex-wrap">
         <button
           :for={{label, status} <- @statuses}
           type="button"
@@ -191,6 +245,26 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
           <span :if={is_nil(status)} class="ml-1 opacity-75">
             ({@status_counts |> Map.values() |> Enum.sum()})
           </span>
+        </button>
+      </div>
+
+      <%!-- Source tier filter --%>
+      <div class="bg-white rounded-2xl shadow-md p-3 mb-4 flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-semibold text-[#8E8E93] mr-1">Source tier:</span>
+        <button
+          :for={{label, tier} <- @tiers}
+          type="button"
+          phx-click="filter_tier"
+          phx-value-tier={tier || "all"}
+          class={[
+            "px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+            if(@tier_filter == tier,
+              do: "bg-[#007AFF] text-white border-[#007AFF]",
+              else: "bg-white text-[#1C1C1E] border-[#E5E5EA] hover:border-[#007AFF]/40"
+            )
+          ]}
+        >
+          {label}
         </button>
       </div>
 
@@ -244,6 +318,12 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
               status_badge_class(@question.validation_status)
             ]}>
               {@question.validation_status}
+            </span>
+            <span
+              :if={@question.source_tier}
+              class={["px-2 py-0.5 rounded-full text-xs font-medium", tier_badge_class(@question.source_tier)]}
+            >
+              Tier {@question.source_tier}
             </span>
           </div>
           <div :if={score(@report)} class="flex items-center gap-2">
@@ -449,10 +529,17 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
   # --- View helpers ---
 
-  defp course_label(%Question{course: %{name: name, grade: grade}}),
+  defp course_label(%Question{course: %{name: name, grades: [grade | _]}}),
     do: "#{name} · Grade #{grade}"
 
+  defp course_label(%Question{course: %{name: name}}), do: name
+
   defp course_label(_), do: ""
+
+  defp tier_badge_class(1), do: "bg-[#E8F0FF] text-[#007AFF]"
+  defp tier_badge_class(2), do: "bg-[#E8F8EB] text-[#34C759]"
+  defp tier_badge_class(3), do: "bg-[#FFF4CC] text-[#8E6000]"
+  defp tier_badge_class(_), do: "bg-[#F5F5F7] text-[#8E8E93]"
 
   defp status_badge_class(:passed), do: "bg-[#E8F8EB] text-[#4CD964]"
   defp status_badge_class(:failed), do: "bg-[#FFE5E3] text-[#FF3B30]"

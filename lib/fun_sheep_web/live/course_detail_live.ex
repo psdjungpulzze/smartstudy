@@ -1136,20 +1136,20 @@ defmodule FunSheepWeb.CourseDetailLive do
         <h2 class="text-lg font-semibold text-[#1C1C1E] mb-4">Practice</h2>
 
         <%!-- Primary CTA changes based on learning_path_state --%>
-        <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
+        <div class="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-4">
           <%= case @learning_path_state do %>
             <% :no_test -> %>
-              <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-[#E8F8EB] rounded-full flex items-center justify-center shrink-0">
-                  <.icon name="hero-calendar-days" class="w-6 h-6 text-[#4CD964]" />
+              <div class="flex items-center gap-3 flex-wrap">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-[#E8F8EB] rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-calendar-days" class="w-5 h-5 sm:w-6 sm:h-6 text-[#4CD964]" />
                 </div>
-                <div class="flex-1">
-                  <p class="font-semibold text-[#1C1C1E]">Schedule your test date</p>
-                  <p class="text-sm text-[#8E8E93]">Set a target date to start tracking readiness</p>
+                <div class="flex-1 min-w-0">
+                  <p class="font-semibold text-[#1C1C1E] text-sm sm:text-base">Schedule your test date</p>
+                  <p class="text-xs sm:text-sm text-[#8E8E93]">Set a target date to start tracking readiness</p>
                 </div>
                 <.link
                   navigate={~p"/courses/#{@course.id}/tests/new"}
-                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                  class="w-full sm:w-auto text-center bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2.5 sm:py-2 rounded-full shadow-md transition-colors text-sm"
                 >
                   Pick a date
                 </.link>
@@ -1157,13 +1157,13 @@ defmodule FunSheepWeb.CourseDetailLive do
 
             <% :test_pending -> %>
               <% next_test = List.first(@upcoming_tests) %>
-              <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center shrink-0">
-                  <.icon name="hero-clipboard-document-check" class="w-6 h-6 text-blue-500" />
+              <div class="flex items-center gap-3 flex-wrap">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-blue-50 rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-clipboard-document-check" class="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" />
                 </div>
-                <div class="flex-1">
-                  <p class="font-semibold text-[#1C1C1E]">Start your first assessment</p>
-                  <p class="text-sm text-[#8E8E93]">
+                <div class="flex-1 min-w-0">
+                  <p class="font-semibold text-[#1C1C1E] text-sm sm:text-base">Start your first assessment</p>
+                  <p class="text-xs sm:text-sm text-[#8E8E93]">
                     Take a test to measure your starting readiness for
                     <span class="font-medium text-[#1C1C1E]">{next_test && next_test.schedule.name}</span>
                   </p>
@@ -1174,24 +1174,24 @@ defmodule FunSheepWeb.CourseDetailLive do
                       do: ~p"/courses/#{@course.id}/tests/#{next_test.schedule.id}",
                       else: ~p"/courses/#{@course.id}/quick-test"
                   }
-                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                  class="w-full sm:w-auto text-center bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2.5 sm:py-2 rounded-full shadow-md transition-colors text-sm"
                 >
                   Start Assessment
                 </.link>
               </div>
 
             <% :has_attempts -> %>
-              <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center shrink-0">
-                  <.icon name="hero-bolt" class="w-6 h-6 text-amber-500" />
+              <div class="flex items-center gap-3 flex-wrap">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-amber-50 rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-bolt" class="w-5 h-5 sm:w-6 sm:h-6 text-amber-500" />
                 </div>
-                <div class="flex-1">
-                  <p class="font-semibold text-[#1C1C1E]">Practice weak concepts</p>
-                  <p class="text-sm text-[#8E8E93]">AI-guided review on your lowest-scoring topics</p>
+                <div class="flex-1 min-w-0">
+                  <p class="font-semibold text-[#1C1C1E] text-sm sm:text-base">Practice weak concepts</p>
+                  <p class="text-xs sm:text-sm text-[#8E8E93]">AI-guided review on your lowest-scoring topics</p>
                 </div>
                 <.link
                   navigate={~p"/courses/#{@course.id}/quick-test"}
-                  class="bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                  class="w-full sm:w-auto text-center bg-[#4CD964] hover:bg-[#3DBF55] text-white font-medium px-5 py-2.5 sm:py-2 rounded-full shadow-md transition-colors text-sm"
                 >
                   Practice Now
                 </.link>
@@ -1199,13 +1199,13 @@ defmodule FunSheepWeb.CourseDetailLive do
 
             <% :approaching -> %>
               <% next_test = List.first(@upcoming_tests) %>
-              <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center shrink-0">
-                  <.icon name="hero-fire" class="w-6 h-6 text-red-500" />
+              <div class="flex items-center gap-3 flex-wrap">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-red-50 rounded-full flex items-center justify-center shrink-0">
+                  <.icon name="hero-fire" class="w-5 h-5 sm:w-6 sm:h-6 text-red-500" />
                 </div>
-                <div class="flex-1">
-                  <p class="font-semibold text-[#1C1C1E]">Test coming up soon!</p>
-                  <p class="text-sm text-[#8E8E93]">
+                <div class="flex-1 min-w-0">
+                  <p class="font-semibold text-[#1C1C1E] text-sm sm:text-base">Test coming up soon!</p>
+                  <p class="text-xs sm:text-sm text-[#8E8E93]">
                     <span class="font-medium text-red-600">
                       {next_test && Date.diff(next_test.schedule.test_date, Date.utc_today())} days
                     </span>
@@ -1214,7 +1214,7 @@ defmodule FunSheepWeb.CourseDetailLive do
                 </div>
                 <.link
                   navigate={~p"/courses/#{@course.id}/quick-test"}
-                  class="bg-red-500 hover:bg-red-600 text-white font-medium px-5 py-2 rounded-full shadow-md transition-colors text-sm shrink-0"
+                  class="w-full sm:w-auto text-center bg-red-500 hover:bg-red-600 text-white font-medium px-5 py-2.5 sm:py-2 rounded-full shadow-md transition-colors text-sm"
                 >
                   Cram Now
                 </.link>

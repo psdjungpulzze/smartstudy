@@ -150,12 +150,14 @@ defmodule FunSheepWeb.StudentOnboardingLive do
     user_role_id = socket.assigns.current_user["user_role_id"]
     course_ids = MapSet.to_list(socket.assigns.selected_course_ids)
 
-    {:ok, enrolled} =
+    {:ok, enrolled_raw} =
       if course_ids != [] do
         Enrollments.bulk_enroll(user_role_id, course_ids, "onboarding")
       else
         {:ok, []}
       end
+
+    enrolled = FunSheep.Repo.preload(enrolled_raw, :course)
 
     user_role = Accounts.get_user_role!(user_role_id)
     Accounts.complete_onboarding(user_role)

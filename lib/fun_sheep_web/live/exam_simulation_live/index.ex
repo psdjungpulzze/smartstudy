@@ -46,6 +46,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Index do
        chapter_ids: chapter_ids,
        bank_size: bank_size,
        bank_too_small: bank_too_small,
+       min_bank_size: @min_bank_size,
        format_preview: format_preview,
        active_session: active_session,
        active_remaining_seconds: active_remaining_seconds,
@@ -141,7 +142,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Index do
       </div>
 
       <%= if not @billing_ok do %>
-        <div class="rounded-2xl bg-white shadow-md p-8 text-center">
+        <div class="rounded-2xl bg-white shadow-md p-4 sm:p-8 text-center">
           <div class="text-4xl mb-4">🔒</div>
           <h2 class="text-xl font-semibold mb-2">Exam Simulation is a Premium Feature</h2>
           <p class="text-gray-600 mb-6">
@@ -173,14 +174,14 @@ defmodule FunSheepWeb.ExamSimulationLive.Index do
         <% end %>
 
         <div class="rounded-2xl bg-white shadow-md overflow-hidden">
-          <div class="bg-slate-800 text-white px-8 py-6">
-            <h1 class="text-2xl font-bold">Full Exam Simulation</h1>
-            <p class="text-slate-300 mt-1">
+          <div class="bg-slate-800 text-white px-4 py-4 sm:px-8 sm:py-6">
+            <h1 class="text-xl sm:text-2xl font-bold">Full Exam Simulation</h1>
+            <p class="text-slate-300 mt-1 text-sm sm:text-base">
               Experience the real test. Timed. No hints. No feedback until you submit.
             </p>
           </div>
 
-          <div class="p-8">
+          <div class="p-4 sm:p-8">
             <%= if @bank_too_small do %>
               <div class="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-6">
                 <p class="text-amber-800 text-sm">
@@ -241,7 +242,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Index do
               phx-click="start_exam"
               disabled={@bank_too_small || @starting}
               class={[
-                "w-full py-3 rounded-full font-semibold text-white shadow-md transition-colors",
+                "w-full sm:w-auto sm:min-w-[200px] sm:block sm:mx-auto py-3 px-8 rounded-full font-semibold text-white shadow-md transition-colors",
                 if(@bank_too_small || @starting,
                   do: "bg-gray-300 cursor-not-allowed",
                   else: "bg-[#4CD964] hover:bg-[#3DBF55]"
