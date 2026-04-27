@@ -316,7 +316,7 @@ if gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" >/dev/n
     --min-instances=2 \
     --max-instances=5 \
     --update-env-vars="POOL_SIZE=50,RUN_OBAN_WORKERS=true,SMTP_HOST=$SMTP_HOST,SMTP_PORT=$SMTP_PORT,SMTP_USERNAME=$SMTP_USERNAME,MAILER_FROM=$MAILER_FROM" \
-    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest" \
+    --update-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest,TAVILY_API_KEY=tavily-api-key:latest" \
     --quiet >/dev/null
 
   WORKER_REVISION=$(gcloud run services describe "$WORKER_SERVICE" --region="$GCP_REGION" \
