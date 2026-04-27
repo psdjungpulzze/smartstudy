@@ -340,7 +340,7 @@ defmodule FunSheepWeb.FormatTestLive do
         </div>
 
         <%= if @submitted do %>
-          <.render_results results={@results} schedule={@schedule} />
+          <.render_results results={@results} schedule={@schedule} course_id={@course_id} />
         <% end %>
 
         <%= if !@no_template && !@submitted do %>
@@ -523,6 +523,7 @@ defmodule FunSheepWeb.FormatTestLive do
 
   attr :results, :map, required: true
   attr :schedule, :map, required: true
+  attr :course_id, :string, required: true
 
   defp render_results(assigns) do
     ~H"""

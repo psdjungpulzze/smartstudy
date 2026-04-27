@@ -2,16 +2,30 @@ defmodule FunSheepWeb.AdminCourseSectionsLiveTest do
   @moduledoc """
   Tests for the AdminCourseSectionsLive page.
 
-  Full LiveView rendering is gated on the compiled app layout being present
-  in the test environment (this worktree does not include it). These tests
-  exercise the Resources context operations that the LiveView delegates to,
-  which gives us confidence that the data layer backing the page is correct.
+  Covers both the LiveView rendering / event handling and the underlying
+  Resources context operations that the LiveView delegates to.
   """
   use FunSheepWeb.ConnCase, async: true
 
+  import Phoenix.LiveViewTest
   import FunSheep.DataCase, only: [errors_on: 1]
 
   alias FunSheep.{Courses, Resources}
+
+  # ── Auth helpers ──
+
+  defp admin_conn(conn) do
+    conn
+    |> init_test_session(%{
+      dev_user_id: "admin-user-id",
+      dev_user: %{
+        "id" => "admin-user-id",
+        "role" => "admin",
+        "email" => "admin@example.com",
+        "display_name" => "Admin User"
+      }
+    })
+  end
 
   # ── Data helpers ──
 
@@ -44,7 +58,232 @@ defmodule FunSheepWeb.AdminCourseSectionsLiveTest do
     }
   end
 
-  # ── mount data layer ──
+  # ── LiveView tests ──
+
+  describe "mount/3" do
+    test "renders the course name in the page title", %{conn: conn} do
+      course = create_course(%{name: "Physics 202"})
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      assert html =~ "Physics 202"
+    end
+
+    test "shows back link to /admin/courses", %{conn: conn} do
+      course = create_course()
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      assert html =~ "/admin/courses"
+      assert html =~ "Courses"
+    end
+
+    test "shows section list when course has chapters and sections", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      assert html =~ section.name
+      assert html =~ "Chapter 1"
+    end
+
+    test "shows 'No chapters found' when course has no chapters", %{conn: conn} do
+      course = create_course(%{name: "Empty Course"})
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      assert html =~ "No chapters found"
+    end
+
+    test "shows prompt to select a section when none is selected", %{conn: conn} do
+      course = create_course()
+      _chapter_and_section = add_chapter_and_section(course)
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      assert html =~ "Select a section on the left to manage its video resources."
+    end
+
+    test "redirects non-admin users with a not-found error", %{conn: conn} do
+      course = create_course()
+
+      non_admin_conn =
+        conn
+        |> init_test_session(%{
+          dev_user_id: "student-id",
+          dev_user: %{
+            "id" => "student-id",
+            "role" => "student",
+            "email" => "student@example.com",
+            "display_name" => "Student"
+          }
+        })
+
+      assert_raise FunSheepWeb.NotFoundError, fn ->
+        live(non_admin_conn, ~p"/admin/courses/#{course.id}/sections")
+      end
+    end
+  end
+
+  describe "select_section event" do
+    test "selecting a section reveals the Add Video form", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      html = render_click(view, "select_section", %{"id" => section.id})
+
+      assert html =~ "Add Video Resource"
+      assert html =~ "No videos added yet."
+    end
+
+    test "selecting a section shows videos that belong to it", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, _video} = Resources.create_video_resource(video_attrs(course, section))
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      html = render_click(view, "select_section", %{"id" => section.id})
+
+      assert html =~ "Mitosis Explained"
+      assert html =~ "youtube.com"
+    end
+
+    test "selecting a section clears any prior form error", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      # Select the section, then verify form renders with no error message
+      html = render_click(view, "select_section", %{"id" => section.id})
+
+      refute html =~ "url: must be"
+    end
+  end
+
+  describe "add_video event" do
+    test "adding a video with valid params shows flash and video in the list", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      # First select the section so the form is visible
+      render_click(view, "select_section", %{"id" => section.id})
+
+      html =
+        render_click(view, "add_video", %{
+          "title" => "Khan Academy: Cell Biology",
+          "url" => "https://www.khanacademy.org/science/cell",
+          "source" => "khan_academy",
+          "duration_seconds" => "600"
+        })
+
+      assert html =~ "Video resource added."
+      assert html =~ "Khan Academy: Cell Biology"
+    end
+
+    test "adding a video with an invalid URL shows a form error", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      render_click(view, "select_section", %{"id" => section.id})
+
+      html =
+        render_click(view, "add_video", %{
+          "title" => "Bad URL Video",
+          "url" => "not-a-valid-url",
+          "source" => "other"
+        })
+
+      assert html =~ "url:"
+    end
+
+    test "adding a video with a blank title shows a form error", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      render_click(view, "select_section", %{"id" => section.id})
+
+      html =
+        render_click(view, "add_video", %{
+          "title" => "",
+          "url" => "https://www.youtube.com/watch?v=abc",
+          "source" => "youtube"
+        })
+
+      assert html =~ "title:"
+    end
+
+    test "adding a video without duration_seconds still succeeds", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      render_click(view, "select_section", %{"id" => section.id})
+
+      html =
+        render_click(view, "add_video", %{
+          "title" => "No Duration Video",
+          "url" => "https://www.youtube.com/watch?v=noduration",
+          "source" => "youtube",
+          "duration_seconds" => ""
+        })
+
+      assert html =~ "Video resource added."
+      assert html =~ "No Duration Video"
+    end
+  end
+
+  describe "delete_video event" do
+    test "deleting a video removes it from the list and shows flash", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, video} = Resources.create_video_resource(video_attrs(course, section))
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      render_click(view, "select_section", %{"id" => section.id})
+
+      html = render_click(view, "delete_video", %{"id" => video.id})
+
+      assert html =~ "Video resource removed."
+      refute html =~ "Mitosis Explained"
+    end
+
+    test "deleting one video leaves other videos for the same section intact", %{conn: conn} do
+      course = create_course()
+      {_chapter, section} = add_chapter_and_section(course)
+
+      {:ok, v1} = Resources.create_video_resource(video_attrs(course, section))
+
+      {:ok, v2} =
+        Resources.create_video_resource(
+          video_attrs(course, section)
+          |> Map.put(:title, "Second Video")
+          |> Map.put(:url, "https://www.youtube.com/watch?v=second")
+        )
+
+      {:ok, view, _html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}/sections")
+
+      render_click(view, "select_section", %{"id" => section.id})
+
+      html = render_click(view, "delete_video", %{"id" => v1.id})
+
+      refute html =~ v1.title
+      assert html =~ v2.title
+    end
+  end
+
+  # ── Context layer tests (kept from original implementation) ──
 
   describe "mount — data loaded by AdminCourseSectionsLive" do
     test "get_course_with_chapters! loads chapters and sections for the course" do

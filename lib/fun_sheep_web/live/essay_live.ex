@@ -24,7 +24,7 @@ defmodule FunSheepWeb.EssayLive do
 
   @impl true
   def mount(%{"course_id" => course_id, "question_id" => question_id} = params, _session, socket) do
-    user_role_id = socket.assigns.current_user["id"]
+    user_role_id = socket.assigns.current_user["user_role_id"]
     schedule_id = params["schedule_id"]
 
     question =

@@ -46,6 +46,7 @@ defmodule FunSheepWeb.ExamSimulationLive.Index do
        chapter_ids: chapter_ids,
        bank_size: bank_size,
        bank_too_small: bank_too_small,
+       min_bank_size: @min_bank_size,
        format_preview: format_preview,
        active_session: active_session,
        active_remaining_seconds: active_remaining_seconds,

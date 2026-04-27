@@ -136,7 +136,7 @@ defmodule FunSheepWeb.LoginLive do
       password: password
     }
 
-    case Req.post(url, json: body) do
+    case Req.post(url, [json: body] ++ extra_req_opts()) do
       {:ok, %{status: 200, body: %{"mfa_required" => true, "session_token" => token}}} ->
         {:ok, :mfa_required, token}
 
@@ -165,7 +165,7 @@ defmodule FunSheepWeb.LoginLive do
     url = "#{interactor_url()}/api/v1/users/login/mfa"
     body = %{session_token: session_token, code: code}
 
-    case Req.post(url, json: body) do
+    case Req.post(url, [json: body] ++ extra_req_opts()) do
       {:ok, %{status: 200, body: tokens}} ->
         {:ok, tokens}
 
@@ -204,6 +204,9 @@ defmodule FunSheepWeb.LoginLive do
 
   defp org_name,
     do: Application.get_env(:fun_sheep, :interactor_org_name, "studysmart")
+
+  # Allows tests to inject `plug: {Req.Test, FunSheepWeb.LoginLive}` without hitting the network.
+  defp extra_req_opts, do: Application.get_env(:fun_sheep, :login_req_opts, [])
 
   @impl true
   def render(assigns) do

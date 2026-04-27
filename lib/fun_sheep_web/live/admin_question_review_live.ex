@@ -529,8 +529,10 @@ defmodule FunSheepWeb.AdminQuestionReviewLive do
 
   # --- View helpers ---
 
-  defp course_label(%Question{course: %{name: name, grade: grade}}),
+  defp course_label(%Question{course: %{name: name, grades: [grade | _]}}),
     do: "#{name} · Grade #{grade}"
+
+  defp course_label(%Question{course: %{name: name}}), do: name
 
   defp course_label(_), do: ""
 

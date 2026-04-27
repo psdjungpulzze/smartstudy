@@ -166,6 +166,8 @@ defmodule FunSheep.Engagement.DailyChallenges do
       }
     )
     |> Repo.all()
+    |> Enum.with_index(1)
+    |> Enum.map(fn {entry, rank} -> Map.put(entry, :rank, rank) end)
   end
 
   @doc """

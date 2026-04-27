@@ -98,5 +98,23 @@ defmodule FunSheep.Scraper.DomainRateLimiterTest do
       assert elapsed >= 1_000,
              "3rd collegeboard request should be delayed (>= 1000ms), got #{elapsed}ms"
     end
+
+    test "malformed / non-URL string is treated as 'default' domain and returns :ok" do
+      assert DomainRateLimiter.acquire("not-a-url") == :ok
+      assert DomainRateLimiter.acquire("ftp://") == :ok
+    end
+
+    test "varsitytutors.com allows 10 requests per second before throttling" do
+      url = "https://varsitytutors.com/math-practice"
+      t0 = System.monotonic_time(:millisecond)
+      for _ <- 1..10, do: DomainRateLimiter.acquire(url)
+      elapsed = System.monotonic_time(:millisecond) - t0
+      assert elapsed < 1_200,
+             "First 10 varsitytutors requests should fit in one window, took #{elapsed}ms"
+    end
+
+    test "acquire returns :ok for URL with no host component" do
+      assert DomainRateLimiter.acquire("/relative/path") == :ok
+    end
   end
 end

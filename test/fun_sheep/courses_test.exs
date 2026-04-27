@@ -14,7 +14,7 @@ defmodule FunSheep.CoursesTest do
   end
 
   defp create_course(attrs \\ %{}) do
-    defaults = %{name: "Test Course", subject: "Math", grade: "10"}
+    defaults = %{name: "Test Course", subject: "Math", grades: ["10"]}
     {:ok, course} = Courses.create_course(Map.merge(defaults, attrs))
     course
   end
@@ -39,12 +39,12 @@ defmodule FunSheep.CoursesTest do
     end
 
     test "filters by grade" do
-      create_course(%{name: "Math 10", grade: "10"})
-      create_course(%{name: "Math 11", grade: "11"})
+      create_course(%{name: "Math 10", grades: ["10"]})
+      create_course(%{name: "Math 11", grades: ["11"]})
 
       results = Courses.search_courses(%{"grade" => "10"})
       assert length(results) == 1
-      assert hd(results).grade == "10"
+      assert "10" in hd(results).grades
     end
 
     test "filters by school_id" do
@@ -77,16 +77,18 @@ defmodule FunSheep.CoursesTest do
   describe "create_course/1" do
     test "creates with valid attrs" do
       assert {:ok, %Course{} = course} =
-               Courses.create_course(%{name: "Algebra", subject: "Math", grade: "9"})
+               Courses.create_course(%{name: "Algebra", subject: "Math", grades: ["9"]})
 
       assert course.name == "Algebra"
       assert course.subject == "Math"
-      assert course.grade == "9"
+      assert course.grades == ["9"]
     end
 
     test "fails without required fields" do
       assert {:error, changeset} = Courses.create_course(%{})
-      assert %{name: _, subject: _, grade: _} = errors_on(changeset)
+      errors = errors_on(changeset)
+      assert Map.has_key?(errors, :name)
+      assert Map.has_key?(errors, :subject)
     end
   end
 

@@ -3,7 +3,8 @@ defmodule FunSheepWeb.AdminCourseShowLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias FunSheep.Courses
+  alias FunSheep.{Courses, Repo}
+  alias FunSheep.Content.DiscoveredSource
 
   defp admin_conn(conn) do
     conn
@@ -26,6 +27,24 @@ defmodule FunSheepWeb.AdminCourseShowLiveTest do
       )
 
     course
+  end
+
+  defp create_discovered_source(course_id, attrs) do
+    defaults = %{
+      course_id: course_id,
+      url: "https://example.com/page-#{System.unique_integer([:positive])}",
+      source_type: "question_bank",
+      status: "scraped",
+      discovery_strategy: "web_search",
+      title: "Test Source"
+    }
+
+    {:ok, source} =
+      %DiscoveredSource{}
+      |> DiscoveredSource.changeset(Map.merge(defaults, attrs))
+      |> Repo.insert()
+
+    source
   end
 
   describe "mount and render" do
@@ -76,6 +95,84 @@ defmodule FunSheepWeb.AdminCourseShowLiveTest do
 
       assert html =~ "/admin/courses"
       assert html =~ "Courses"
+    end
+
+    test "renders course metadata including catalog fields when present", %{conn: conn} do
+      {:ok, course} =
+        Courses.create_course(%{
+          name: "SAT Math Prep",
+          subject: "Mathematics",
+          grade: "11",
+          catalog_test_type: "SAT",
+          catalog_subject: "Math",
+          processing_status: "ready",
+          access_level: "public"
+        })
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "SAT"
+      assert html =~ "Math"
+      assert html =~ "ready"
+      assert html =~ "public"
+    end
+
+    test "renders em-dash for nil catalog fields on a plain course", %{conn: conn} do
+      course = create_course(%{name: "Plain Course"})
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}")
+
+      # nil catalog_test_type renders as "—"
+      assert html =~ "—"
+    end
+
+    test "renders per-domain table with rows when sources exist", %{conn: conn} do
+      course = create_course(%{name: "Course With Sources"})
+      create_discovered_source(course.id, %{url: "https://khan.org/math/calculus", status: "scraped"})
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "khan.org"
+      assert html =~ "Per-domain extraction"
+      # Table headers appear for non-empty result
+      assert html =~ "Domain"
+      assert html =~ "Strategy"
+    end
+
+    test "renders web_search strategy badge for web_search sources", %{conn: conn} do
+      course = create_course(%{name: "Web Search Course"})
+
+      create_discovered_source(course.id, %{
+        url: "https://quizlet.com/biology",
+        discovery_strategy: "web_search"
+      })
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "web_search"
+    end
+
+    test "renders registry strategy badge for registry sources", %{conn: conn} do
+      course = create_course(%{name: "Registry Course"})
+
+      create_discovered_source(course.id, %{
+        url: "https://official-source.org/resource",
+        discovery_strategy: "registry"
+      })
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "registry"
+    end
+
+    test "renders pass rate column in per-domain table", %{conn: conn} do
+      course = create_course(%{name: "Pass Rate Course"})
+
+      create_discovered_source(course.id, %{url: "https://example.com/q", status: "scraped"})
+
+      {:ok, _view, html} = live(admin_conn(conn), ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "Pass rate"
     end
   end
 end

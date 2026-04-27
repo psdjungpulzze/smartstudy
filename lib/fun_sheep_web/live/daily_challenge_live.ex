@@ -37,6 +37,7 @@ defmodule FunSheepWeb.DailyChallengeLive do
         already_attempted: already_attempted,
         previous_attempt: previous_attempt,
         leaderboard: leaderboard,
+        question_count: @question_count,
         # Question phase assigns
         attempt: nil,
         questions: [],
@@ -73,6 +74,7 @@ defmodule FunSheepWeb.DailyChallengeLive do
           challenge.question_ids
           |> Enum.map(&Questions.get_question/1)
           |> Enum.reject(&is_nil/1)
+          |> FunSheep.Repo.preload(:chapter)
 
         case questions do
           [] ->
@@ -385,6 +387,7 @@ defmodule FunSheepWeb.DailyChallengeLive do
         <.render_leaderboard
           leaderboard={@leaderboard}
           user_role_id={@user_role_id}
+          question_count={@question_count}
         />
       </div>
 
@@ -574,6 +577,7 @@ defmodule FunSheepWeb.DailyChallengeLive do
         <.render_leaderboard
           leaderboard={@leaderboard}
           user_role_id={@user_role_id}
+          question_count={@question_count}
         />
       </div>
     </div>
@@ -589,6 +593,7 @@ defmodule FunSheepWeb.DailyChallengeLive do
 
   attr :leaderboard, :list, required: true
   attr :user_role_id, :string, required: true
+  attr :question_count, :integer, required: true
 
   defp render_leaderboard(assigns) do
     ~H"""

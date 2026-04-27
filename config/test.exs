@@ -68,6 +68,8 @@ config :fun_sheep, :ai_backoff_base_ms, 0
 # Route Anthropic/OpenAI HTTP calls through Req.Test stubs in tests
 config :fun_sheep, :anthropic_req_opts, plug: {Req.Test, FunSheep.AI.Anthropic}
 config :fun_sheep, :openai_req_opts, plug: {Req.Test, FunSheep.AI.OpenAI}
+# Route LoginLive HTTP calls through Req.Test stubs in tests
+config :fun_sheep, :login_req_opts, plug: {Req.Test, FunSheepWeb.LoginLive}
 
 # Disable Oban in tests
 config :fun_sheep, Oban, testing: :inline

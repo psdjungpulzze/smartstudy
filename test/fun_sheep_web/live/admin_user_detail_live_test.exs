@@ -146,7 +146,7 @@ defmodule FunSheepWeb.AdminUserDetailLiveTest do
         FunSheep.Courses.create_course(%{
           name: "Physics 101",
           subject: "Physics",
-          grade: "11",
+          grades: ["11"],
           created_by_id: target.id
         })
 

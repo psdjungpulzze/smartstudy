@@ -100,9 +100,11 @@ defmodule FunSheepWeb.Router do
 
       live "/subscription", SubscriptionLive, :index
       live "/leaderboard", LeaderboardLive, :index
+      live "/upcoming-tests", UpcomingTestsLive, :index
 
       live "/social/profile/:id", UserProfileLive, :show
       live "/social/find", FindFriendsLive, :index
+      live "/flock/:id", FlockProfileLive, :show
 
       live "/integrations", IntegrationsLive, :index
 

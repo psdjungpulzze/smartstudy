@@ -119,4 +119,179 @@ defmodule FunSheepWeb.TeacherOnboardingLiveTest do
     assert html =~ "parent" and html =~ "not you"
     assert html =~ "Go to your classroom"
   end
+
+  # ── Additional coverage tests ────────────────────────────────────────────
+
+  test "update_class live change event updates class details", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    # The update_class handler requires the _target key (phx-change fires with it)
+    html =
+      render_change(view, "update_class", %{
+        "_target" => ["name"],
+        "name" => "Updated Class",
+        "period" => "4th",
+        "course" => "Physics",
+        "school_year" => "2025-2026"
+      })
+
+    # The form should still be rendered (still on step 1)
+    assert html =~ "Create your first class"
+  end
+
+  test "add_student rejects empty email", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "MyClass"})
+    |> render_submit()
+
+    # Use render_click to bypass HTML5 email type validation
+    html = render_click(view, "add_student", %{"student_email" => ""})
+
+    assert html =~ "Enter a student email"
+  end
+
+  test "add_student rejects malformed email", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "MyClass"})
+    |> render_submit()
+
+    # Use render_click with the event directly to bypass HTML5 email validation
+    html = render_click(view, "add_student", %{"student_email" => "notanemail"})
+
+    assert html =~ "doesn&#39;t look like an email" or html =~ "doesn't look like an email"
+  end
+
+  test "remove_student removes the student from list", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "MyClass"})
+    |> render_submit()
+
+    view
+    |> form("form[phx-submit=add_student]", %{"student_email" => "alice@school.edu"})
+    |> render_submit()
+
+    html = render(view)
+    assert html =~ "alice@school.edu"
+
+    render_click(view, "remove_student", %{"email" => "alice@school.edu"})
+
+    html = render(view)
+    refute html =~ "alice@school.edu"
+  end
+
+  test "send_invites with empty list shows error", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "EmptyClass"})
+    |> render_submit()
+
+    html = render_click(view, "send_invites", %{})
+    assert html =~ "Add at least one student first"
+  end
+
+  test "goto_step event navigates steps", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "Nav Class"})
+    |> render_submit()
+
+    # Go back to step 1
+    html = render_click(view, "goto_step", %{"step" => "1"})
+    assert html =~ "Create your first class"
+  end
+
+  test "set_test event advances to step 4 with test name", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "TestClass"})
+    |> render_submit()
+
+    view
+    |> form("form[phx-submit=add_student]", %{"student_email" => "bob@school.edu"})
+    |> render_submit()
+
+    render_click(view, "send_invites", %{})
+
+    view
+    |> form("form[phx-submit=set_test]", %{
+      "name" => "Unit 3 Exam",
+      "date" => "2026-05-01",
+      "subject" => "Chemistry"
+    })
+    |> render_submit()
+
+    html = render(view)
+    assert html =~ "TestClass is set up"
+    assert html =~ "Unit 3 Exam"
+    assert html =~ "2026-05-01"
+  end
+
+  test "skip_test event advances directly to done step", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "SkipTestClass"})
+    |> render_submit()
+
+    view
+    |> form("form[phx-submit=add_student]", %{"student_email" => "carol@school.edu"})
+    |> render_submit()
+
+    render_click(view, "send_invites", %{})
+
+    html = render_click(view, "skip_test", %{})
+
+    assert html =~ "SkipTestClass is set up"
+    refute html =~ "Save and finish"
+  end
+
+  test "multiple students invited shows plural noun", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, view, _html} = live(conn, ~p"/onboarding/teacher")
+
+    view
+    |> form("form[phx-submit=submit_class]", %{"name" => "MultiClass"})
+    |> render_submit()
+
+    view
+    |> form("form[phx-submit=add_student]", %{"student_email" => "d1@school.edu"})
+    |> render_submit()
+
+    view
+    |> form("form[phx-submit=add_student]", %{"student_email" => "d2@school.edu"})
+    |> render_submit()
+
+    render_click(view, "send_invites", %{})
+    html = render_click(view, "skip_test", %{})
+
+    # plural noun "students" should appear
+    assert html =~ "students"
+  end
+
+  test "progress header shows all 4 step labels", %{conn: conn} do
+    {conn, _t} = teacher_conn(conn)
+    {:ok, _view, html} = live(conn, ~p"/onboarding/teacher")
+
+    assert html =~ "Class"
+    assert html =~ "Students"
+    assert html =~ "Test"
+    assert html =~ "Done"
+  end
 end
