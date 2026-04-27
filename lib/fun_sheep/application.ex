@@ -65,8 +65,6 @@ defmodule FunSheep.Application do
              ]
            ]
          }},
-        # Per-domain rate limiter for web scraping (GenServer + ETS)
-        FunSheep.Scraper.DomainRateLimiter,
         # Background job processing
         {Oban, Application.fetch_env!(:fun_sheep, Oban)}
       ] ++
