@@ -22,14 +22,13 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   require Logger
 
-  # Anthropic web search — real crawl, no hallucination
-  @anthropic_api_url "https://api.anthropic.com/v1/messages"
-  @anthropic_api_version "2023-06-01"
-  # claude-haiku-4-5: fast, cheap, supports web_search_20250305
-  @search_model "claude-haiku-4-5-20251001"
-  # Server-side tool: Anthropic executes the search; single round-trip, real URLs
-  @search_tool_type "web_search_20250305"
-  @search_beta "web-search-2025-03-05"
+  alias FunSheep.Search.TavilyClient
+
+  # Cap total queries per course. Generic/AP courses naturally produce ≤ 40
+  # queries and won't reach this limit. SAT/ACT/GRE with many sections can
+  # generate 120+; 60 covers ~20 sections which gives solid web discovery
+  # coverage while keeping Tavily cost negligible per course.
+  @max_queries_per_course 60
 
   @search_sites [
     "quizlet.com",
@@ -271,7 +270,13 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   # --- Search Query Building ---
 
-  defp build_search_queries(%{metadata: %{"generation_config" => gen_config}} = course)
+  defp build_search_queries(course) do
+    course
+    |> raw_search_queries()
+    |> Enum.take(@max_queries_per_course)
+  end
+
+  defp raw_search_queries(%{metadata: %{"generation_config" => gen_config}} = course)
        when is_map(gen_config) do
     # Metadata-driven path: derive search queries from generation_config.prompt_context.
     # This handles any standardized test course that has generation_config set via
@@ -302,7 +307,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     end
   end
 
-  defp build_search_queries(%{catalog_test_type: "sat"} = course) do
+  defp raw_search_queries(%{catalog_test_type: "sat"} = course) do
     # SAT fallback: courses created before generation_config metadata was added.
     # SAT courses use targeted, domain-specific search queries for each section.
     # Generic queries ("grade X practice questions") produce irrelevant hits for
@@ -329,7 +334,7 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     end)
   end
 
-  defp build_search_queries(course) do
+  defp raw_search_queries(course) do
     subject = course.subject || course.name
     grade = List.first(course.grades || []) || ""
     textbook_name = get_textbook_name(course)
@@ -452,105 +457,24 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
     end
   end
 
-  # --- Web Search Execution (Anthropic web_search_20250305 — real crawl) ---
+  # --- Web Search Execution (Tavily Search API) ---
 
   defp search_web(query) do
-    prompt = """
-    Search the web for educational resources matching this query: "#{query}"
+    case TavilyClient.search(query, max_results: 10, search_depth: "basic") do
+      {:ok, results} ->
+        tagged = Enum.map(results, &Map.put(&1, :search_query, query))
+        {:ok, tagged}
 
-    Return a JSON array of up to 10 results you actually found via web search. Each item:
-    - "title": the real page title from the search result
-    - "url": the actual URL from the search result
-    - "snippet": brief description of what the page contains
-    - "publisher": website or domain name
+      {:error, :rate_limited} ->
+        Process.sleep(2_000)
 
-    Only include pages that genuinely contain practice questions, quizzes, test banks,
-    study guides, or past exam papers. Omit pure ads or pages with no educational content.
-
-    Return ONLY the JSON array, no other text.
-    """
-
-    api_key = Application.fetch_env!(:fun_sheep, :anthropic_api_key)
-
-    body = %{
-      model: @search_model,
-      max_tokens: 4096,
-      tools: [%{type: @search_tool_type, name: "web_search", max_uses: 3}],
-      messages: [%{role: "user", content: prompt}]
-    }
-
-    headers = [
-      {"x-api-key", api_key},
-      {"anthropic-version", @anthropic_api_version},
-      {"anthropic-beta", @search_beta},
-      {"content-type", "application/json"}
-    ]
-
-    case Req.post(@anthropic_api_url,
-           json: body,
-           headers: headers,
-           receive_timeout: 90_000,
-           retry: false,
-           finch: FunSheep.Finch
-         ) do
-      {:ok, %{status: 200, body: resp}} ->
-        text = extract_text_from_response(resp)
-        parse_search_response_text(text, query)
-
-      {:ok, %{status: status, body: resp_body}} ->
-        Logger.warning(
-          "[WebDiscovery] Anthropic search HTTP #{status} for '#{query}': #{inspect(resp_body)}"
-        )
-
-        {:error, {:http_status, status}}
+        case TavilyClient.search(query, max_results: 10, search_depth: "basic") do
+          {:ok, results} -> {:ok, Enum.map(results, &Map.put(&1, :search_query, query))}
+          {:error, reason} -> {:error, reason}
+        end
 
       {:error, reason} ->
-        Logger.warning("[WebDiscovery] Search failed for '#{query}': #{inspect(reason)}")
         {:error, reason}
-    end
-  end
-
-  # Extracts the final text block from an Anthropic response.
-  # When using server-side tools the content array contains tool_use, tool_result,
-  # and text blocks — we want the last text block (Claude's final reply).
-  defp extract_text_from_response(%{"content" => content}) when is_list(content) do
-    content
-    |> Enum.filter(&(&1["type"] == "text"))
-    |> List.last()
-    |> case do
-      %{"text" => text} -> text
-      _ -> ""
-    end
-  end
-
-  defp extract_text_from_response(_), do: ""
-
-  defp parse_search_response_text(text, query) do
-    cleaned =
-      text
-      |> String.replace(~r/```json\s*/i, "")
-      |> String.replace(~r/```\s*/, "")
-      |> String.trim()
-
-    case Jason.decode(cleaned) do
-      {:ok, results} when is_list(results) ->
-        parsed =
-          Enum.map(results, fn r ->
-            %{
-              title: r["title"],
-              url: r["url"],
-              snippet: r["snippet"],
-              publisher: r["publisher"],
-              confidence: r["confidence"] || 0.8,
-              search_query: query
-            }
-          end)
-
-        {:ok, parsed}
-
-      _ ->
-        Logger.error("[WebDiscovery] Failed to parse search response for '#{query}': #{inspect(String.slice(text, 0, 200))}")
-        {:error, :parse_failed}
     end
   end
 

@@ -42,7 +42,8 @@ if config_env() in [:dev, :test] do
   # Set LLM API keys into Application env after .env.credentials is loaded above.
   config :fun_sheep,
     openai_api_key: System.get_env("OPENAI_API_KEY"),
-    anthropic_api_key: System.get_env("ANTHROPIC_API_KEY")
+    anthropic_api_key: System.get_env("ANTHROPIC_API_KEY"),
+    tavily_api_key: System.get_env("TAVILY_API_KEY")
 end
 
 # Google Vision API key (from env or .env.credentials).
@@ -288,9 +289,14 @@ if config_env() == :prod do
     System.get_env("OPENAI_API_KEY") ||
       raise "environment variable OPENAI_API_KEY is missing."
 
+  tavily_api_key =
+    System.get_env("TAVILY_API_KEY") ||
+      raise "environment variable TAVILY_API_KEY is missing."
+
   config :fun_sheep,
     anthropic_api_key: anthropic_api_key,
-    openai_api_key: openai_api_key
+    openai_api_key: openai_api_key,
+    tavily_api_key: tavily_api_key
 
   # ## SSL Support
   #
