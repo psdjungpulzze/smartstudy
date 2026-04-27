@@ -184,6 +184,7 @@ upsert_secret google-vision-api-key "$GOOGLE_VISION_API_KEY"
 upsert_secret smtp-password "$SMTP_PASSWORD"
 upsert_secret anthropic-api-key "$ANTHROPIC_API_KEY"
 upsert_secret openai-api-key "$OPENAI_API_KEY"
+upsert_secret tavily-api-key "$TAVILY_API_KEY"
 
 for required_secret in database-url secret-key-base; do
   gcloud secrets describe "$required_secret" >/dev/null 2>&1 \
@@ -242,7 +243,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --service-account="$GCS_SERVICE_ACCOUNT" \
   --add-cloudsql-instances="$CONNECTION_NAME" \
   --env-vars-file="$ENV_VARS_FILE" \
-  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest"
+  --set-secrets="DATABASE_URL=database-url:latest,SECRET_KEY_BASE=secret-key-base:latest,INTERACTOR_CLIENT_SECRET=interactor-client-secret:latest,GOOGLE_VISION_API_KEY=google-vision-api-key:latest,SMTP_PASSWORD=smtp-password:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest,TAVILY_API_KEY=tavily-api-key:latest"
 
 NEW_REVISION=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.latestReadyRevisionName)')
 SERVICE_URL=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region="$GCP_REGION" --format='value(status.url)')
