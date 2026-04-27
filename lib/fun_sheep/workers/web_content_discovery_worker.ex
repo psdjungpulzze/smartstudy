@@ -24,8 +24,11 @@ defmodule FunSheep.Workers.WebContentDiscoveryWorker do
 
   alias FunSheep.Search.TavilyClient
 
-  # Cap total queries per course to bound cost regardless of course size.
-  @max_queries_per_course 20
+  # Cap total queries per course. Generic/AP courses naturally produce ≤ 40
+  # queries and won't reach this limit. SAT/ACT/GRE with many sections can
+  # generate 120+; 60 covers ~20 sections which gives solid web discovery
+  # coverage while keeping Tavily cost negligible per course.
+  @max_queries_per_course 60
 
   @search_sites [
     "quizlet.com",
